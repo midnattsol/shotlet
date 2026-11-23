@@ -60,7 +60,7 @@ scenario_multimon() {
 scenario_rotated() {
     # outputs turned 90 degrees and flipped upside down: the picture
     # must come out the way each output shows it. A pin (a 300x200
-    # test picture, red inside 60..240 x 40..160) sits at 134,134 of
+    # test picture, red inside 60..240 x 40..160) sits at 152,152 of
     # each output's top-left
     local mon
     cfg_set thumbnail=never

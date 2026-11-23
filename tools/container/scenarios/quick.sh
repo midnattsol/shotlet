@@ -79,11 +79,12 @@ scenario_pin() {
     click 0 "$x" "$y"
     check "the card's Pin opens a pin" any_log 5 "pin: showing"
     check "  ... as a layer-shell surface" any_log 1 "pin: showing .*layer shell"
-    # 1:1 at margin 120,120 plus 14 px of shadow room
+    # 1:1 at margin 120,120 plus the shadow room (app/pin/state.zig
+    # shadow_room, 32 logical px)
     drv findpng "$OUT/shotlet-first.png" "$RED" 40 20; read -r ex ey ew eh <<<"$VAL"
-    wait_until 5 _pin_at "$((ex + 134)) $((ey + 134)) $ew $eh"
+    wait_until 5 _pin_at "$((ex + 152)) $((ey + 152)) $ew $eh"
     read -r cx0 cy0 _ <<<"$VAL"
-    check "  ... at its place, 1:1" eq "$VAL" "$((ex + 134)) $((ey + 134)) $ew $eh"
+    check "  ... at its place, 1:1" eq "$VAL" "$((ex + 152)) $((ey + 152)) $ew $eh"
     shot 0 pinned
     click_app 0 $((MW - 40)) 40
     check "  ... above the app after clicking the app" find_on 0 "$RED" 40 20
