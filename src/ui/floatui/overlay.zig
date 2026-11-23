@@ -35,14 +35,36 @@ fn centred(cv: *Canvas, r: Rect, size: f64, color: u32, style: text.Style, s: []
     text.drawStyled(cv, r.x + @divTrunc(r.w - tw, 2), r.y + @divTrunc(r.h - th, 2), size, color, style, s);
 }
 
+/// A notice's pill for `s` centred in `area` (`link`: room for the check
+/// before it).
+pub fn noticeRect(area: Rect, s: []const u8, link: bool, k: f64) Rect {
+    const lead = if (link) px(14 + 6, k) else 0;
+    const w = text.widthStyled(13 * k, .semibold, s) + lead + px(28, k);
+    const h = px(30, k);
+    return .{ .x = area.x + @divTrunc(area.w - w, 2), .y = area.y + @divTrunc(area.h - h, 2), .w = w, .h = h };
+}
+
 /// A short message ("Copied", "Failed") in a dark pill centred in `area`.
 pub fn notice(cv: *Canvas, area: Rect, s: []const u8, k: f64, th: Theme) void {
+    const r = noticeRect(area, s, false, k);
+    cv.fillRoundRectAA(r.x, r.y, r.w, r.h, ff(r.h) / 2, th.scrim_notice);
+    centred(cv, r, 13 * k, th.on_scrim, .semibold, s);
+}
+
+/// A notice that does something when clicked ("Saved · Show in Files"):
+/// a check before the words; the accent under the pointer, the focus
+/// ring with the keyboard's focus.
+pub fn noticeLink(cv: *Canvas, area: Rect, s: []const u8, st: State, k: f64, th: Theme) void {
+    const r = noticeRect(area, s, true, k);
+    const rad = ff(r.h) / 2;
+    const bg, const fg = if (st.hot) .{ th.accent_fill_hover, th.on_accent } else .{ th.scrim_notice, th.on_scrim };
+    cv.fillRoundRectAA(r.x, r.y, r.w, r.h, rad, bg);
+    const is = 14 * k;
+    const x = r.x + px(14, k);
+    icons.drawAt(cv, .check, ff(x) + is / 2, ff(r.y) + ff(r.h) / 2, is, .{}, fg);
     const fs = 13 * k;
-    const w = text.widthStyled(fs, .semibold, s) + px(28, k);
-    const h = px(30, k);
-    const r: Rect = .{ .x = area.x + @divTrunc(area.w - w, 2), .y = area.y + @divTrunc(area.h - h, 2), .w = w, .h = h };
-    cv.fillRoundRectAA(r.x, r.y, r.w, r.h, ff(h) / 2, th.scrim_notice);
-    centred(cv, r, fs, th.on_scrim, .semibold, s);
+    text.drawStyled(cv, x + px(14 + 6, k), r.y + @divTrunc(r.h - text.heightStyled(fs, .semibold), 2), fs, fg, .semibold, s);
+    if (st.focused) barkit.focusRing(cv, r, rad, k, th.accent);
 }
 
 /// A round dark button of radius `r` (physical px) centred on cx, cy,

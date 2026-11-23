@@ -12,7 +12,9 @@
 //! - PNGs carry an alpha channel only for see-through pixels that are
 //!   meant (`alphaFor`);
 //! - a kept capture (a history entry) is copied, saved, annotated and
-//!   pinned through `Entry`.
+//!   pinned through `Entry`;
+//! - a saved file is shown in the file manager through `showInFiles`
+//!   (the thumbnails' "Saved · Show in Files" and Show in Files).
 
 const std = @import("std");
 const api = @import("../platform/api.zig");
@@ -21,6 +23,7 @@ const env_mod = @import("env.zig");
 const filename = @import("filename.zig");
 const history = @import("history.zig");
 const relaunch = @import("relaunch.zig");
+const report = @import("report.zig");
 const clip = @import("modes/clip.zig");
 const png = @import("../gfx/png.zig");
 const doc_mod = @import("../ui/doc.zig");
@@ -177,6 +180,29 @@ pub fn failureText(buf: []u8, err: anyerror) []const u8 {
     return std.fmt.bufPrint(buf, "Not saved: {s}", .{why}) catch "Not saved";
 }
 
+/// Show the saved file `path` in the file manager, selected. True when
+/// shown; when no file manager answered, a problem card says so and
+/// where the file is. A file manager that is slow to start (no answer
+/// in time) counts as shown: it got the request.
+pub fn showInFiles(gpa: std.mem.Allocator, env: Env, bus: ?*desktop.Bus, path: []const u8, who: []const u8) bool {
+    const err: ?anyerror = if (bus) |b| (if (desktop.revealFile(gpa, b, path)) null else |e| e) else error.NoBus;
+    if (shown(err)) {
+        std.log.info("{s}: showing {s} in the file manager", .{ who, path });
+        return true;
+    }
+    std.log.warn("{s}: no file manager showed {s}: {t}", .{ who, path, err.? });
+    var buf: [2200]u8 = undefined;
+    const body = std.fmt.bufPrint(&buf, "The file is saved as {s}", .{path}) catch "The file is saved";
+    report.problem(env, "Couldn\u{2019}t open the file manager", body);
+    return false;
+}
+
+/// Whether a file manager took the request that ended with `err`.
+fn shown(err: ?anyerror) bool {
+    const e = err orelse return true;
+    return e == error.Timeout;
+}
+
 /// A kept capture: history entry `id` under `root`, and its meta (the
 /// caller's; Save records the path in it and on disk).
 pub const Entry = struct {
@@ -234,6 +260,14 @@ test "copy on save and the notification follow the settings everywhere" {
     cfg.notify = false;
     try testing.expectEqual(Policy{ .copy = true, .notify = false }, policy(&cfg, false));
     try testing.expectEqual(Policy{ .copy = true, .notify = false }, policy(&cfg, true));
+}
+
+test "Show in Files: shown unless no file manager took it" {
+    try testing.expect(shown(null));
+    try testing.expect(shown(error.Timeout));
+    try testing.expect(!shown(error.ServiceUnknown));
+    try testing.expect(!shown(error.NoBus));
+    try testing.expect(!shown(error.Unavailable));
 }
 
 test "PNGs keep alpha only for see-through pixels that are meant" {

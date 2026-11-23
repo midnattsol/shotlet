@@ -5,7 +5,6 @@
 const std = @import("std");
 const log = std.log.scoped(.quick_access);
 const uri_mod = @import("../../uri.zig");
-const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
 const deliver = @import("../deliver.zig");
@@ -13,6 +12,7 @@ const filename = @import("../filename.zig");
 const shell = @import("../../platform/api.zig").shell;
 const sys = @import("../../platform/api.zig").sys;
 const fui = @import("../../ui/floatui.zig");
+const notice_mod = @import("../../ui/notice.zig");
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
 
@@ -31,8 +31,19 @@ pub fn act(self: *Quick, i: usize, a: Action) void {
 
 /// A short word over card i ("Copied"); the card stays a while for it.
 pub fn notice(self: *Quick, i: usize, s: []const u8) void {
+    self.cards.items[i].notice.show(s, sys.monoMs(), notice_mod.word_ms);
+    noticed(self, i);
+}
+
+/// "Saved · Show in Files" over card i, a link to its file.
+fn noticeSaved(self: *Quick, i: usize) void {
     const c = &self.cards.items[i];
-    c.notice.show(s, sys.monoMs(), 1200);
+    c.notice.showSaved(c.meta.saved, sys.monoMs());
+    noticed(self, i);
+}
+
+fn noticed(self: *Quick, i: usize) void {
+    const c = &self.cards.items[i];
     c.deadline_ms = @max(c.deadline_ms, c.notice.until + 1500);
     self.dirty = true;
 }
@@ -58,7 +69,7 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
             try entry(self, i).copy(ctx(self));
             notice(self, i, "Copied");
         },
-        .save, .save_as => if (try entry(self, i).save(ctx(self), if (a == .save_as) .ask else .folder)) notice(self, i, "Saved"),
+        .save, .save_as => if (try entry(self, i).save(ctx(self), if (a == .save_as) .ask else .folder)) noticeSaved(self, i),
         .annotate => {
             if (!c.editable) return;
             entry(self, i).edit(self.env);
@@ -68,11 +79,11 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
             try entry(self, i).pin(self.env);
             self.remove(i);
         },
+        // the file manager takes over: the card goes, as after Annotate
+        // (a problem card says why when none answered; the card stays)
         .show_in_files => {
             if (c.meta.saved.len == 0) return;
-            const b = self.bus_() orelse return error.NoBus;
-            try desktop.revealFile(self.gpa, b, c.meta.saved);
-            log.info("showing {s} in the file manager", .{c.meta.saved});
+            if (deliver.showInFiles(self.gpa, self.env, self.bus_(), c.meta.saved, "quick access")) c.life.leave(sys.monoMs());
         },
         .close => {
             log.info("closed {s}", .{c.kept.id.slice()});
@@ -90,6 +101,7 @@ fn controlAction(self: *const Quick, i: usize, c: Control) ?Action {
         .pin => .pin,
         .primary => pills[0],
         .secondary => pills[1],
+        .notice => .show_in_files,
         else => null,
     };
 }

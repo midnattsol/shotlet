@@ -19,8 +19,9 @@ pub const hint_h = 52;
 pub const max_cards = 5;
 
 /// `primary` and `secondary`: the two buttons along the bottom, whose
-/// actions depend on the card (pillActions).
-pub const Control = enum { body, close, annotate, pin, primary, secondary, menu, hint };
+/// actions depend on the card (pillActions); `notice`: "Saved · Show in
+/// Files" while it shows (ui/notice.zig; Quick.hitAt finds it).
+pub const Control = enum { body, close, annotate, pin, primary, secondary, menu, hint, notice };
 
 pub const menu_items = [_]struct { label: []const u8, action: Action }{
     .{ .label = "Copy", .action = .copy },

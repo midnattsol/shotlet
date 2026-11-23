@@ -272,7 +272,15 @@ pub const Quick = struct {
     pub fn hitAt(self: *const Quick, bx: f64, by: f64) ?Hit {
         if (bx < 0 or by < 0) return null;
         var mb: [max_cards]bool = undefined;
-        return layout.hitTest(scale.toLogical(bx, self.factor()), scale.toLogical(by, self.factor()), @intCast(self.size[1]), self.cards.items.len, self.menus(&mb), self.hint);
+        const x = scale.toLogical(bx, self.factor());
+        const y = scale.toLogical(by, self.factor());
+        const wh: i32 = @intCast(self.size[1]);
+        var h = layout.hitTest(x, y, wh, self.cards.items.len, self.menus(&mb), self.hint) orelse return null;
+        // the "Saved" link over the card's middle
+        if (h.control == .body or h.control == .notice) {
+            if (self.cards.items[h.card].notice.hit(layout.cardRect(h.card, wh), x, y, sys.monoMs())) h.control = .notice;
+        }
+        return h;
     }
 
     /// The card actions and shortcuts apply to: focused, hovered, newest.

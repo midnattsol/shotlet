@@ -118,7 +118,8 @@ pub fn notify(gpa: std.mem.Allocator, bus: *dbus.Connection, summary: []const u8
     portal.notify(gpa, bus, summary, text);
 }
 
-/// Show `path` selected in the file manager.
+/// Show `path` selected in the file manager; an error when no file
+/// manager answered.
 pub fn revealFile(gpa: std.mem.Allocator, bus: *dbus.Connection, path: []const u8) !void {
     return filemanager.showItem(gpa, bus, path);
 }

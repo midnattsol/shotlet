@@ -10,13 +10,16 @@ const scale = @import("../scale.zig");
 const press = @import("../press.zig");
 const control_draw = @import("control_draw.zig");
 const Rect = @import("../shapes.zig").Rect;
+const Notice = @import("../notice.zig").Notice;
 
 pub const card_w = 240;
 pub const card_h = 150;
 /// room around the card for its shadow (theme card_shadow)
 pub const pad = theme.card_room;
 
-pub const Control = enum { body, close, trim, copy, save_as };
+/// `notice`: "Saved · Show in Files" while it shows (ui/notice.zig;
+/// quickvid finds it, it is not in `hit`)
+pub const Control = enum { body, close, trim, copy, save_as, notice };
 
 pub const View = struct {
     /// the picture shown (first frame, or a strip picture on hover)
@@ -27,7 +30,9 @@ pub const View = struct {
     gif: bool,
     hover: ?Control = null,
     hovered: bool = false,
-    notice: []const u8 = "",
+    /// "Copied", "Saved · Show in Files" over the card, as at `now`
+    notice: ?*const Notice = null,
+    now: i64 = 0,
     alpha: f64 = 1,
     /// the desktop's appearance (the controls over the picture look the
     /// same in both; the card behind a narrow picture follows it)
@@ -45,7 +50,7 @@ pub fn controlRect(c: Control) Rect {
         .trim => .{ .x = card_w - 8 - 26, .y = 8, .w = 26, .h = 26 },
         .copy => .{ .x = 8, .y = card_h - 8 - 30, .w = pw, .h = 30 },
         .save_as => .{ .x = 8 + pw + 6, .y = card_h - 8 - 30, .w = pw, .h = 30 },
-        .body => .{ .x = 0, .y = 0, .w = card_w, .h = card_h },
+        .body, .notice => .{ .x = 0, .y = 0, .w = card_w, .h = card_h },
     };
 }
 
@@ -61,6 +66,17 @@ pub fn hit(x: i32, y: i32) ?Control {
     return press.hitTest(Control, &targets, x - pad, y - pad);
 }
 
+/// Where the notice is centred, in the card: between the hovered
+/// duration badge and the buttons, which it would touch in the middle.
+const notice_area: Rect = .{ .x = 0, .y = 8 + 26 + 6 + 24, .w = card_w, .h = card_h - 8 - 30 - (8 + 26 + 6 + 24) };
+
+/// The same, the notice's link (while `n` shows one) over the card first.
+pub fn hitWith(n: *const Notice, x: i32, y: i32, now: i64) ?Control {
+    const area: Rect = .{ .x = pad + notice_area.x, .y = pad + notice_area.y, .w = notice_area.w, .h = notice_area.h };
+    if (n.hit(area, x, y, now)) return .notice;
+    return hit(x, y);
+}
+
 const px = scale.px;
 const ff = scale.ff;
 
@@ -74,7 +90,7 @@ pub fn paint(gpa: std.mem.Allocator, buf: []u32, bw: u32, bh: u32, k: f64, v: *c
     var cv = render.Canvas.init(card, cw, ch);
     badge(&cv, k, v);
     if (v.hovered) controls(&cv, k, v);
-    if (v.notice.len > 0) fui.notice(&cv, .ofSize(cw, ch), v.notice, k, v.th);
+    if (v.notice) |n| n.draw(&cv, scale.rect(notice_area, k), v.now, .{ .hot = v.hover == .notice }, k, v.th);
     const at = px(pad, k);
     fui.compositeFaded(gpa, .{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ at, at }, 12 * k, v.th.card_shadow, v.alpha, k) catch {};
 }
@@ -104,6 +120,19 @@ fn controls(cv: *render.Canvas, k: f64, v: *const View) void {
         const label = if (c == .copy) "Copy" else "Save as\u{2026}";
         fui.pillButton(cv, scale.rect(controlRect(c), k), label, .light, 13, .{ .hot = v.hover == c }, k, v.th);
     }
+}
+
+test "the Saved link takes the card's middle while it shows" {
+    var n: Notice = .{};
+    try std.testing.expectEqual(@as(?Control, .body), hitWith(&n, pad + 120, pad + 75, 0));
+    n.showSaved("/v.mp4", 0);
+    const text = @import("../../gfx/text.zig");
+    text.init(std.testing.allocator);
+    defer text.deinit();
+    if (!text.available()) return error.SkipZigTest;
+    try std.testing.expectEqual(@as(?Control, .notice), hitWith(&n, pad + 120, pad + 75, 0));
+    try std.testing.expectEqual(@as(?Control, .copy), hitWith(&n, pad + 20, pad + card_h - 20, 0));
+    try std.testing.expectEqual(@as(?Control, .body), hitWith(&n, pad + 120, pad + 75, 10_000));
 }
 
 test "card controls hit" {

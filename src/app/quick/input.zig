@@ -54,9 +54,11 @@ fn onMotion(self: *Quick, x: f64, y: f64) void {
 }
 
 /// The hand over a card's picture, which drags the capture out (closed
-/// while pressed); the arrow over its buttons and menu.
+/// while pressed); the pointing hand over the "Saved" link; the arrow
+/// over its buttons and menu.
 fn cursorOf(self: *const Quick) window.Cursor {
     const h = self.hover orelse return .arrow;
+    if (h.control == .notice) return .pointer;
     if (h.control != .body) return .arrow;
     const held = if (self.press.held()) |p| p.control == .body else false;
     return window.Cursor.hand(held);
@@ -81,7 +83,17 @@ fn onButton(self: *Quick, button: window.Button, pressed: bool, x: f64, y: f64) 
     }
 }
 
-const focus_order = [_]Control{ .primary, .secondary, .annotate, .pin, .close };
+/// the "Saved" link first while it shows (focusable says)
+const focus_order = [_]Control{ .notice, .primary, .secondary, .annotate, .pin, .close };
+
+/// Whether card i's control `ctl` takes the focus now.
+fn focusable(self: *const Quick, i: usize, ctl: Control) bool {
+    return ctl != .notice or linkShows(self, i);
+}
+
+fn linkShows(self: *const Quick, i: usize) bool {
+    return i < self.cards.items.len and self.cards.items[i].notice.file(sys.monoMs()) != null;
+}
 
 fn onKey(self: *Quick, k: window.Key) void {
     self.dirty = true;
@@ -90,7 +102,8 @@ fn onKey(self: *Quick, k: window.Key) void {
     // Tab and the left/right arrows move focus along a card's controls
     if (focus.action(k, .horizontal)) |a| return switch (a) {
         .next, .prev => cycleFocus(self, if (a == .next) .next else .prev),
-        .activate => if (self.focus) |fo| self.activate(fo) else self.act(cur, .copy),
+        // with nothing focused: the "Saved" link while it shows, else Copy
+        .activate => if (self.focus) |fo| self.activate(fo) else if (card.notice.opensOn(k, sys.monoMs())) self.act(cur, .show_in_files) else self.act(cur, .copy),
         .close => if (card.menu) {
             card.menu = false;
         } else self.act(cur, .close),
@@ -99,7 +112,8 @@ fn onKey(self: *Quick, k: window.Key) void {
         .up, .down => {
             const n = self.cards.items.len;
             const c: usize = if (k.code == .up) (cur + 1) % n else (cur + n - 1) % n;
-            self.focus = .{ .card = c, .control = if (self.focus) |fo| fo.control else .primary };
+            const ctl = if (self.focus) |fo| fo.control else .primary;
+            self.focus = .{ .card = c, .control = if (focusable(self, c, ctl)) ctl else .primary };
         },
         .delete => self.act(cur, .close),
         .c => if (k.ctrl) self.act(cur, .copy),
@@ -119,7 +133,11 @@ fn cycleFocus(self: *Quick, dir: focus.Dir) void {
         null;
     // with nothing focused, Tab and Shift+Tab both start at the newest
     // card's first control
-    const idx = (if (cur == null) 0 else focus.cycle(n, cur, dir)) orelse return;
+    var idx = (if (cur == null) 0 else focus.cycle(n, cur, dir)) orelse return;
+    // past the controls that are not there now (the link once gone)
+    while (!focusable(self, idx / focus_order.len, focus_order[idx % focus_order.len])) {
+        idx = focus.cycle(n, idx, if (cur == null) .next else dir) orelse return;
+    }
     self.focus = .{ .card = idx / focus_order.len, .control = focus_order[idx % focus_order.len] };
 }
 
@@ -135,7 +153,18 @@ pub fn tick(self: *Quick) void {
         const c = &self.cards.items[i];
         if (c.menu or (keep_alive and c.life.leaving == 0)) c.deadline_ms = @max(c.deadline_ms, now + 2000);
         if (now >= c.deadline_ms) c.life.leave(now);
-        if (c.notice.expire(now)) self.dirty = true;
+        if (onLink(self.hover, i)) c.notice.hold(now);
+        if (c.notice.expire(now)) {
+            self.dirty = true;
+            // the link went from under the focus: the first button has it
+            if (self.focus) |*fo| if (fo.card == i and fo.control == .notice) {
+                fo.control = .primary;
+            };
+            if (onLink(self.hover, i)) {
+                self.hover.?.control = .body;
+                self.win.setCursor(cursorOf(self)) catch {};
+            }
+        }
         if (fading(c, now)) self.dirty = true;
         if (c.life.gone(now)) {
             self.remove(i);
@@ -143,6 +172,11 @@ pub fn tick(self: *Quick) void {
         }
         i += 1;
     }
+}
+
+fn onLink(h: ?layout.Hit, i: usize) bool {
+    const hh = h orelse return false;
+    return hh.card == i and hh.control == .notice;
 }
 
 /// Not drawn yet, fading in or out, or its controls fading: a frame per

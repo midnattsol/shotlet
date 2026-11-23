@@ -107,7 +107,8 @@ pub fn hasPending(bus: *Bus) bool {
 pub fn notify(gpa: std.mem.Allocator, bus: *Bus, summary: []const u8, text: []const u8) void {
     _ = .{ gpa, bus, summary, text };
 }
-/// Show `path` selected in the file manager.
+/// Show `path` selected in the file manager; an error when no file
+/// manager answered.
 pub fn revealFile(gpa: std.mem.Allocator, bus: *Bus, path: []const u8) error{Unavailable}!void {
     _ = .{ gpa, bus, path };
     return error.Unavailable;

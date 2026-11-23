@@ -61,6 +61,38 @@ scenario_quick() {
     check "  ... and the thumbnail goes away" any_log 5 "quick access: dropped"
     check "  ... from the screen" wait_until 3 eval '! card_red'
     shot 0 dropped
+    quick_saved_link
+}
+
+# no file manager here: the card's "Saved · Show in Files" link, clicked
+# or with Enter, says so with a problem card, and the card stays
+_lines() { cat "$OUT"/*.log 2>/dev/null | grep -c "$1"; }
+_lines_more() { [ "$(_lines "$1")" -gt "$2" ]; }
+quick_saved_link() {
+    local x y n
+    n=$(_lines "quick access: added\\|quick access: showing")
+    red_capture shotlet-second
+    wait_until 5 _lines_more "quick access: added\\|quick access: showing" "$n"
+    wait_until 5 card_red
+    hover_card
+    read -r x y <<<"$(card_point 60 23)" # Save: the first button until saved
+    click 0 "$x" "$y"
+    check "the card's Save saves" any_log 5 "quick access: saved to "
+    # (the click gave the card the keyboard)
+    keys enter
+    check "with no file manager, Enter on Saved says so on a problem card" \
+        any_log 5 "toast: Couldn.{1,3}t open the file manager: The file is saved as "
+    hover_card
+    shot 0 saved-link
+    check "  ... Saved is a link (the pointing hand)" any_log 2 "cursor: pointer via cursor-shape"
+    n=$(_lines "no file manager showed")
+    read -r x y <<<"$(card_point 120 75)"
+    click 0 "$x" "$y"
+    check "  ... and so does a click on it" wait_until 5 _lines_more "no file manager showed" "$n"
+    sleep 1
+    shot 0 no-file-manager
+    drv move 0 $((MW / 2)) $((MH / 3))
+    check "  ... the thumbnail stays" wait_until 3 card_red
 }
 
 # _pin_at "CX CY W H" [X0 Y0 X1 Y1]: the red pin is found right there

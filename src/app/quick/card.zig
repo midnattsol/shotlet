@@ -94,8 +94,11 @@ fn drawCard(self: *Quick, dst: fui.Surface, i: usize, r: Rect, now: i64) !void {
         if (shown < 1) drawStatus(&cv, c, k, self.th);
         if (shown > 0) try drawControls(self, card, pic, cw, ch, i, .{ .hovered = hovered, .focused = focused }, shown);
     }
-    const word = c.notice.text(now);
-    if (word.len > 0) fui.notice(&cv, .{ .x = 0, .y = 0, .w = r.w, .h = r.h }, word, k, self.th);
+    const on_link: fui.State = .{
+        .hot = hovered and self.hover.?.control == .notice,
+        .focused = focused and self.focus.?.control == .notice,
+    };
+    c.notice.draw(&cv, .{ .x = 0, .y = 0, .w = r.w, .h = r.h }, now, on_link, k, self.th);
     var alpha = c.life.alpha(now);
     if (dragged) alpha = @min(alpha, 0.5);
     try fui.compositeFaded(self.gpa, dst, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, card_radius * k, self.th.card_shadow, alpha, k);

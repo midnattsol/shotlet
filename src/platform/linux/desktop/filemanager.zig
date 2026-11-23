@@ -6,8 +6,13 @@ const std = @import("std");
 const dbus = @import("../dbus.zig");
 const uri_mod = @import("../../../uri.zig");
 
-/// Ask the file manager to show `path`. Fire and forget: only a failure
-/// to send is an error.
+/// how long a file manager may take to answer (D-Bus activation starts
+/// one that is not running; Nautilus answers in about a second then)
+const answer_ms = 4000;
+
+/// Ask the file manager to show `path`, and wait for its answer: an
+/// error when none can (no file manager: error.ServiceUnknown), the call
+/// failed, or nothing answered in time (error.Timeout).
 pub fn showItem(gpa: std.mem.Allocator, bus: *dbus.Connection, path: []const u8) !void {
     const uri = try uri_mod.fromFilePath(gpa, path);
     defer gpa.free(uri);
@@ -17,5 +22,6 @@ pub fn showItem(gpa: std.mem.Allocator, bus: *dbus.Connection, path: []const u8)
     try m.putString(uri);
     m.endArray(arr);
     try m.putString(""); // startup id
-    _ = try bus.callMethod("org.freedesktop.FileManager1", "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1", "ShowItems", "ass", m.buf.items);
+    var reply = try bus.call("org.freedesktop.FileManager1", "/org/freedesktop/FileManager1", "org.freedesktop.FileManager1", "ShowItems", "ass", m.buf.items, answer_ms);
+    reply.deinit(bus.alloc);
 }
