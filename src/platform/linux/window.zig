@@ -119,6 +119,7 @@ comptime {
     _ = clipboard;
     _ = drag;
     _ = @import("window/dump.zig");
+    _ = @import("window/loopstats.zig");
 }
 
 // the seam's neutral types (src/platform/api/window.zig)

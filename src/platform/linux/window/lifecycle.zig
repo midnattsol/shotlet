@@ -8,6 +8,7 @@ const output = @import("output.zig");
 const buffers = @import("buffers.zig");
 const registry = @import("registry.zig");
 const events = @import("events.zig");
+const loopstats = @import("loopstats.zig");
 const text_input = @import("text_input.zig");
 const data_device = @import("data_device.zig");
 const clipboard = @import("clipboard.zig");
@@ -28,6 +29,7 @@ pub const OpenOptions = window.OpenOptions;
 /// Create the toplevel; returns after the first configure, with buffers
 /// allocated (a .resize event will be queued).
 pub fn open(w: *Window, title: []const u8, opts: OpenOptions) !void {
+    loopstats.opened(title);
     w.default_w = opts.width;
     w.default_h = opts.height;
     try surface.create(w, 0, title, opts, 0, 0);
@@ -43,6 +45,7 @@ pub fn openOutputs(w: *Window, title: []const u8) !void {
     var order: [max_outputs]u8 = undefined;
     const slots = w.outputs.sortedSlots(&order);
     if (slots.len == 0) return open(w, title, .{ .fullscreen = true });
+    loopstats.opened(title);
     const n = @min(slots.len, max_surfaces);
     for (slots[0..n], 0..) |slot, i| try openOn(w, @intCast(i), title, &w.outputs.list[slot]);
     w.n_surfaces = @intCast(n);
@@ -87,6 +90,7 @@ fn allConfigured(w: *const Window) bool {
 /// offered clipboard selection can still be served). Fullscreen ones
 /// show a clear frame first (vanish.zig).
 pub fn closeWindow(w: *Window) void {
+    loopstats.report();
     dump.dumpFrames(w);
     var clear: vanish.Clear = .{};
     vanish.vanish(w, &clear);
@@ -97,6 +101,7 @@ pub fn closeWindow(w: *Window) void {
 }
 
 pub fn deinit(w: *Window) void {
+    loopstats.report();
     dump.dumpFrames(w);
     clipboard.dropSource(w);
     drag.endDrag(w);

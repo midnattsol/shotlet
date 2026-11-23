@@ -857,6 +857,7 @@ turns something off is on when set at all (`=1`); the others take a value.
 | `SHOTLET_ENCODER=libav\|ffmpeg` | force one MP4 encoder path | `encode/sink.zig` |
 | `SHOTLET_OCR_LANG=eng+spa` | Tesseract's languages (default: the desktop's language plus English) | `ocr/tesseract.zig` |
 | `SHOTLET_DUMP_FRAME=/path/prefix` | each window surface's last frame goes to `<prefix>-<n>.png` when it closes | `platform/linux/window/dump.zig` |
+| `SHOTLET_LOOP_STATS=1` | as each window closes, log its frame times (p50, p95, max) and the longest time the event loop stayed away from the compositor (unanswered pings) | `platform/linux/window/loopstats.zig` |
 | `SHOTLET_EDITOR_DUMP=/path/prefix` | the editor writes every pane's last frame and the export at exit | `ui/editor/session.zig` |
 | `SHOTLET_EDITOR_SCRIPT="key ...; quit"` | scripted editor input (`ui/script_input.zig`); turns animations off | `ui/editor/session.zig` |
 | `SHOTLET_SETTINGS_FOCUS=n` | Settings starts with its n-th control focused | `ui/settings/app.zig` |

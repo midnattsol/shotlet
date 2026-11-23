@@ -45,6 +45,8 @@ fi
 # --- inside the private bus
 export WAYLAND_DISPLAY=wayland-hl
 export SHOTLET_E2E_SHELL_LOG="$HOME/shell.log"
+# every window logs its frame times as it closes (the responsiveness checks)
+export SHOTLET_LOOP_STATS=1
 pids=()
 cleanup() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done

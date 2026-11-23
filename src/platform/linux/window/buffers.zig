@@ -6,6 +6,7 @@ const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
 const events = @import("events.zig");
+const loopstats = @import("loopstats.zig");
 
 const Window = window.Window;
 const Rect = window.Rect;
@@ -118,6 +119,7 @@ pub fn presentDamaged(w: *Window, idx: u8, damage: ?Rect) !void {
     }
     try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
     try c.flush();
+    loopstats.presented();
     b.busy = true;
     s.last_presented = s.cur_buf;
     s.cur_buf = 1 - s.cur_buf;

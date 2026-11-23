@@ -28,6 +28,7 @@ pub const Switches = struct {
     editor_script: ?[]const u8 = null,
     settings_focus: ?[]const u8 = null,
     settings_view: ?[]const u8 = null,
+    loop_stats: bool = false,
 };
 
 pub const Entry = struct {
@@ -57,6 +58,7 @@ pub const table = [_]Entry{
     .{ .name = "SHOTLET_EDITOR_DUMP", .field = "editor_dump", .doc = "/path/prefix: the editor writes every pane's last frame and the export at exit", .consumer = "ui/editor/session.zig" },
     .{ .name = "SHOTLET_EDITOR_SCRIPT", .field = "editor_script", .doc = "scripted editor input, `;`-separated (ui/script_input.zig); turns animations off", .consumer = "ui/editor/session.zig" },
     .{ .name = "SHOTLET_SETTINGS_FOCUS", .field = "settings_focus", .doc = "n: Settings starts with its n-th control focused", .consumer = "ui/settings/app.zig" },
+    .{ .name = "SHOTLET_LOOP_STATS", .field = "loop_stats", .doc = "log, as each window closes, its frame times and the longest time the event loop stayed away from the compositor", .consumer = "platform/linux/window/loopstats.zig" },
     .{ .name = "SHOTLET_SETTINGS_VIEW", .field = "settings_view", .doc = "general|editor|shortcuts|recording: the view Settings starts on", .consumer = "ui/settings/app.zig" },
 };
 

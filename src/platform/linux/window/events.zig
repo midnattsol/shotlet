@@ -15,6 +15,7 @@ const text_input = @import("text_input.zig");
 const data_device = @import("data_device.zig");
 const clipboard = @import("clipboard.zig");
 const drag = @import("drag.zig");
+const loopstats = @import("loopstats.zig");
 
 const Window = window.Window;
 const InputEvent = window.InputEvent;
@@ -61,6 +62,8 @@ pub fn waitKeyboardFocus(w: *Window, ms: i32) !bool {
 /// poll the socket for at most max_ms (-1 = forever), waking early for
 /// the next key repeat. Returns false when it timed out idle.
 fn waitAndDispatch(w: *Window, max_ms: i32) !bool {
+    loopstats.arrive();
+    defer loopstats.leave();
     try pumpRepeat(w);
     if (w.queue.items.len > 0) return true;
     try w.conn.flush();
@@ -82,6 +85,8 @@ fn waitAndDispatch(w: *Window, max_ms: i32) !bool {
 /// (-1 = forever) shortened to the next pending key repeat. Such loops
 /// should call drainPending() after waking so repeats get queued.
 pub fn pollTimeoutMs(w: *const Window, max_ms: i32) i32 {
+    // (the caller waits on the socket next)
+    loopstats.arrive();
     const rep = w.kb.repeat.timeoutMs(sys.monoMs()) orelse return max_ms;
     const r: i32 = @intCast(@min(rep, std.math.maxInt(i32)));
     return if (max_ms < 0) r else @min(max_ms, r);
@@ -99,6 +104,8 @@ fn pumpRepeat(w: *Window) !void {
 /// without blocking, plus any due key repeat. Call before rendering to
 /// get the latest input state.
 pub fn drainPending(w: *Window) !void {
+    loopstats.arrive();
+    defer loopstats.leave();
     while (try w.conn.pollEvent()) |ev| {
         try handleEvent(w, ev);
     }
