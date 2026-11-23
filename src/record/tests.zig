@@ -13,7 +13,6 @@ test {
     _ = @import("../encode/sink.zig");
     _ = @import("timeline.zig");
     _ = @import("region.zig");
-    _ = @import("sync.zig");
     _ = @import("audio.zig");
     _ = @import("frames.zig");
     _ = @import("strip.zig");

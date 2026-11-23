@@ -1,11 +1,11 @@
-//! Image decoders loaded at run time, so Shotlet keeps zero build
+//! Image decoders loaded at run time (optlib), so Shotlet keeps zero build
 //! dependencies: libwebp for WebP, libturbojpeg for the JPEGs our own
 //! decoder refuses (progressive, CMYK). Missing libraries just mean those
 //! files cannot be opened.
 
 const std = @import("std");
 const png = @import("png.zig");
-const libs = @import("../platform/api.zig").libs;
+const optlib = @import("../optlib.zig");
 
 const WebP = struct {
     WebPDecodeBGRA: *const fn ([*]const u8, usize, *c_int, *c_int) callconv(.c) ?[*]u8,
@@ -23,30 +23,8 @@ const TurboJpeg = struct {
 /// TJPF_BGRA: B, G, R, A bytes, which is 0xAARRGGBB on little-endian
 const tjpf_bgra = 8;
 
-fn Lib(comptime Api: type, comptime base: []const u8, comptime versions: []const []const u8) type {
-    return struct {
-        var api: ?Api = null;
-        var tried = false;
-        var lib: ?libs.Lib = null;
-
-        fn get() ?Api {
-            if (tried) return api;
-            tried = true;
-            lib = libs.open(base, versions);
-            var l = &(lib orelse return null);
-            var a: Api = undefined;
-            const info = @typeInfo(Api).@"struct";
-            inline for (info.field_names, info.field_types) |name, T| {
-                @field(a, name) = l.lookup(T, name) orelse return null;
-            }
-            api = a;
-            return api;
-        }
-    };
-}
-
-const webp_lib = Lib(WebP, "webp", &.{ "7", "6", "" });
-const tj_lib = Lib(TurboJpeg, "turbojpeg", &.{ "0", "" });
+const webp_lib = optlib.Lib(WebP, "webp", &.{ "7", "6", "" });
+const tj_lib = optlib.Lib(TurboJpeg, "turbojpeg", &.{ "0", "" });
 
 pub fn isWebp(data: []const u8) bool {
     return data.len >= 12 and std.mem.eql(u8, data[0..4], "RIFF") and std.mem.eql(u8, data[8..12], "WEBP");
@@ -58,7 +36,7 @@ fn checkSize(w: c_int, h: c_int) !void {
 }
 
 pub fn decodeWebp(alloc: std.mem.Allocator, data: []const u8) !png.Image {
-    const a = webp_lib.get() orelse return error.NoWebpLibrary;
+    const a = &(webp_lib.get() orelse return error.NoWebpLibrary).api;
     var w: c_int = 0;
     var h: c_int = 0;
     if (a.WebPGetInfo(data.ptr, data.len, &w, &h) == 0) return error.Corrupt;
@@ -70,7 +48,7 @@ pub fn decodeWebp(alloc: std.mem.Allocator, data: []const u8) !png.Image {
 }
 
 pub fn decodeJpegLib(alloc: std.mem.Allocator, data: []const u8) !png.Image {
-    const a = tj_lib.get() orelse return error.NoJpegLibrary;
+    const a = &(tj_lib.get() orelse return error.NoJpegLibrary).api;
     const h_ = a.tjInitDecompress() orelse return error.NoJpegLibrary;
     defer _ = a.tjDestroy(h_);
     var w: c_int = 0;

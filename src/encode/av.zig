@@ -1,5 +1,5 @@
 //! FFmpeg's libraries (libavcodec, libavformat, libavutil), loaded at run
-//! time with dlopen: Shotlet builds without them and falls back to the
+//! time (optlib): Shotlet builds without them and falls back to the
 //! ffmpeg program (ffmpeg_proc.zig) when they are missing or not a
 //! version whose structures we know.
 //!
@@ -11,7 +11,7 @@
 
 const std = @import("std");
 const switches = @import("../platform/api/switches.zig");
-const dynlib = @import("../platform/api.zig").libs;
+const optlib = @import("../optlib.zig");
 
 pub const Ctx = anyopaque;
 
@@ -71,61 +71,54 @@ pub var codec: Codec = undefined;
 pub var format: Format = undefined;
 pub var util: Util = undefined;
 
-var libs: [3]?dynlib.Lib = .{ null, null, null };
-var state: enum { unknown, ok, missing } = .unknown;
-var why_missing: []const u8 = "";
+const Loaded = struct {
+    codec: optlib.Table(Codec),
+    format: optlib.Table(Format),
+    util: optlib.Table(Util),
+};
 
-/// Load the libraries once. False (with the reason in `missing()`) when
-/// they are absent, incomplete or of a version we do not know.
+const loaded = optlib.Once(Loaded, load);
+
+/// Load the libraries once (from any thread). False (with the reason in
+/// `missing()`) when they are absent, incomplete or of a version we do
+/// not know.
 pub fn available() bool {
-    if (state == .unknown) state = if (load()) .ok else .missing;
-    return state == .ok;
+    return loaded.available();
 }
 
 pub fn missing() []const u8 {
-    return why_missing;
+    return loaded.missing();
 }
 
 const majors = [_][]const u8{ "61", "60", "59" };
 
-fn openAny(base: []const u8, versions: []const []const u8) ?dynlib.Lib {
-    return dynlib.open(base, versions);
-}
-
-fn load() bool {
+fn load(why: *[]const u8) anyerror!Loaded {
     if (switches.get().no_libav) {
-        why_missing = "turned off (SHOTLET_NO_LIBAV)";
-        return false;
+        why.* = "turned off (SHOTLET_NO_LIBAV)";
+        return error.Off;
     }
-    libs[2] = openAny("avutil", &.{ "59", "58", "57" }) orelse return fail("libavutil not found");
-    libs[0] = openAny("avcodec", &majors) orelse return fail("libavcodec not found");
-    libs[1] = openAny("avformat", &majors) orelse return fail("libavformat not found");
-    if (!bind(Codec, &codec, &libs[0].?) or !bind(Format, &format, &libs[1].?) or !bind(Util, &util, &libs[2].?))
-        return fail("FFmpeg libraries lack expected functions");
+    var u = try optlib.bind(Util, "avutil", &.{ "59", "58", "57" }, why);
+    errdefer u.close();
+    var c = try optlib.bind(Codec, "avcodec", &majors, why);
+    errdefer c.close();
+    var f = try optlib.bind(Format, "avformat", &majors, why);
+    errdefer f.close();
+    codec = c.api;
+    format = f.api;
+    util = u.api;
     const vc = codec.avcodec_version() >> 16;
     const vf = format.avformat_version() >> 16;
     const vu = util.avutil_version() >> 16;
-    if (vc < 59 or vc > 61 or vf < 59 or vf > 61 or vu < 57 or vu > 59) return fail("FFmpeg version not supported");
-    util.av_log_set_level(16); // AV_LOG_ERROR
-    if (!checkLayouts()) return fail("FFmpeg structures not as expected");
-    return true;
-}
-
-fn fail(msg: []const u8) bool {
-    why_missing = msg;
-    for (&libs) |*l| if (l.*) |*x| {
-        x.close();
-        l.* = null;
-    };
-    return false;
-}
-
-fn bind(comptime T: type, out: *T, l: *dynlib.Lib) bool {
-    const info = @typeInfo(T).@"struct";
-    inline for (info.field_names, info.field_types) |name, ty| {
-        @field(out, name) = l.lookup(ty, name) orelse return false;
+    if (vc < 59 or vc > 61 or vf < 59 or vf > 61 or vu < 57 or vu > 59) {
+        why.* = "FFmpeg version not supported";
+        return error.Unsupported;
     }
-    return true;
+    util.av_log_set_level(16); // AV_LOG_ERROR
+    if (!checkLayouts()) {
+        why.* = "FFmpeg structures not as expected";
+        return error.Unsupported;
+    }
+    return .{ .codec = c, .format = f, .util = u };
 }
 
 // --- the fields we touch
@@ -184,7 +177,7 @@ fn checkLayouts() bool {
 }
 
 pub fn errName(code: c_int, buf: []u8) []const u8 {
-    if (state != .ok) return "?";
+    if (!available()) return "?";
     if (util.av_strerror(code, buf.ptr, buf.len) < 0) return "unknown error";
     return std.mem.sliceTo(buf, 0);
 }

@@ -19,7 +19,7 @@ const frames_mod = @import("frames.zig");
 const audio = @import("audio.zig");
 const region = @import("region.zig");
 const strip_mod = @import("strip.zig");
-const sync = @import("sync.zig");
+const sync = @import("../sync.zig");
 
 pub const Options = struct {
     format: sink_mod.Format = .mp4,
