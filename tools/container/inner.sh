@@ -17,6 +17,7 @@ OUT=/out
 E2E_TAG="$COMP $SCEN"
 . "$COMMON/report.sh"
 . "$COMMON/session.sh"
+. "$COMMON/table.sh"
 . "$CTR/table.sh"
 
 case " $COMPOSITORS " in *" $COMP "*) ;; *) echo "inner.sh: unknown compositor $COMP" >&2; exit 2 ;; esac
@@ -37,9 +38,8 @@ if [ -z "${CTR_INNER:-}" ]; then
     export HOME=${HOME:-/tmp/home}
     mkdir -p "$HOME"
     sandbox_env container
-    # TODO(wave 2): remove HL_INNER and SHOTLET_CONTAINER once the drivers
-    # (droptarget, wldrive) check SHOTLET_E2E_SANDBOX
-    export HL_INNER=1 SHOTLET_CONTAINER=1 CTR_INNER=1
+    # (CTR_INNER: the second pass, inside the private bus)
+    export CTR_INNER=1
     exec dbus-run-session -- "$0" "$@" 2> >(grep --line-buffered -v '^dbus-daemon\[' >&2)
 fi
 

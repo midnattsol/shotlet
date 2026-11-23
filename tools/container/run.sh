@@ -27,6 +27,7 @@
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 IMAGE=${CTR_IMAGE:-shotlet-e2e:trixie}
+. "$ROOT/tools/e2e-common/table.sh"
 . "$ROOT/tools/container/table.sh"
 . "$ROOT/tools/e2e-common/summary.sh"
 

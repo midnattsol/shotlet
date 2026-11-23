@@ -12,11 +12,8 @@ pub const variable = "SHOTLET_E2E_SANDBOX";
 
 /// The sandbox this process runs in, or null outside any.
 pub fn current(vars: *const std.process.Environ.Map) ?Kind {
-    if (vars.get(variable)) |v| return std.meta.stringToEnum(Kind, v);
-    // TODO(wave 2): remove (the runners' variables before SHOTLET_E2E_SANDBOX)
-    if (vars.get("SHOTLET_CONTAINER") != null) return .container;
-    if (vars.get("HL_INNER") != null) return .gnome; // TODO(wave 2): remove
-    return null;
+    const v = vars.get(variable) orelse return null;
+    return std.meta.stringToEnum(Kind, v);
 }
 
 /// Exit with status 2 unless running in one of the sandboxes `allowed`.
@@ -36,9 +33,11 @@ test "sandbox kinds" {
     var vars: std.process.Environ.Map = .init(std.testing.allocator);
     defer vars.deinit();
     try std.testing.expectEqual(@as(?Kind, null), current(&vars));
+    // the runners' older variables no longer count
     try vars.put("HL_INNER", "1");
-    try std.testing.expectEqual(@as(?Kind, .gnome), current(&vars));
     try vars.put("SHOTLET_CONTAINER", "1");
+    try std.testing.expectEqual(@as(?Kind, null), current(&vars));
+    try vars.put(variable, "container");
     try std.testing.expectEqual(@as(?Kind, .container), current(&vars));
     try vars.put(variable, "gnome");
     try std.testing.expectEqual(@as(?Kind, .gnome), current(&vars));

@@ -114,8 +114,8 @@ pub fn paint(px: []u32, w: u32, bg: u32, boxes: []const Box) void {
 }
 
 /// mkpng PATH W H BG [BOX...]: a test picture, BG with each
-/// X0,Y0,X1,Y1,RRGGBB box drawn over it in turn (tools/e2e/mkpng.py's
-/// picture). Without boxes, BG is framed in dark grey (the middle three
+/// X0,Y0,X1,Y1,RRGGBB box drawn over it in turn (X1, Y1 exclusive).
+/// Without boxes, BG is framed in dark grey (the middle three
 /// fifths each way); a single `plain` box leaves it plain.
 pub fn mkpng(gpa: std.mem.Allocator, out: []u8, it: *Args) ![]const u8 {
     const path = try loop.arg(it);

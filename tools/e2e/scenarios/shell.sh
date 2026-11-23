@@ -23,7 +23,7 @@ scenario_shell() {
     "$BIN" gnome-integration uninstall >"$OUT/uninstall.log" 2>&1
     dump_keys >"$OUT/keys-after.txt"
     check "uninstall gives GNOME its screenshot keys back exactly" cmp -s "$OUT/keys-before.txt" "$OUT/keys-after.txt"
-    check "  ... and the extension is gone" test ! -e "$XDG_DATA_HOME/gnome-shell/extensions/shotlet@midnattsol.github.io"
+    check "  ... and the extension is gone" test ! -e "$XDG_DATA_HOME/gnome-shell/extensions/$EXT_UUID"
 }
 
 shell_install() {
@@ -53,18 +53,16 @@ shell_print() {
     sleep 0.8
     shot 0 editor
     check "  ... without any consent dialog" no_dialog
-    check "  ... or dialog button on screen" no_find 0 "$accent"
+    check "  ... or dialog button on screen" no_find_on 0 "$ACCENT" 24 10
     check "  ... the capture file is gone once read" capture_dir_empty
     check "  ... and no capture was written anywhere else" eq "$(new_pngs)" ""
     check "  ... the capture directory is private" eq "$(stat -c %a "$XDG_RUNTIME_DIR/shotlet")" 700
     drv pixel "$OUT/editor.png" 800 600
-    check "  ... the editor shows the desktop (dimmed blue)" test "${VAL:2:6}" != "$BG"
+    check "  ... the editor shows the desktop (dimmed blue)" test "${VAL:2:6}" != "$DESKTOP_BG"
     drag 0 400 300 0 600 400 0 800 500
     keys enter
-    sleep 1
-    check "Copy gives the selection" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
-    drv pixel "$OUT/clip.png" 200 100
-    check "  ... with the desktop's pixels, not the cursor or a dim" near "$VAL" "$BG"
+    check "Copy gives the selection" clip_is clip 400x200
+    check "  ... with the desktop's pixels, not the cursor or a dim" pixel_near "$OUT/clip.png" 200 100 "$DESKTOP_BG"
 }
 
 # anyone else asking over the bus is refused
@@ -131,17 +129,14 @@ scenario_shell_mixed() {
     sleep 0.3
     shot 0 sel0
     keys ctrl+c
-    sleep 1
-    check "the selection is exported at 2x" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 960x600
+    check "the selection is exported at 2x" clip_is clip 960x600
     drv pixel "$OUT/clip.png" 100 8
-    check "  ... the 2x monitor's top bar on the left" test "${VAL:2:6}" != "$BG"
-    drv pixel "$OUT/clip.png" 100 300
-    check "  ... the desktop below it" near "$VAL" "$BG"
-    drv pixel "$OUT/clip.png" 800 8
-    check "  ... the 1x monitor (no top bar) on the right" near "$VAL" "$BG"
+    check "  ... the 2x monitor's top bar on the left" test "${VAL:2:6}" != "$DESKTOP_BG"
+    check "  ... the desktop below it" pixel_near "$OUT/clip.png" 100 300 "$DESKTOP_BG"
+    check "  ... the 1x monitor (no top bar) on the right" pixel_near "$OUT/clip.png" 800 8 "$DESKTOP_BG"
     drv pixel "$OUT/clip.png" 559 8; a=$VAL
     drv pixel "$OUT/clip.png" 561 8; b=$VAL
-    check "  ... meeting at the seam (x=560)" eval 'test "${a:2:6}" != "$BG" && near "$b" "$BG"'
+    check "  ... meeting at the seam (x=560)" eval 'test "${a:2:6}" != "$DESKTOP_BG" && near "$b" "$DESKTOP_BG"'
     # once more, everything warm (the portal running, as in a session)
     sleep 1
     drv key print
@@ -167,8 +162,7 @@ scenario_shell_tray() {
     sleep 1.2
     gdbus call --session --dest io.github.midnattsol.Shotlet --object-path /MenuBar \
         --method com.canonical.dbusmenu.Event 1 clicked "<0>" 0 >/dev/null 2>&1
-    check "  ... and so does the menu's Take screenshot" shell_wait 10 "startup: capture=" 2
-    sleep 0.8
+    check "  ... and so does the menu's Take screenshot" shell_editor 2
     keys esc
     sleep 1.2
     # rate limit: two asks at once give one capture
@@ -177,7 +171,7 @@ scenario_shell_tray() {
     sleep 3
     check "two asks at once start one capture" eq "$(shell_count "startup: capture=")" 3
     check "  ... the other one declined" grep -q "Error.Busy" "$SHOT_LOG"
-    check "  ... and no portal capture child" not_grep "screencast" "$SHOT_LOG"
+    check "  ... and no portal capture child" no_log "screencast" "$SHOT_LOG"
     keys esc
     check "the daemon keeps running" alive
 }
@@ -203,8 +197,7 @@ scenario_shell_terminal() {
     run_shotlet text text
     check "shotlet text hands the capture to the extension" wait_exit 5
     check "  ... whose shotlet is a text capture" shell_wait 10 "text capture: the selected area" 1
-    check "  ... in its editor" shell_wait 10 "startup: capture=" 2
-    sleep 0.8
+    check "  ... in its editor" shell_editor 2
     keys esc
     # an older or broken integration: the portal path as before
     ext_gsettings set shotlet-path "'/nonexistent/shotlet'"

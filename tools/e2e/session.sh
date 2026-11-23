@@ -21,7 +21,8 @@
 # compositor log.
 set -u
 . "$(dirname "$0")/../e2e-common/session.sh"
-if [ -z "${HL_INNER:-}" ]; then
+# (the second pass, inside the private bus, sees sandbox_env's guard)
+if [ "${SHOTLET_E2E_SANDBOX:-}" != gnome ]; then
     command -v gnome-shell >/dev/null && command -v dbus-run-session >/dev/null || {
         echo "session.sh: gnome-shell or dbus-run-session missing" >&2; exit 77; }
     HOME=$(mktemp -d -t shotlet-e2e.XXXXXX) || exit 1
@@ -33,9 +34,6 @@ if [ -z "${HL_INNER:-}" ]; then
     # predictable dialog labels and messages
     export LANGUAGE=C; unset LC_ALL LC_MESSAGES LC_CTYPE LC_TIME LC_NUMERIC LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION
     unset SSH_AUTH_SOCK GNOME_KEYRING_CONTROL SESSION_MANAGER XAUTHORITY GTK_IM_MODULE QT_IM_MODULE XMODIFIERS
-    # TODO(wave 2): remove HL_INNER once the drivers check SHOTLET_E2E_SANDBOX
-    # (session.sh itself can test that instead)
-    export HL_INNER=1
     # the private bus daemon's activation chatter is noise here
     dbus-run-session -- "$0" "$@" 2> >(grep -v '^dbus-daemon\[' >&2); rc=$?
     # processes the private bus started (portals, ...) may linger a moment

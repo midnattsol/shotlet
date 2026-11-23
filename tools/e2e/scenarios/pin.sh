@@ -25,7 +25,7 @@ pin_menu_point() { # pin_menu_point ITEM: where to click it
 pin_at() { pin_at_in "$1" "$2"; }
 pin_at_in() { # pin_at_in CX CY [X0 Y0 X1 Y1]: looking only in that box
     local cx cy w h
-    drv find 0 ff2020 40 20 "${@:3}" || return 1
+    find_on 0 "$RED" 40 20 "${@:3}" || return 1
     read -r cx cy w h <<<"$VAL"
     echo "  red picture at $VAL" >&2
     [ "${cx#-}" -ge $(($1 - 1)) ] && [ "$cx" -le $(($1 + 1)) ] && [ "$cy" -ge $(($2 - 1)) ] && [ "$cy" -le $(($2 + 1)) ] &&
@@ -34,8 +34,9 @@ pin_at_in() { # pin_at_in CX CY [X0 Y0 X1 Y1]: looking only in that box
 
 scenario_pin() {
     drv_ready Meta-0
-    check "another app is up" start_target
-    "$PYGTK" "$ROOT/tools/e2e/mkpng.py" "$OUT/red.png" 300 200 ff2020
+    require_pygtk || return
+    check "another app is up" start_app target
+    drv mkpng "$OUT/red.png" 300 200 "$RED" plain
     pin_place
     pin_menu
     pin_opacity
@@ -68,7 +69,7 @@ pin_menu() {
     check "right-click opens the pin's menu" wait_log 3 "pin: menu open"
     sleep 0.5
     shot 0 menu-light
-    check "  ... beside the pointer, in the light material" drv find 0 f2f2f7 3 200 "$PIN_MENU_X" "$PIN_MENU_Y" $((PIN_MENU_X + 300)) $((PIN_MENU_Y + 300))
+    check "  ... beside the pointer, in the light material" find_on 0 "$MENU_BG" 3 200 "$PIN_MENU_X" "$PIN_MENU_Y" $((PIN_MENU_X + 300)) $((PIN_MENU_Y + 300))
     keys esc
     check "  ... Esc closes it" wait_log 3 "pin: menu closed"
     check "  ... and only it" alive
@@ -89,13 +90,13 @@ pin_opacity() {
     check "the menu's 50% makes the pin see-through" wait_log 3 "pin: opacity 50%"
     sleep 0.5
     shot 0 half
-    check "  ... the red shows half" no_find_exact 0 ff2020 40 20 300 150 700 450
+    check "  ... the red shows half" no_find_on 0 "$RED" 40 20 300 150 700 450
     drv pixel "$OUT/half.png" 500 300
     check "  ... over what lies below" test "${VAL:2:2}" != ff
     keys 1
     check "the 1 key makes it opaque again" wait_log 3 "pin: opacity 100%"
     sleep 0.4
-    check "  ... red again" drv find 0 ff2020 40 20
+    check "  ... red again" find_on 0 "$RED" 40 20
 }
 
 pin_copy() {
@@ -118,7 +119,7 @@ pin_lock() {
     click 0 460 330
     sleep 0.5
     check "  ... clicks on it reach the app below" test "$(grep -c "^click" "$OUT/target.log")" -gt "$n0"
-    check "  ... and it stays" drv find 0 ff2020 40 20
+    check "  ... and it stays" find_on 0 "$RED" 40 20
     drv move 0 631 219
     sleep 0.4
     shot 0 locked
@@ -141,7 +142,7 @@ pin_annotate() {
     check "Annotate opens the picture in the editor" wait_log 10 "edit: showing"
     sleep 1.5
     shot 0 annotating
-    check "  ... the pin stepping aside" no_find_exact 0 ff2020 40 20 1050 100 1450 400
+    check "  ... the pin stepping aside" no_find_on 0 "$RED" 40 20 1050 100 1450 400
     keys enter
     check "  ... and its Copy comes back to the pin" wait_log 10 "pin: updated from the editor \(300x200\)"
     sleep 1.5
@@ -157,10 +158,10 @@ pin_close_all() {
     read -r x y <<<"$(pin_menu_point close-all)"
     click 0 "$x" "$y"
     check "Close All Pins closes this pin" wait_log 3 "pin: closed"
-    check "  ... and the other one" wait_file_line 3 "pin: closed" "$first"
+    check "  ... and the other one" wait_log 3 "pin: closed" "$first"
     sleep 0.5
     shot 0 all-closed
-    check "  ... from the screen" no_find_exact 0 ff2020 40 20
+    check "  ... from the screen" no_find_on 0 "$RED" 40 20
     PIN_MENU_X=400 PIN_MENU_Y=250
 }
 
@@ -175,7 +176,7 @@ pin_dark_menu() {
     drv move 0 $((PIN_MENU_X + 128)) $((PIN_MENU_Y + 51))
     sleep 0.5
     shot 0 menu-dark
-    check "in the dark appearance the menu is dark" drv find 0 2c2c2e 3 200 "$PIN_MENU_X" "$PIN_MENU_Y" $((PIN_MENU_X + 300)) $((PIN_MENU_Y + 300))
+    check "in the dark appearance the menu is dark" find_on 0 2c2c2e 3 200 "$PIN_MENU_X" "$PIN_MENU_Y" $((PIN_MENU_X + 300)) $((PIN_MENU_Y + 300))
     keys esc esc
     check "Esc closes the menu, then the pin" wait_log 3 "pin: closed"
 }

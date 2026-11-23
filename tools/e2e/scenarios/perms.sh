@@ -4,8 +4,6 @@
 # `gnome-integration install` that loads at the next login.
 #   perms  perms-shell  gnome-install
 
-EXT_UUID=shotlet@midnattsol.github.io
-
 # a portal grant, what `permissions` says about it, and its reset
 scenario_perms() {
     drv_ready Meta-0
@@ -19,7 +17,7 @@ scenario_perms() {
     "$BIN" permissions >"$OUT/status.txt" 2>&1
     check "permissions: the last capture went through the portal" grep -q "^last capture:  through the screen-sharing portal" "$OUT/status.txt"
     check "  ... a restore token is stored" grep -q "^restore token: stored" "$OUT/status.txt"
-    check "  ... but not shown" not_grep "$(sed -n 's/^screencast_restore_token=//p' "$HOME/.config/shotlet/config")" "$OUT/status.txt"
+    check "  ... but not shown" no_log "$(sed -n 's/^screencast_restore_token=//p' "$(cfg_path)")" "$OUT/status.txt"
     check "  ... one screen-cast grant, one from older versions" grep -q "^screen cast:   1 permission for $APP_ID, 1 from older versions" "$OUT/status.txt"
     check "  ... and the screenshot permission" grep -q "^screenshot:    1 permission for $APP_ID" "$OUT/status.txt"
     perms_dry_run
@@ -44,14 +42,14 @@ perms_dry_run() {
     "$BIN" permissions reset --dry-run >"$OUT/dry.txt" 2>&1
     check "reset --dry-run lists what would go" grep -q "Would remove a screen-cast permission of $APP_ID" "$OUT/dry.txt"
     check "  ... and changes nothing" eq "$(perm_apps screencast | tr '\n' ' ')" " cliptux $APP_ID org.example.Other "
-    check "  ... not even the token" grep -q "^screencast_restore_token=." "$HOME/.config/shotlet/config"
+    check "  ... not even the token" grep -q "^screencast_restore_token=." "$(cfg_path)"
 }
 
 perms_reset() {
     "$BIN" permissions reset >"$OUT/reset.txt" 2>&1
     check "reset removes Shotlet's grants (current and older)" eq "$(perm_apps screencast | tr '\n' ' ')" " org.example.Other "
     check "  ... and its screenshot permission only" eq "$(perm_apps screenshot | tr '\n' ' ')" "org.example.Other "
-    check "  ... and the token" not_grep "^screencast_restore_token=." "$HOME/.config/shotlet/config"
+    check "  ... and the token" no_log "^screencast_restore_token=." "$(cfg_path)"
     check "  ... saying so" grep -q "Removed the stored restore token" "$OUT/reset.txt"
     "$BIN" permissions >"$OUT/status2.txt" 2>&1
     check "permissions then shows none" grep -q "^screen cast:   none" "$OUT/status2.txt"
@@ -66,8 +64,7 @@ scenario_perms_shell() {
     check "permissions: captures go through the GNOME integration" grep -q "^capture now:   through the GNOME integration" "$OUT/before.txt"
     run_shotlet term
     check "a capture is handed to the extension" wait_exit 5
-    check "  ... which opens the editor" shell_wait 10 "startup: capture=" 1
-    sleep 0.8
+    check "  ... which opens the editor" shell_editor 1
     keys esc
     sleep 1
     "$BIN" permissions >"$OUT/after.txt" 2>&1
@@ -109,8 +106,7 @@ install_twice() {
 
 finish_setup() {
     run_shotlet term
-    check "the first capture goes through the extension" shell_wait 15 "startup: capture=" 1
-    sleep 0.8
+    check "the first capture goes through the extension" shell_editor 1 15
     keys esc
     check "  ... and finishes the setup: Print goes to Shotlet" shell_wait 15 "Print now captures with Shotlet" 1
     check "  ... once" test ! -e "$XDG_STATE_HOME/shotlet/gnome-setup-pending"
@@ -121,20 +117,13 @@ finish_setup() {
 # org.gnome.Shell on the private bus, never another one) stops and a new
 # one starts, which discovers the copied extension
 restart_shell() {
-    local pid i
+    local pid
     pid=$(gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
         --method org.freedesktop.DBus.GetConnectionUnixProcessID org.gnome.Shell 2>/dev/null | grep -o '[0-9]\+' | tail -1)
     [ -n "$pid" ] || return 1
     kill "$pid"
-    for i in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-    kill -0 "$pid" 2>/dev/null && return 1
-    gnome-shell --headless --no-x11 --virtual-monitor 1600x900 --wayland-display wayland-hl >>"$HL_SHELL_LOG" 2>&1 &
-    for i in $(seq 1 100); do
-        [ -S "$XDG_RUNTIME_DIR/wayland-hl" ] && gdbus introspect --session \
-            --dest org.gnome.Mutter.RemoteDesktop --object-path /org/gnome/Mutter/RemoteDesktop \
-            >/dev/null 2>&1 && break
-        sleep 0.2
-    done
-    sleep 2
-    gdbus_owner dev.shotlet.Shell1
+    wait_until 10 eval "! kill -0 $pid 2>/dev/null" || return 1
+    start_gnome_shell 1600x900 || return 1
+    # the extension is up once it owns its bus name
+    wait_until 10 gdbus_owner dev.shotlet.Shell1
 }

@@ -7,6 +7,7 @@
 scenario_quick() {
     quick_cfg
     drv_ready Meta-0
+    require_pygtk || return
     quick_shown
     quick_copy
     quick_click_through
@@ -16,17 +17,17 @@ scenario_quick() {
 }
 
 quick_shown() {
-    check "another app is up and focused" start_target
+    check "another app is up and focused" start_app target
     drv move 0 800 450
     red_capture first first
     check "thumbnail process starts after Copy" wait_log 10 "quick access: showing"
     check "  ... placed by the GNOME extension" grep -q "placed by the GNOME extension" "$SHOT_LOG"
     sleep 1.5
     shot 0 thumb
-    check "thumbnail shows bottom-left" drv find 0 ff453a 40 4 0 700 300 900
-    check "  ... above the other app (not covered)" drv find 0 ff453a 40 4 0 700 300 900
+    check "thumbnail shows bottom-left" find_on 0 "$PEN_RED" 40 4 0 700 300 900
+    check "  ... above the other app (not covered)" find_on 0 "$PEN_RED" 40 4 0 700 300 900
     keys a b c
-    check "the other app keeps the keyboard focus (typing reaches it)" target_said 3 "^text abc"
+    check "the other app keeps the keyboard focus (typing reaches it)" app_said 3 "^text abc" target
 }
 
 # hover: the veil and buttons; Copy
@@ -36,12 +37,10 @@ quick_copy() {
     sleep 0.4
     shot 0 hover
     : >"$OUT/clip-before"
-    timeout 5 wl-copy -- "something else" &
-    sleep 0.5
+    clip_set "something else"
     read -r x y <<<"$(card_point 177 23)"  # Copy: the second button until saved
     click 0 "$x" "$y"
-    sleep 1
-    check "thumbnail Copy puts the PNG back on the clipboard" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 500x300
+    check "thumbnail Copy puts the PNG back on the clipboard" clip_is clip 500x300
     shot 0 copied
 }
 
@@ -55,27 +54,27 @@ quick_click_through() {
     click 0 800 300
     sleep 0.8
     shot 0 after-click
-    check "  ... and the thumbnail stays above it" drv find 0 ff453a 40 4 0 700 300 900
+    check "  ... and the thumbnail stays above it" find_on 0 "$PEN_RED" 40 4 0 700 300 900
 }
 
 # drag out into the app
 quick_drop_texture() {
     drag_card_out
-    check "dragging the thumbnail drops the image into a GTK app" target_said 5 "^drop texture 500 300"
+    check "dragging the thumbnail drops the image into a GTK app" app_said 5 "^drop texture 500 300" target
     check "  ... and the thumbnail goes away" any_log 5 "quick access: dropped"
     sleep 0.5
     shot 0 dropped
-    check "  ... from the screen" no_find_exact 0 ff453a 40 4 0 700 300 900
+    check "  ... from the screen" no_find_on 0 "$PEN_RED" 40 4 0 700 300 900
 }
 
 # as a file: an app that asks for text/uri-list
 quick_drop_file() {
-    check "a drop target for files is up" start_droptarget text/uri-list
+    check "a drop target for files is up" start_app droptarget text/uri-list
     n=$(shown_count)
     red_capture third
     new_card "$n"
     drag_card_out
-    check "  ... and as a file (text/uri-list)" drop_said 5 "^drop text/uri-list [0-9]+ file:///"
+    check "  ... and as a file (text/uri-list)" app_said 5 "^drop text/uri-list [0-9]+ file:///" droptarget
     f=$(grep -o "file://[^ ]*" "$OUT/drop.log" | head -1 | sed 's|^file://||')
     check "  ... naming a PNG named after the capture time" eq "$(png_size "$f")" 500x300
     # only the one started above: the path is also in this script's argv
@@ -98,24 +97,25 @@ quick_pin() {
     click 0 1500 100
     sleep 0.8
     shot 0 pinned-after-click
-    check "  ... that stays above after clicking the app" drv find 0 ff453a 40 4
+    check "  ... that stays above after clicking the app" find_on 0 "$PEN_RED" 40 4
 }
 
 scenario_quick_plain() {
     # no extension: the thumbnail is an ordinary window, still usable
     quick_cfg
     drv_ready Meta-0
-    start_target
+    require_pygtk || return
+    start_app target
     drv move 0 800 450
     red_capture plain first
     check "thumbnail shown without the extension" wait_log 10 "quick access: showing .*plain window"
     sleep 1.5
     shot 0 thumb
-    check "  ... somewhere on screen" drv find 0 ff453a 40 4
+    check "  ... somewhere on screen" find_on 0 "$PEN_RED" 40 4
     check "  ... with the integration hint" grep -q "no Shotlet GNOME Shell extension" "$SHOT_LOG"
     keys ctrl+c
-    sleep 1
-    check "  ... and its Ctrl+C copies" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 500x300
+    sleep 1 # (the clipboard held the capture, as large)
+    check "  ... and its Ctrl+C copies" clip_is clip 500x300
     keys esc
     check "Esc closes it" wait_log 5 "quick access: closed"
 }
@@ -137,25 +137,24 @@ open_settings() {
 # choice, 5 thumbnail choice, 7 seconds +, 13 Clear history, 15 Enable)
 scenario_settings() {
     drv_ready Meta-0
-    cfgf=$HOME/.config/shotlet/config
     settings_reset
-    printf 'loupe=auto\n' >>"$cfgf"
+    cfg_set loupe=auto
     open_settings 4
-    check "an older magnifier choice is written as while holding Ctrl" grep -q "^loupe=hold" "$cfgf"
+    check "an older magnifier choice is written as while holding Ctrl" cfg_has loupe=hold
     open_settings 4 space
-    check "the magnifier choice goes to always" grep -q "^loupe=always" "$cfgf"
+    check "the magnifier choice goes to always" cfg_has loupe=always
     open_settings 5 space
-    check "the thumbnail choice goes to after Copy and Save" grep -q "^thumbnail=after_copy_and_save" "$cfgf"
+    check "the thumbnail choice goes to after Copy and Save" cfg_has thumbnail=after_copy_and_save
     open_settings 7 enter
-    check "  ... and + makes it stay longer" grep -q "^quick_access_seconds=10" "$cfgf"
-    mkdir -p "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
+    check "  ... and + makes it stay longer" cfg_has quick_access_seconds=10
+    mkdir -p "$XDG_STATE_HOME/shotlet/history/1795280000000-0000abcd"
     open_settings 13 enter
-    check "Clear history asks first" test -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
+    check "Clear history asks first" test -e "$XDG_STATE_HOME/shotlet/history/1795280000000-0000abcd"
     open_settings 13 enter enter
-    check "  ... and a second press empties it" test ! -e "$HOME/.local/state/shotlet/history/1795280000000-0000abcd"
+    check "  ... and a second press empties it" test ! -e "$XDG_STATE_HOME/shotlet/history/1795280000000-0000abcd"
     open_settings 15 enter
-    check "Enable installs the GNOME Shell extension" test -f "$HOME/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io/extension.js"
-    check "  ... enabled for the next login" eval "gsettings get org.gnome.shell enabled-extensions | grep -q shotlet@midnattsol.github.io"
+    check "Enable installs the GNOME Shell extension" test -f "$XDG_DATA_HOME/gnome-shell/extensions/$EXT_UUID/extension.js"
+    check "  ... enabled for the next login" eval 'gsettings get org.gnome.shell enabled-extensions | grep -q "$EXT_UUID"'
     settings_snapped
 }
 
@@ -192,14 +191,13 @@ same_px() { # same_px SHOT X0 Y0 X1 Y1: two pixels of a screenshot match
 
 # Reset permissions: Shotlet's grant and token go, another app's stays
 settings_reset() {
-    mkdir -p "$HOME/.config/shotlet"
-    printf 'screencast_restore_token=e2e-token\nnotify=true\n' >>"$cfgf"
+    cfg_set screencast_restore_token=e2e-token notify=true
     perm SetPermission screencast true e2e-ours "$APP_ID" "['yes']" >/dev/null
     perm SetPermission screencast true e2e-other org.example.Other "['yes']" >/dev/null
     perm SetPermission screencast true e2e-anon "" "['yes']" >/dev/null
     open_settings 4 enter
-    check "Reset permissions forgets the restore token" not_grep "screencast_restore_token=e2e" "$cfgf"
-    check "  ... keeping the other settings" grep -q "^notify=true" "$cfgf"
+    check "Reset permissions forgets the restore token" no_log "screencast_restore_token=e2e" "$(cfg_path)"
+    check "  ... keeping the other settings" cfg_has notify=true
     check "  ... removes Shotlet's screen-cast grant" eq "$(perm Lookup screencast e2e-ours)" ""
     check "  ... and leaves other apps' alone" eq "$(perm_apps screencast | tr '\n' ' ')" " org.example.Other "
     check "  ... saying so" grep -q "permissions reset from Settings: Forgot the screens and 1 permission" "$OUT/settings-4.log"
@@ -210,14 +208,15 @@ scenario_annotate() {
     # still editable; its Copy updates the same capture
     quick_cfg
     drv_ready Meta-0
-    start_target
+    require_pygtk || return
+    start_app target
     drv move 0 800 450
     red_capture first first
     check "thumbnail shown" wait_log 10 "quick access: showing"
     sleep 1
     clip_png "$OUT/orig.png"
     drv pixel "$OUT/orig.png" 150 140
-    check "the copy has the red rectangle" test "${VAL:2:6}" = ff453a
+    check "the copy has the red rectangle" test "${VAL:2:6}" = "$PEN_RED"
     read -r x y <<<"$(card_point 120 75)"
     drv move 0 "$x" "$y"
     sleep 0.3
@@ -227,21 +226,20 @@ scenario_annotate() {
     sleep 1.5
     shot 0 reopened
     # the 500x300 capture sits centred: the rectangle at 650..800, 400..480
-    check "  ... with the previous annotations" drv find 0 ff453a 40 4 600 350 1000 550
+    check "  ... with the previous annotations" find_on 0 "$PEN_RED" 40 4 600 350 1000 550
     keys v
     click 0 725 440
     drv sleep 200
     keys delete
     sleep 0.3
     shot 0 deleted
-    check "  ... which can be selected and deleted" no_find_exact 0 ff453a 40 4 600 350 1000 550
+    check "  ... which can be selected and deleted" no_find_on 0 "$PEN_RED" 40 4 600 350 1000 550
     keys enter
-    sleep 1.5
-    clip_png "$OUT/edited.png"
-    check "  ... and Copy gives the edited image" eq "$(png_size "$OUT/edited.png")" 500x300
+    sleep 1.5 # (the clipboard held the capture, as large)
+    check "  ... and Copy gives the edited image" clip_is edited 500x300
     drv pixel "$OUT/edited.png" 150 140
-    check "  ... without the rectangle" test "${VAL:2:6}" != ff453a
-    n=$(ls "$HOME/.local/state/shotlet/history" | wc -l)
+    check "  ... without the rectangle" test "${VAL:2:6}" != "$PEN_RED"
+    n=$(ls "$XDG_STATE_HOME/shotlet/history" | wc -l)
     check "  ... updating the same history entry" eq "$n" 1
 }
 
@@ -265,7 +263,7 @@ history_kept() {
     drag 0 100 100 0 300 250
     keys ctrl+s
     new_card "$n"
-    n=$(ls "$HOME/.local/state/shotlet/history" | wc -l)
+    n=$(ls "$XDG_STATE_HOME/shotlet/history" | wc -l)
     check "copied and saved captures are kept" eq "$n" 2
     grep -l "saved=" "$HOME"/.local/state/shotlet/history/*/meta >/dev/null
     check "  ... the saved one with its path" test $? = 0
@@ -273,7 +271,7 @@ history_kept() {
 
 # the Recent captures panel: Enter copies, Delete removes
 history_panel() {
-    pkill -f "shotlet quick" 2>/dev/null
+    stop_kept quick
     SHOTLET_DUMP_FRAME=$OUT/panel run_shotlet panel history
     check "Recent captures lists both" wait_log 5 "history: 2 captures"
     check "  ... search on, or shown disabled without Tesseract" wait_log 5 "text search off|text search on"
@@ -297,9 +295,9 @@ history_panel() {
 # the panel's Clear history (in the footer, away from close) asks first:
 # Esc backs out, Clear clears
 history_clear_asks() {
-    local hist=$HOME/.local/state/shotlet/history
+    local hist=$XDG_STATE_HOME/shotlet/history
     # the panel: its light or dark card, the biggest blob of its colour
-    drv find 0 fafafc 3 200 || drv find 0 242426 3 200 || { fail "the history panel on screen"; return; }
+    find_on 0 fafafc 3 200 || find_on 0 242426 3 200 || { fail "the history panel on screen"; return; }
     read -r cx cy w h <<<"$VAL"
     local bottom=$((cy + h / 2)) right=$((cx + w / 2))
     click 0 "$cx" $((bottom - 22))
@@ -316,7 +314,7 @@ history_clear_asks() {
 }
 
 history_restart() {
-    pkill -f "shotlet (quick|history|pin)" 2>/dev/null
+    stop_kept
     sleep 0.5
     run_shotlet again history
     check "the history survives a restart" wait_log 5 "history: 1 captures"
