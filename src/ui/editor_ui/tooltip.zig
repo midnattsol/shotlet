@@ -2,14 +2,13 @@
 //! shown after a short hover or for the keyboard-focused control.
 
 const std = @import("std");
-const text_mod = @import("../../gfx/text.zig");
 const render = @import("../../gfx/render.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
 const motion = @import("../motion.zig");
 const buttons = @import("buttons.zig");
-const draw_chrome = @import("draw_chrome.zig");
+const selchrome = @import("../selchrome.zig");
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
@@ -60,11 +59,7 @@ pub fn tooltipRect(self: *const Editor) ?Rect {
     const b = tooltipButton(self) orelse return null;
     var kb: [32]u8 = undefined;
     const l = tipLabel(self, b.kind, &kb);
-    const fs = theme.font_small * self.uf();
-    var tw = text_mod.width(fs, l.name);
-    if (l.key.len > 0) tw += self.sc(8) + text_mod.width(fs, l.key);
-    const th = text_mod.height(fs) + self.sc(8);
-    const pw = tw + self.sc(20);
+    const pw, const th = selchrome.tooltipSize(l.name, l.key, self.uf());
     if (b.layer == .menu) return besideMenu(self, b, pw, th);
     if (b.layer == .strip) return aboveStrip(self, b, pw, th);
     const w: i32 = @intCast(self.pn().width);
@@ -112,12 +107,5 @@ pub fn drawTooltip(self: *Editor, canvas: *Canvas) void {
     const r = tooltipRect(self) orelse return;
     var kb: [32]u8 = undefined;
     const l = tipLabel(self, b.kind, &kb);
-    const f = self.uf();
-    const th = self.theme;
-    const fs = theme.font_small * f;
-    canvas.fillRoundRectAA(r.x, r.y + self.sc(2), r.w, r.h, 7.0 * f, 0x1F000000);
-    draw_chrome.drawPill(self, canvas, r, 7.0 * f);
-    const ty = r.y + @divTrunc(r.h - text_mod.height(fs), 2);
-    text_mod.draw(canvas, r.x + self.sc(10), ty, fs, th.pill_fg, l.name);
-    if (l.key.len > 0) text_mod.draw(canvas, r.right() - self.sc(10) - text_mod.width(fs, l.key), ty, fs, th.pill_muted, l.key);
+    selchrome.tooltip(canvas, r, l.name, l.key, self.uf(), self.theme);
 }

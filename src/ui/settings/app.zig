@@ -8,6 +8,9 @@ const window = @import("../../platform/api.zig").window;
 const config = @import("../../app/config.zig");
 const text = @import("../../gfx/text.zig");
 const theme_mod = @import("../theme.zig");
+const scale = @import("../scale.zig");
+const press = @import("../press.zig");
+const switches = @import("../../platform/api/switches.zig");
 const icons = @import("../icons.zig");
 const sys = @import("../../platform/api.zig").sys;
 const env_mod = @import("../../app/env.zig");
@@ -42,10 +45,13 @@ pub const App = struct {
     regions: std.ArrayList(Region) = .empty,
     folder_req: ?desktop.Dialog = null,
     frame: frame_mod.Frame = .{},
+    /// the control a left press went down on: a click activates it on
+    /// release over the same control
+    press: press.Press(model.Hit) = .{},
 
     /// The content's height and scale, for scrolling.
     fn viewport(self: *const App) model.Viewport {
-        return .{ .h = @intCast(self.frame.ch), .f = @as(f64, @floatFromInt(self.win.scale120)) / 120.0 };
+        return .{ .h = @intCast(self.frame.ch), .f = scale.of(self.win.scale120) };
     }
 
     pub fn busPtr(self: *App) ?*desktop.Session {
@@ -95,14 +101,16 @@ pub const App = struct {
             .close => return .close,
             .key => |k| return self.onKey(k),
             .pointer_axis => |a| {
-                var step: i32 = @intFromFloat(a.value * 12.0 * @as(f64, @floatFromInt(self.win.scale120)) / 120.0);
+                var step: i32 = @intFromFloat(a.value * 12.0 * scale.of(self.win.scale120));
                 if (step == 0 and a.value != 0) step = if (a.value > 0) 1 else -1;
                 self.st.scrollBy(step, self.viewport());
             },
             .pointer_motion => |m| self.onMotion(@intFromFloat(frame_mod.Frame.toContent(self.win, m.x)), @intFromFloat(frame_mod.Frame.toContent(self.win, m.y))),
             .pointer_button => |b| {
-                if (b.button != .left or !b.pressed) return .keep;
-                return self.onClick(@intFromFloat(frame_mod.Frame.toContent(self.win, b.x)), @intFromFloat(frame_mod.Frame.toContent(self.win, b.y)));
+                if (b.button != .left) return .keep;
+                const x: i32 = @intFromFloat(frame_mod.Frame.toContent(self.win, b.x));
+                const y: i32 = @intFromFloat(frame_mod.Frame.toContent(self.win, b.y));
+                return if (b.pressed) self.onPress(x, y) else self.onRelease(x, y);
             },
         }
         return .keep;
@@ -119,7 +127,7 @@ pub const App = struct {
             if (!k.repeat) self.recordBind(action, k);
             return .keep;
         }
-        switch (focus.keyCommand(k)) {
+        switch (focus.keyCommand(k) orelse return .keep) {
             .close => return .close,
             .next => st.moveFocus(self.regions.items, self.viewport(), true),
             .prev => st.moveFocus(self.regions.items, self.viewport(), false),
@@ -127,7 +135,6 @@ pub const App = struct {
                 if (k.repeat) return .keep;
                 if (actions.activate(self, hit)) return .quit;
             },
-            .none => {},
         }
         return .keep;
     }
@@ -174,25 +181,39 @@ pub const App = struct {
         }
     }
 
-    fn onClick(self: *App, px: i32, py: i32) !Next {
+    /// The control at (px, py), if any.
+    fn hitAt(self: *const App, px: i32, py: i32) ?model.Hit {
         const hh = model.headerHeight(self.viewport().f);
         for (self.regions.items) |r| {
             if (!r.contains(px, py)) continue;
             // content scrolled under the fixed header must not
             // swallow clicks meant for the header's controls
             if (py < hh and !focus.isHeader(r.hit)) continue;
-            // clicking moves keyboard focus there too
-            if (focus.isFocusable(r.hit)) self.st.focus = r.hit;
-            return if (actions.activate(self, r.hit)) .quit else .keep;
+            return r.hit;
         }
+        return null;
+    }
+
+    fn onPress(self: *App, px: i32, py: i32) !Next {
+        const hit = self.hitAt(px, py);
+        self.press.down(hit, @floatFromInt(px), @floatFromInt(py));
+        if (hit != null) return .keep;
         if (self.st.recording != null) {
             self.st.recording = null;
             self.st.dirty = true;
-        } else if (py < hh) {
+        } else if (py < model.headerHeight(self.viewport().f)) {
             // drag the window by its header bar
             try self.win.startMove();
         }
         return .keep;
+    }
+
+    /// A click: the release over the control the press went down on.
+    fn onRelease(self: *App, px: i32, py: i32) Next {
+        const hit = self.press.up(self.hitAt(px, py)) orelse return .keep;
+        // clicking moves keyboard focus there too
+        if (focus.isFocusable(hit)) self.st.focus = hit;
+        return if (actions.activate(self, hit)) .quit else .keep;
     }
 
     fn redraw(self: *App) !void {
@@ -223,11 +244,11 @@ fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session)
     // SHOTLET_SETTINGS_FOCUS=n starts with the n-th control focused, and
     // SHOTLET_SETTINGS_VIEW=general|editor|shortcuts on that view, so
     // headless runs (which cannot type) can check them
-    if (std.c.getenv("SHOTLET_SETTINGS_FOCUS")) |v| {
-        st.pending_focus = std.fmt.parseInt(usize, std.mem.span(v), 10) catch null;
+    if (switches.get().settings_focus) |v| {
+        st.pending_focus = std.fmt.parseInt(usize, v, 10) catch null;
     }
-    if (std.c.getenv("SHOTLET_SETTINGS_VIEW")) |v| {
-        st.view = std.meta.stringToEnum(model.View, std.mem.span(v)) orelse .general;
+    if (switches.get().settings_view) |v| {
+        st.view = std.meta.stringToEnum(model.View, v) orelse .general;
     }
     return st;
 }

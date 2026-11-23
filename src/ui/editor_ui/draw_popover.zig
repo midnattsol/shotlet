@@ -8,22 +8,26 @@ const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
 const motion = @import("../motion.zig");
-const icons = @import("../icons.zig");
 const hsv_mod = @import("../hsv.zig");
 const tui = @import("../tools/tui.zig");
 const buttons = @import("buttons.zig");
 const material = @import("material.zig");
 const hit = @import("hit.zig");
-const draw_toolbar = @import("draw_toolbar.zig");
-const ff = @import("common.zig").ff;
+const barkit = @import("../barkit.zig");
+const menukit = @import("../menukit.zig");
+const scale = @import("../scale.zig");
+const ff = scale.ff;
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
 const Button = buttons.Button;
-const Icon = icons.Icon;
 const palette = shapes_mod.palette;
-const focusRing = draw_toolbar.focusRing;
+
+/// The keyboard focus ring around `r`, its corners rounded to `radius`.
+fn focusRing(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
+    barkit.focusRing(canvas, r, radius, self.uf(), self.theme.accent);
+}
 
 /// Segment rows whose trough is drawn, by their y (minInt: free slot).
 const Troughs = [4]i32;
@@ -36,8 +40,8 @@ pub fn drawPopover(self: *Editor, canvas: *Canvas) void {
     const pr = self.pop_rect;
     // grow from 96% around the side facing the toolbar
     const sc_k = 0.96 + 0.04 * p;
-    const gw: i32 = @intFromFloat(@round(ff(pr.w) * sc_k));
-    const gh: i32 = @intFromFloat(@round(ff(pr.h) * sc_k));
+    const gw = scale.px(pr.w, sc_k);
+    const gh = scale.px(pr.h, sc_k);
     const gy = if (pr.y < self.toolbar_rect.y) pr.bottom() - gh else pr.y;
     const grown = Rect{ .x = pr.x + @divTrunc(pr.w - gw, 2), .y = gy, .w = gw, .h = gh };
     const sh = th.popover_shadow;
@@ -69,20 +73,10 @@ fn drawColorsContent(self: *Editor, canvas: *Canvas) void {
 
 /// A palette colour: a dot, ringed in accent when chosen.
 fn drawSwatch(self: *const Editor, canvas: *Canvas, b: Button, bi: usize, col: u32, sel: bool) void {
-    const th = self.theme;
     const f = self.uf();
     const r = b.rect;
-    const cx = ff(r.x) + ff(r.w) / 2.0;
-    const cy = ff(r.y) + ff(r.h) / 2.0;
-    const hv = hit.hoverAmount(self, bi);
     const rad = ff(r.w) / 2.0;
-    if (sel) {
-        canvas.ringAA(cx, cy, rad + 3.0 * f, 2.0 * f, th.accent);
-    } else if (hv > 0) {
-        canvas.ringAA(cx, cy, rad + 2.5 * f, 1.5 * f, theme.fade(th.hairline, 2 * hv));
-    }
-    canvas.fillCircleAA(cx, cy, rad, col);
-    canvas.ringAA(cx, cy, rad - 0.5 * f, 1.0 * f, 0x59808080);
+    menukit.swatch(canvas, ff(r.x) + rad, ff(r.y) + ff(r.h) / 2.0, rad, col, f, self.theme, sel, hit.hoverAmount(self, bi));
     if (self.focus == bi) focusRing(self, canvas, r.expand(self.sc(2)), rad + 2 * f);
 }
 
@@ -126,9 +120,7 @@ fn drawSizeSlider(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) vo
     canvas.fillRoundRectAA(r.x, ty, r.w, track_h, ff(track_h) / 2, th.track);
     const kx = ff(r.x) + knob + t * (ff(r.w) - 2 * knob);
     canvas.fillRoundRectAA(r.x, ty, @intFromFloat(@round(kx - ff(r.x))), track_h, ff(track_h) / 2, th.accent);
-    canvas.fillCircleAA(kx, cy + 1.0 * f, knob + 1.0 * f, 0x26000000);
-    canvas.fillCircleAA(kx, cy + 0.5 * f, knob + 0.5 * f, 0x33000000);
-    canvas.fillCircleAA(kx, cy, knob, 0xFFFFFFFF);
+    menukit.knob(canvas, kx, cy, knob, f);
     if (self.focus == bi) focusRing(self, canvas, .{ .x = @intFromFloat(kx - knob), .y = @intFromFloat(cy - knob), .w = @intFromFloat(2 * knob), .h = @intFromFloat(2 * knob) }, knob);
 }
 
@@ -137,22 +129,16 @@ fn drawSegment(self: *const Editor, canvas: *Canvas, b: Button, bi: usize, s: bu
     const th = self.theme;
     const f = self.uf();
     const r = b.rect;
-    const hv = hit.hoverAmount(self, bi);
     if (claimTrough(troughs, r.y)) {
         const pr = self.pop_rect;
         const pad = self.sc(theme.popover_pad);
-        canvas.fillRoundRectAA(pr.x + pad, r.y - self.sc(2), pr.w - 2 * pad, r.h + self.sc(4), 9.0 * f, th.track);
+        menukit.segTrough(canvas, .{ .x = pr.x + pad, .y = r.y - self.sc(2), .w = pr.w - 2 * pad, .h = r.h + self.sc(4) }, f, th);
     }
     const on = buttons.segOn(self, s);
-    if (on) {
-        canvas.fillRoundRectAA(r.x, r.y + self.sc(1), r.w, r.h, 7.0 * f, 0x26000000);
-        canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.seg_on);
-    } else if (hv > 0) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, theme.fade(th.hover, hv));
     var kb: [32]u8 = undefined;
     const l = buttons.buttonLabel(self, b.kind, &kb).name;
-    const fs = theme.font_small * f;
-    const tw = text_mod.width(fs, l);
-    text_mod.draw(canvas, r.x + @divTrunc(r.w - tw, 2), r.y + @divTrunc(r.h - text_mod.height(fs), 2), fs, if (on) th.fg else th.muted, l);
+    // the chosen segment shows no hover
+    menukit.segment(canvas, r, f, th, l, on, if (on) 0 else hit.hoverAmount(self, bi));
     if (self.focus == bi) focusRing(self, canvas, r, 7.0 * f);
 }
 
@@ -190,31 +176,21 @@ fn drawConic(canvas: *Canvas, cx: f64, cy: f64, r: f64) void {
 
 fn drawMenuContent(self: *Editor, canvas: *Canvas) void {
     const th = self.theme;
-    const f = self.uf();
     for (self.buttons.items, 0..) |b, bi| {
         if (b.layer != .menu) continue;
         const r = b.rect;
         if (b.kind == .cancel) {
             canvas.fillRect(r.x + self.sc(10), r.y - self.sc(5), r.w - self.sc(20), 1, th.hairline);
         }
-        const under = (self.hover_btn >= 0 and @as(usize, @intCast(self.hover_btn)) == bi) or self.focus == bi;
-        const enabled = buttons.disabledWhy(self, b.kind) == null;
-        // a disabled row only shows where the keyboard focus is
-        const hot = under and enabled;
-        if (hot) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.accent_fill);
-        if (under and !enabled and self.focus == bi) canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 7.0 * f, th.hover);
-        const fade = if (enabled) 1 else theme.disabled_alpha;
-        const fg = theme.fade(if (hot) th.on_accent else th.fg, fade);
-        const sub = theme.fade(if (hot) theme.withAlpha(th.on_accent, 0xBF) else th.muted, fade);
-        const is = self.sc(16);
-        const checked = b.kind == .beautify and self.beautify.enabled;
-        const icon: Icon = if (checked) .check else buttons.kindIcon(self, b.kind) orelse .more;
-        icons.draw(canvas, icon, r.x + self.sc(10), r.y + @divTrunc(r.h - is, 2), is, if (checked and !hot) th.accent else fg);
+        const focused = self.focus == bi;
+        const under = (self.hover_btn >= 0 and @as(usize, @intCast(self.hover_btn)) == bi) or focused;
         var kb: [32]u8 = undefined;
         const l = buttons.buttonLabel(self, b.kind, &kb);
-        const fs = theme.font_label * f;
-        text_mod.draw(canvas, r.x + self.sc(10) + is + self.sc(10), r.y + @divTrunc(r.h - text_mod.height(fs), 2), fs, fg, l.name);
-        const ks = theme.font_small * f;
-        if (l.key.len > 0) text_mod.draw(canvas, r.right() - self.sc(10) - text_mod.width(ks, l.key), r.y + @divTrunc(r.h - text_mod.height(ks), 2), ks, sub, l.key);
+        menukit.menuRow(canvas, r, self.uf(), th, .{
+            .icon = buttons.kindIcon(self, b.kind) orelse .more,
+            .label = l.name,
+            .key = l.key,
+            .checked = b.kind == .beautify and self.beautify.enabled,
+        }, .{ .hot = under, .focused = focused, .enabled = buttons.disabledWhy(self, b.kind) == null });
     }
 }

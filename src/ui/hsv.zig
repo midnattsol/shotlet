@@ -1,6 +1,7 @@
 //! HSV and RGB (0xAARRGGBB), for the custom colour picker.
 
 const std = @import("std");
+const ff = @import("scale.zig").ff;
 
 pub fn hsvToRgb(h: f64, s: f64, v: f64) u32 {
     const c = v * s;
@@ -36,9 +37,9 @@ pub fn hsvToRgb(h: f64, s: f64, v: f64) u32 {
 }
 
 pub fn rgbToHsv(c: u32) [3]f64 {
-    const r = ff(@intCast((c >> 16) & 0xFF)) / 255.0;
-    const g = ff(@intCast((c >> 8) & 0xFF)) / 255.0;
-    const b = ff(@intCast(c & 0xFF)) / 255.0;
+    const r = ff((c >> 16) & 0xFF) / 255.0;
+    const g = ff((c >> 8) & 0xFF) / 255.0;
+    const b = ff(c & 0xFF) / 255.0;
     const mx = @max(r, @max(g, b));
     const mn = @min(r, @min(g, b));
     const d = mx - mn;
@@ -67,8 +68,4 @@ test "hsv round trip" {
             try std.testing.expect(@abs(a - b) <= 1);
         }
     }
-}
-
-fn ff(v: i32) f64 {
-    return @floatFromInt(v);
 }

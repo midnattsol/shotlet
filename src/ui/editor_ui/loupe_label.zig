@@ -12,7 +12,7 @@ const theme = @import("../theme.zig");
 const icons = @import("../icons.zig");
 const selchrome = @import("../selchrome.zig");
 const color = @import("../tools/color.zig");
-const ff = @import("common.zig").ff;
+const ff = @import("../scale.zig").ff;
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;

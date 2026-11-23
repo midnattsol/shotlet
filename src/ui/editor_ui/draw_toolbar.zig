@@ -14,20 +14,13 @@ const buttons = @import("buttons.zig");
 const material = @import("material.zig");
 const barkit = @import("../barkit.zig");
 const hit = @import("hit.zig");
-const ff = @import("common.zig").ff;
+const ff = @import("../scale.zig").ff;
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
 const Button = buttons.Button;
 const Icon = icons.Icon;
-
-pub fn focusRing(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
-    const g = self.sc(theme.focus_gap);
-    const fw = theme.focus_w * self.uf();
-    const rr = r.expand(g + @as(i32, @intFromFloat(@ceil(fw / 2))));
-    shapes_mod.roundRectRing(canvas, rr, radius + ff(g) + fw / 2, fw, self.theme.accent);
-}
 
 pub fn drawIconIn(self: *const Editor, canvas: *Canvas, icon: Icon, r: Rect, size: f64, color: u32) void {
     const s = self.sc(size);
@@ -102,7 +95,7 @@ fn drawBarButton(self: *const Editor, canvas: *Canvas, b: Button, bi: usize) voi
             if (buttons.kindIcon(self, b.kind)) |ic| drawIconIn(self, canvas, ic, r, theme.icon, fg) else if (b.kind == .ext) tui.drawBarLabel(self, canvas, b, fg);
         },
     }
-    if (self.focus == bi) focusRing(self, canvas, r, theme.button_radius * f);
+    if (self.focus == bi) barkit.focusRing(canvas, r, theme.button_radius * f, f, th.accent);
 }
 
 /// A tool's prominent button (Crop), if `kind` is one.
@@ -138,7 +131,7 @@ fn drawColorsButton(self: *const Editor, canvas: *Canvas, r: Rect, press: f64) v
     canvas.ringAA(cx, cy, 10.5 * f, 3.0 * f, theme.withAlpha(col, 0x99));
     canvas.ringAA(cx, cy, 10.0 * f, 2.0 * f, th.material_solid);
     canvas.fillCircleAA(cx, cy, 9.0 * f, col);
-    if (col & 0xFFFFFF == 0xFFFFFF or (col & 0xFFFFFF) == 0x1C1C1E) canvas.ringAA(cx, cy, 8.5 * f, 1.0 * f, 0x59808080);
+    if (col & 0xFFFFFF == 0xFFFFFF or (col & 0xFFFFFF) == 0x1C1C1E) canvas.ringAA(cx, cy, 8.5 * f, 1.0 * f, th.swatch_ring);
     const cs = self.sc(12);
     icons.draw(canvas, .chevron_down, r.x + self.sc(8 + 18 + 8), r.y + @divTrunc(r.h - cs, 2), cs, th.muted);
 }

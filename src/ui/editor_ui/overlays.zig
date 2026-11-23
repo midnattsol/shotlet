@@ -12,7 +12,6 @@ const selection = @import("selection.zig");
 const loupe = @import("loupe.zig");
 const loupe_hint = @import("loupe_hint.zig");
 const tooltip = @import("tooltip.zig");
-const notice = @import("notice.zig");
 const strip = @import("strip.zig");
 const winpick = @import("../editor/winpick.zig");
 
@@ -67,6 +66,5 @@ fn collectFloating(self: *Editor, list: *RectList) void {
     if (!pop_fade.rect(self).isEmpty()) list.add(pop_fade.rect(self));
     if (tooltip.tooltipRect(self)) |r| list.add(r.expand(self.sc(6)));
     if (self.picker.open and !self.toolbar_rect.isEmpty()) list.add(foot(self, self.picker.rect.expand(self.sc(1)), th.popover_shadow));
-    if (self.copy_notice != .none) list.add(foot(self, notice.noticeRect(self), th.bar_shadow));
     if (self.help_open) list.add(foot(self, help.rect(self), th.popover_shadow));
 }

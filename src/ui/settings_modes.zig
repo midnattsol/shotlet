@@ -99,7 +99,7 @@ pub fn drawShortcuts(ui: *S.Ui, x: i32, y0: i32, w: i32, st: *const State) !i32 
         if (!st.held) {
             S.rowTitle(ui, r, sc.label, null);
             const cmd = std.fmt.bufPrint(&cmd_buf, "shotlet {s}", .{if (std.mem.eql(u8, sc.name, "area")) "" else sc.name}) catch "";
-            _ = S.keyCaps(ui, r, &.{cmd}, null);
+            _ = S.keyCaps(ui, r, &.{cmd}, .window);
             continue;
         }
         S.rowTitle(ui, r, sc.label, null);

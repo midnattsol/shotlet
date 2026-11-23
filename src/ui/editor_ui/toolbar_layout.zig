@@ -15,7 +15,7 @@ const hit = @import("hit.zig");
 const barkit = @import("../barkit.zig");
 const strip = @import("strip.zig");
 const capmode = @import("../editor/capmode.zig");
-const ff = @import("common.zig").ff;
+const ff = @import("../scale.zig").ff;
 
 const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;

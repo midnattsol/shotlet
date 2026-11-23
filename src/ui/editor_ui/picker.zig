@@ -9,8 +9,9 @@ const editor_mod = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const theme = @import("../theme.zig");
 const hsv_mod = @import("../hsv.zig");
+const color = @import("../tools/color.zig");
 const material = @import("material.zig");
-const ff = @import("common.zig").ff;
+const ff = @import("../scale.zig").ff;
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
@@ -85,7 +86,9 @@ pub fn pickAt(self: *Editor, part: PickPart, m: Point) void {
 }
 
 fn setHex(self: *Editor, c: u32) void {
-    _ = std.fmt.bufPrint(&self.picker.hex, "{X:0>6}", .{c & 0xFFFFFF}) catch {};
+    var buf: [8]u8 = undefined;
+    // "#RRGGBB": the field holds the digits
+    @memcpy(&self.picker.hex, color.hex(&buf, c)[1..7]);
     self.picker.hex_len = 6;
 }
 
@@ -125,8 +128,8 @@ pub fn pickerKey(self: *Editor, k: window.Key) ?bool {
     self.picker.hex[self.picker.hex_len] = std.ascii.toUpper(t[0]);
     self.picker.hex_len += 1;
     if (self.picker.hex_len < 6) return false;
-    const v = std.fmt.parseInt(u32, &self.picker.hex, 16) catch return false;
-    const hsv = rgbToHsv(0xFF000000 | v);
+    const v = color.parseHex(&self.picker.hex) orelse return false;
+    const hsv = rgbToHsv(v);
     self.picker.h = hsv[0];
     self.picker.s = hsv[1];
     self.picker.v = hsv[2];

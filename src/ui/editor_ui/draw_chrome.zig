@@ -16,22 +16,15 @@ const draw_popover = @import("draw_popover.zig");
 const pop_fade = @import("pop_fade.zig");
 const picker = @import("picker.zig");
 const tooltip = @import("tooltip.zig");
-const notice = @import("notice.zig");
 const strip = @import("strip.zig");
 const winpick = @import("../editor/winpick.zig");
-const ff = @import("common.zig").ff;
+const ff = @import("../scale.zig").ff;
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
 const Rect = shapes_mod.Rect;
 const Point = shapes_mod.Point;
 const handlePoints = shapes_mod.handlePoints;
-
-/// A label pill over the capture (the size, tooltips, the loupe's and
-/// the colour picker's readouts), see theme.Theme.pill_bg.
-pub fn drawPill(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
-    selchrome.pill(canvas, r, radius, self.theme);
-}
 
 pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     if (self.text) |t| {
@@ -52,7 +45,6 @@ pub fn drawChrome(self: *Editor, canvas: *Canvas) void {
     pop_fade.draw(self, canvas);
     if (self.picker.open and !self.toolbar_rect.isEmpty()) picker.drawPicker(self, canvas);
     tooltip.drawTooltip(self, canvas);
-    if (self.copy_notice != .none) notice.drawCopyNotice(self, canvas);
     tools.drawTop(self, canvas);
     if (self.help_open) help.draw(self, canvas);
 }

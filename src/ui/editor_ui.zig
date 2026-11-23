@@ -1,15 +1,15 @@
 //! Editor chrome in the "Glass" look (theme.zig): the selection overlay,
 //! one floating toolbar over a blurred copy of the screenshot, the colour
 //! and size popover, the More menu, the beautify panel, the custom colour
-//! picker, the magnifier loupe, tooltips, the help overlay and the copy
-//! notice. Every piece has a footprint so the editor repaints only those
+//! picker, the magnifier loupe, tooltips and the help overlay (the copy
+//! notice is the tools' toast, tools/toast.zig). Every piece has a footprint so the editor repaints only those
 //! rectangles (collectOverlays must cover everything drawChrome draws).
 //!
 //! Facade over editor_ui/: buttons (the control model and labels),
 //! toolbar_layout and popover_layout, hit (pointer and focus queries),
 //! overlays (footprints), draw_chrome, selection, draw_toolbar,
 //! draw_popover, material (blurred backdrop, shadow, hairline), picker,
-//! loupe, tooltip, notice and strip (the capture modes before a
+//! loupe, tooltip and strip (the capture modes before a
 //! selection).
 
 const buttons = @import("editor_ui/buttons.zig");
@@ -27,7 +27,6 @@ const picker = @import("editor_ui/picker.zig");
 const loupe = @import("editor_ui/loupe.zig");
 const loupe_hint = @import("editor_ui/loupe_hint.zig");
 const tooltip = @import("editor_ui/tooltip.zig");
-const notice = @import("editor_ui/notice.zig");
 
 pub const Seg = buttons.Seg;
 pub const PopClosing = pop_fade.Closing;
@@ -61,10 +60,8 @@ pub const hoverAmount = hit.hoverAmount;
 
 pub const collectOverlays = overlays.collectOverlays;
 pub const drawChrome = draw_chrome.drawChrome;
-pub const drawPill = draw_chrome.drawPill;
 pub const hoverHandle = selection.hoverHandle;
 pub const drawSelectionChrome = selection.drawSelectionChrome;
-pub const focusRing = draw_toolbar.focusRing;
 pub const drawToolbar = draw_toolbar.drawToolbar;
 pub const tooltipDueMs = tooltip.tooltipDueMs;
 
@@ -90,7 +87,6 @@ pub const loupePointed = loupe.pointed;
 pub const loupeHeld = loupe.held;
 pub const loupeEdgeDragged = loupe_hint.edgeDragged;
 pub const loupeNudged = loupe.nudged;
-pub const drawCopyNotice = notice.drawCopyNotice;
 
 // keep the submodules' tests reachable from the test root
 comptime {

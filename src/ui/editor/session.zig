@@ -5,6 +5,7 @@
 const std = @import("std");
 const desktop = @import("../../platform/api.zig").desktop;
 const sys = @import("../../platform/api.zig").sys;
+const switches = @import("../../platform/api/switches.zig");
 const editor = @import("../editor.zig");
 const ui = @import("../editor_ui.zig");
 const theme_mod = @import("../theme.zig");
@@ -22,14 +23,9 @@ pub fn nowMs() i64 {
     return sys.monoMs();
 }
 
-pub fn getenv(name: [*:0]const u8) ?[]const u8 {
-    const v = std.c.getenv(name) orelse return null;
-    return std.mem.span(v);
-}
-
 /// Run the editor; returns the user's chosen action and exported PNG.
 pub fn run(ed: *Editor) !editor.Result {
-    if (getenv("SHOTLET_EDITOR_SCRIPT")) |s| ed.script.src = s;
+    if (switches.get().editor_script) |s| ed.script.src = s;
     while (ed.running) {
         const now = nowMs();
         if (ed.smoke_deadline_ms != 0 and now > ed.smoke_deadline_ms) {
@@ -48,7 +44,7 @@ pub fn run(ed: *Editor) !editor.Result {
         }
         if (scripted and !ed.needs_render) try script.step(ed);
     }
-    if (getenv("SHOTLET_EDITOR_DUMP")) |prefix| exporter.dumpAtExit(ed, prefix);
+    if (switches.get().editor_dump) |prefix| exporter.dumpAtExit(ed, prefix);
     if (!ed.action.exports()) return .{ .action = ed.action };
     return .{ .action = ed.action, .png_data = try exporter.exportPng(ed) };
 }
@@ -102,7 +98,7 @@ pub fn setPrefs(ed: *Editor, prefs: theme_mod.Prefs) void {
     ed.prefs = prefs;
     ed.theme = theme_mod.of(prefs);
     // scripted runs dump frames: keep them independent of timing
-    motion.enabled = prefs.animations and getenv("SHOTLET_EDITOR_SCRIPT") == null;
+    motion.enabled = prefs.animations and switches.get().editor_script == null;
     for (ed.panes[0..ed.n_panes]) |*p| {
         for (&p.backdrops) |*b| b.hash = 0;
         p.gen +%= 1;
