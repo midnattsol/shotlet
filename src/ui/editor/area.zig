@@ -42,9 +42,9 @@ fn get(ed: *Editor) *areasel.Selection {
 
 /// The area changed: into the document, repainted where it was and is.
 fn put(ed: *Editor) void {
-    caches.selDirty(ed);
+    const old = ed.doc.sel;
     ed.doc.sel = ed.area.sel;
-    caches.selDirty(ed);
+    caches.selChanged(ed, old);
 }
 
 /// The area is being dragged out (not moved or resized).

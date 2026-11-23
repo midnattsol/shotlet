@@ -17,6 +17,7 @@ comptime {
     _ = @import("frame.zig");
     _ = @import("freeze_pick.zig");
     _ = @import("freeze_pane.zig");
+    _ = @import("bands.zig");
     _ = @import("hsv.zig");
     _ = @import("icons.zig");
     _ = @import("lens.zig");

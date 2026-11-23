@@ -38,6 +38,7 @@ const dim = @import("dim.zig");
 const motion = @import("motion.zig");
 const scale = @import("scale.zig");
 const theme = @import("theme.zig");
+const bands = @import("bands.zig");
 
 const Rect = geom.Rect;
 const Point = geom.Point;
@@ -322,13 +323,42 @@ pub const Picker = struct {
         // and so would this frame
         if (fade == 256 and now.isEmpty() and p.drawn[0].isEmpty() and p.drawn[1].isEmpty()) return null;
         const redo = if (fade < 256) p.bounds() else now.unite(p.drawn[bi]);
-        self.compose(p, px, redo);
+        self.composeBands(p, px, redo);
         var cv = Canvas.init(px, p.w, p.h);
         self.paintChrome(mode, &cv, i);
-        if (fade < 256) mixRows(px, p.base, px, fade);
+        if (fade < 256) fadeBands(p, px, fade);
         const told = redo.unite(p.drawn[1 - bi]);
         p.drawn[bi] = if (fade < 256) p.bounds() else now;
         return told.clip(p.w, p.h) orelse p.bounds();
+    }
+
+    /// compose, a big `r` in bands (the first frame, the fades).
+    fn composeBands(self: *const Picker, p: *const Pane, px: []u32, r: Rect) void {
+        const c = r.clip(p.w, p.h) orelse return;
+        const Ctx = struct {
+            pick: *const Picker,
+            p: *const Pane,
+            px: []u32,
+            fn band(x: @This(), b: Rect) void {
+                x.pick.compose(x.p, x.px, b);
+            }
+        };
+        bands.run(c, Ctx{ .pick = self, .p = p, .px = px }, Ctx.band);
+    }
+
+    /// The frame `px` seen `fade`/256 of the way from the plain capture.
+    fn fadeBands(p: *const Pane, px: []u32, fade: u32) void {
+        const Ctx = struct {
+            p: *const Pane,
+            px: []u32,
+            k: u32,
+            fn band(x: @This(), b: Rect) void {
+                const from = @as(usize, @intCast(b.y)) * x.p.w;
+                const to = @as(usize, @intCast(b.bottom())) * x.p.w;
+                mixRows(x.px[from..to], x.p.base[from..to], x.px[from..to], x.k);
+            }
+        };
+        bands.run(p.bounds(), Ctx{ .p = p, .px = px, .k = fade }, Ctx.band);
     }
 
     /// The dimmed capture over `r` of pane `p`, bright inside the area.

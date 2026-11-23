@@ -14,6 +14,8 @@ const dim = @import("../dim.zig");
 const beauty_cache = @import("beauty_cache.zig");
 const fade = @import("fade.zig");
 const winpick = @import("winpick.zig");
+const caches = @import("caches.zig");
+const bands = @import("../bands.zig");
 
 const Editor = editor.Editor;
 const Canvas = render.Canvas;
@@ -84,6 +86,10 @@ pub fn renderFrame(ed: *Editor) !void {
 /// Draw pane `idx` (the current one) into its surface's back buffer and
 /// present it.
 pub fn renderPane(ed: *Editor, idx: u8) !void {
+    if (ed.pn().view_stale) {
+        ed.pn().view_stale = false;
+        caches.refreshView(ed, ed.screenRect());
+    }
     try beauty_cache.ensure(ed);
     ed.pn().overlays.len = 0;
     ui.collectOverlays(ed, &ed.pn().overlays);
@@ -101,7 +107,7 @@ pub fn renderPane(ed: *Editor, idx: u8) !void {
     if (entering != null) p.add(ed.screenRect());
     // past ~half the screen one full pass beats many partial ones
     if (p.area() * 2 > @as(i64, ed.pn().width) * ed.pn().height) {
-        composeRegion(ed, px, ed.screenRect());
+        composeWhole(ed, px);
     } else {
         for (p.slice()) |r| composeRegion(ed, px, r);
     }
@@ -114,6 +120,19 @@ pub fn renderPane(ed: *Editor, idx: u8) !void {
     p.addAll(&ed.pn().overlays);
     ed.pn().last_frame = px;
     try ed.win.presentSurface(idx);
+}
+
+/// The whole background, in bands (a 4K frame on its first frames, the
+/// fade-in, a big change).
+fn composeWhole(ed: *Editor, px: []u32) void {
+    const Ctx = struct {
+        ed: *Editor,
+        px: []u32,
+        fn band(c: @This(), b: Rect) void {
+            composeRegion(c.ed, c.px, b);
+        }
+    };
+    bands.run(ed.screenRect(), Ctx{ .ed = ed, .px = px }, Ctx.band);
 }
 
 /// Paint the background for buffer rect `region`: the dimmed view, the

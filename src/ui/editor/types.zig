@@ -115,6 +115,9 @@ pub const Pane = struct {
     /// layer as shown through `view`, buffer-sized, and a dimmed copy
     viewc: []u32 = &.{},
     viewc_dim: []u32 = &.{},
+    /// viewc is to be made whole before the next frame (the surface was
+    /// sized: a second size before it draws costs nothing)
+    view_stale: bool = false,
     stroke_mask: []u8 = &.{}, // scratch for Canvas strokes
     /// coverage of the freehand stroke being drawn, buffer-sized
     live_cov: []u8 = &.{},

@@ -20,6 +20,7 @@ const theme = @import("../theme.zig");
 const view_mod = @import("../view.zig");
 const shapes_mod = @import("../shapes.zig");
 const mix = @import("../../gfx/effects.zig").mixRows;
+const bands = @import("../bands.zig");
 
 const Editor = editor.Editor;
 const Rect = shapes_mod.Rect;
@@ -61,7 +62,26 @@ pub fn enterLevel(ed: *Editor) ?u32 {
 pub fn blendIn(ed: *Editor, px: []u32, k: u32) void {
     const p = ed.pn();
     if (p.viewc.len != px.len) return;
-    mix(px, p.viewc, px, k);
+    mixBands(px, p.viewc, px, k, p.width);
+}
+
+/// `dst` = `a` turning into `b` as `k` goes to 256, rows `w` wide: a
+/// whole 4K frame per refresh while a fade lasts, so in bands.
+fn mixBands(dst: []u32, a: []const u32, b: []const u32, k: u32, w: u32) void {
+    const Ctx = struct {
+        dst: []u32,
+        a: []const u32,
+        b: []const u32,
+        w: usize,
+        k: u32,
+        fn band(c: @This(), r: Rect) void {
+            const from = @as(usize, @intCast(r.y)) * c.w;
+            const to = @as(usize, @intCast(r.bottom())) * c.w;
+            mix(c.dst[from..to], c.a[from..to], c.b[from..to], c.k);
+        }
+    };
+    const h: u32 = @intCast(dst.len / @max(1, w));
+    bands.run(.ofSize(w, h), Ctx{ .dst = dst, .a = a, .b = b, .w = w, .k = k }, Ctx.band);
 }
 
 /// 0..256 along the eased curve, `start` ms ago; 256 without motion.
@@ -85,11 +105,25 @@ const Frames = struct {
             if (!p.alive or n == 0 or p.last_frame.len != n) continue;
             f.from[i] = try ed.alloc.dupe(u32, p.last_frame);
             f.plain[i] = try ed.alloc.alloc(u32, n);
-            const all: Rect = .ofSize(p.width, p.height);
-            view_mod.resample(ed.img.pixels, ed.img.width, ed.img.height, p.view, f.plain[i], p.width, p.height, all);
+            plainView(ed, p, f.plain[i]);
             f.shown[i] = false;
         }
         return f;
+    }
+
+    /// The capture without annotations as pane `p` shows it: its view
+    /// when nothing is drawn, else resampled anew, in bands.
+    fn plainView(ed: *const Editor, p: *const editor.Pane, dst: []u32) void {
+        if (ed.doc.shapes.items.len == 0 and p.viewc.len == dst.len and !p.view_stale) return @memcpy(dst, p.viewc);
+        const Ctx = struct {
+            ed: *const Editor,
+            p: *const editor.Pane,
+            dst: []u32,
+            fn band(c: @This(), b: Rect) void {
+                view_mod.resample(c.ed.img.pixels, c.ed.img.width, c.ed.img.height, c.p.view, c.dst, c.p.width, c.p.height, b);
+            }
+        };
+        bands.run(.ofSize(p.width, p.height), Ctx{ .ed = ed, .p = p, .dst = dst }, Ctx.band);
     }
 
     fn deinit(f: *Frames, gpa: std.mem.Allocator) void {
@@ -132,7 +166,7 @@ fn presentStep(ed: *Editor, frames: *Frames, k: u32) !void {
             frames.shown[i] = true;
             continue;
         }
-        mix(px, frames.from[i], frames.plain[i], k);
+        mixBands(px, frames.from[i], frames.plain[i], k, ed.panes[i].width);
         try ed.win.presentSurface(@intCast(i));
         if (k >= 256) frames.shown[i] = true;
     }

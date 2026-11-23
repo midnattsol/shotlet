@@ -13,6 +13,7 @@ const dimRow = @import("../dim.zig").dimRow;
 const png = @import("../../gfx/png.zig");
 const tools = @import("../tools/mod.zig");
 const hit = @import("hit.zig");
+const bands = @import("../bands.zig");
 
 const Editor = editor.Editor;
 const Pane = editor.Pane;
@@ -66,7 +67,8 @@ pub fn onResize(ed: *Editor, idx: u8, w: u32, h: u32) !void {
         try doc_mod.composeRegion(ed.alloc, ed.layer, ed.img.pixels, ed.img.width, ed.img.height, ed.doc.shapes.items, ed.lifted, ed.doc.imageRect());
     }
     if (idx == 0) applyPresetSelection(ed);
-    refreshView(ed, ed.screenRect());
+    // made whole right before its first frame (renderPane)
+    p.view_stale = true;
     for (&p.pending) |*q| {
         q.len = 0;
         q.add(ed.screenRect());
@@ -126,19 +128,34 @@ pub fn scrollTall(ed: *Editor, notches: i32) !void {
 /// Re-render `b` (buffer pixels) of the view caches from the layer.
 pub fn refreshView(ed: *Editor, b: Rect) void {
     const r = Rect.intersect(b, ed.screenRect()) orelse return;
-    view_mod.resample(ed.layer, ed.img.width, ed.img.height, ed.pn().view, ed.pn().viewc, ed.pn().width, ed.pn().height, r);
-    const keep = ed.dim_keep;
-    const w: usize = ed.pn().width;
-    var y: usize = @intCast(r.y);
-    while (y < @as(usize, @intCast(r.bottom()))) : (y += 1) {
-        const off = y * w + @as(usize, @intCast(r.x));
-        dimRow(ed.pn().viewc[off..][0..@intCast(r.w)], ed.pn().viewc_dim[off..][0..@intCast(r.w)], keep);
-    }
+    viewBands(ed, r);
     ed.pn().content_dirty.add(r);
     ed.pn().gen +%= 1;
     if (ed.selBuf()) |s| {
         if (Rect.intersect(s, r) != null) ed.pn().bcache_valid = false;
     }
+}
+
+/// Make the current pane's view (and its dimmed copy) of buffer rect
+/// `r`: a big one in bands, a thread each (a 4K pane is tens of
+/// millions of source pixels to average).
+fn viewBands(ed: *Editor, r: Rect) void {
+    const Ctx = struct {
+        ed: *const Editor,
+        p: *const Pane,
+        fn band(c: @This(), b: Rect) void {
+            const e = c.ed;
+            const p = c.p;
+            view_mod.resample(e.layer, e.img.width, e.img.height, p.view, p.viewc, p.width, p.height, b);
+            const w: usize = p.width;
+            var y: usize = @intCast(b.y);
+            while (y < @as(usize, @intCast(b.bottom()))) : (y += 1) {
+                const off = y * w + @as(usize, @intCast(b.x));
+                dimRow(p.viewc[off..][0..@intCast(b.w)], p.viewc_dim[off..][0..@intCast(b.w)], e.dim_keep);
+            }
+        }
+    };
+    bands.run(r, Ctx{ .ed = ed, .p = ed.pn() }, Ctx.band);
 }
 
 /// Re-render image rect `r` on every pane.
@@ -203,6 +220,35 @@ pub fn selDirty(ed: *Editor) void {
     ed.needs_render = true;
 }
 
+/// The selection moved or changed size from `old`: repaint where it was
+/// and is. Without the beautify frame only the difference changes (the
+/// inside of both stays bright, the outside of both dim; the edges and
+/// handles are overlays), so a drag repaints thin strips, not the whole
+/// area (two 4K panes).
+pub fn selChanged(ed: *Editor, old: ?Rect) void {
+    const new = ed.doc.sel;
+    if (ed.beautify.enabled or old == null or new == null) {
+        ed.doc.sel = old;
+        selDirty(ed);
+        ed.doc.sel = new;
+        return selDirty(ed);
+    }
+    const saved = ed.pane_i;
+    defer ed.pane_i = saved;
+    for (ed.panes[0..ed.n_panes], 0..) |*p, i| {
+        if (!p.alive) continue;
+        ed.pane_i = @intCast(i);
+        const a = p.view.rectToBuf(old.?.normalized());
+        const b = p.view.rectToBuf(new.?.normalized());
+        var out: [4]Rect = undefined;
+        for (a.subtract(b, &out)) |r| p.content_dirty.add(r.expand(2));
+        for (b.subtract(a, &out)) |r| p.content_dirty.add(r.expand(2));
+        p.bcache_valid = false;
+        p.gen +%= 1;
+    }
+    ed.needs_render = true;
+}
+
 /// The selection plus its beautify padding, on screen.
 pub fn frameRect(ed: *const Editor, s: Rect) Rect {
     if (!ed.beautify.enabled) return s;
@@ -237,4 +283,27 @@ pub fn replaceImage(ed: *Editor, img: *const png.Image) !void {
         for (&p.pending) |*q| q.add(ed.screenRect());
     }
     ed.needs_render = true;
+}
+
+test "a selection dragged a little repaints the strips that changed, not the area" {
+    var px: [64 * 64]u32 = @splat(0xFF808080);
+    const img: png.Image = .{ .width = 64, .height = 64, .pixels = &px };
+    var ed = Editor.init(std.testing.allocator, undefined, &img);
+    defer ed.doc.deinit();
+    ed.n_panes = 1;
+    ed.panes[0] = .{ .alive = true, .width = 640, .height = 640, .view = .{ .scale = 10 } };
+    // 40x40 image px (400x400 on screen), one pixel wider
+    ed.doc.sel = .{ .x = 10, .y = 10, .w = 40, .h = 40 };
+    const old = ed.doc.sel;
+    ed.doc.sel = .{ .x = 10, .y = 10, .w = 41, .h = 40 };
+    selChanged(&ed, old);
+    const dirty = ed.panes[0].content_dirty.area();
+    try std.testing.expect(dirty > 0);
+    // a 10 px strip, give or take its margin: not the 160 000 px area
+    try std.testing.expect(dirty < 400 * 20);
+    // with the beautify frame the whole frame repaints (its look changes)
+    ed.panes[0].content_dirty = .{};
+    ed.beautify.enabled = true;
+    selChanged(&ed, old);
+    try std.testing.expect(ed.panes[0].content_dirty.area() >= 400 * 400);
 }

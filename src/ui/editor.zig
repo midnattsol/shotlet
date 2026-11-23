@@ -305,4 +305,5 @@ pub const Editor = struct {
 comptime {
     _ = fade;
     _ = capmode;
+    _ = caches;
 }

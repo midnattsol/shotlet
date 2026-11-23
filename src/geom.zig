@@ -86,6 +86,27 @@ pub const Rect = struct {
         if (x1 <= x0 or y1 <= y0) return null;
         return fromEdges(x0, y0, x1, y1);
     }
+    /// What of `a` lies outside `b`: at most four rects (the bands above
+    /// and below `b`, then left and right of it), into `out`.
+    pub fn subtract(a: Rect, b: Rect, out: *[4]Rect) []const Rect {
+        if (a.isEmpty()) return out[0..0];
+        const c = a.intersect(b) orelse {
+            out[0] = a;
+            return out[0..1];
+        };
+        var n: usize = 0;
+        const parts = [4]Rect{
+            fromEdges(a.x, a.y, a.right(), c.y),
+            fromEdges(a.x, c.bottom(), a.right(), a.bottom()),
+            fromEdges(a.x, c.y, c.x, c.bottom()),
+            fromEdges(c.right(), c.y, a.right(), c.bottom()),
+        };
+        for (parts) |p| if (!p.isEmpty()) {
+            out[n] = p;
+            n += 1;
+        };
+        return out[0..n];
+    }
     /// Bounding box of both; an empty rect is ignored.
     pub fn unite(a: Rect, b: Rect) Rect {
         if (a.isEmpty()) return b;
@@ -360,4 +381,22 @@ test "a selection on the 1.5 monitor beside a 2 one maps to its logical region" 
     try testing.expectEqual(Rect{ .x = 1728, .y = 0, .w = 772, .h = 100 }, s.rect);
     try testing.expectEqual(@as(usize, 1), monitorAt(&owner, .{ 2410, 206 }));
     try testing.expectEqual(@as(usize, 0), monitorAt(&owner, .{ 1727, 1079 }));
+}
+
+test "a rect minus another: the bands around the overlap" {
+    var out: [4]Rect = undefined;
+    const a: Rect = .{ .x = 0, .y = 0, .w = 100, .h = 50 };
+    // grown by 10 to the right and 5 down: only those strips are new
+    const b: Rect = .{ .x = 0, .y = 0, .w = 110, .h = 55 };
+    try testing.expectEqual(@as(usize, 0), a.subtract(b, &out).len);
+    const d = b.subtract(a, &out);
+    try testing.expectEqual(@as(usize, 2), d.len);
+    try testing.expectEqual(Rect{ .x = 0, .y = 50, .w = 110, .h = 5 }, d[0]);
+    try testing.expectEqual(Rect{ .x = 100, .y = 0, .w = 10, .h = 50 }, d[1]);
+    var area: i64 = 0;
+    for (d) |r| area += r.area();
+    try testing.expectEqual(b.area() - a.area(), area);
+    // apart: all of it; inside: four bands
+    try testing.expectEqual(Rect{ .x = 0, .y = 0, .w = 100, .h = 50 }, a.subtract(.{ .x = 500, .y = 0, .w = 5, .h = 5 }, &out)[0]);
+    try testing.expectEqual(@as(usize, 4), a.subtract(.{ .x = 10, .y = 10, .w = 5, .h = 5 }, &out).len);
 }

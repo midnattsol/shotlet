@@ -4,6 +4,7 @@
 const std = @import("std");
 const shapes = @import("../shapes.zig");
 const render = @import("../../gfx/render.zig");
+const bands = @import("../bands.zig");
 const doc = @import("../doc.zig");
 const Shape = shapes.Shape;
 const Rect = shapes.Rect;
@@ -33,6 +34,25 @@ pub fn composeRegion(
         margin += s.readMargin();
     }
     const e = Rect.intersect(r.expand(margin), full).?;
+    if (!touches(list, skip, e)) {
+        // nothing drawn there: the picture itself (a fresh capture's
+        // whole layer, 25 million pixels on two 4K monitors), in bands
+        const Copy = struct {
+            layer: []u32,
+            img: []const u32,
+            w: usize,
+            fn band(c: @This(), b: Rect) void {
+                const bw: usize = @intCast(b.w);
+                var y = b.y;
+                while (y < b.bottom()) : (y += 1) {
+                    const at = @as(usize, @intCast(y)) * c.w + @as(usize, @intCast(b.x));
+                    @memcpy(c.layer[at..][0..bw], c.img[at..][0..bw]);
+                }
+            }
+        };
+        bands.run(r, Copy{ .layer = layer, .img = img, .w = w }, Copy.band);
+        return;
+    }
     const in_place = e.eql(full);
     const ew: usize = @intCast(e.w);
     const eh: usize = @intCast(e.h);
@@ -61,6 +81,15 @@ pub fn composeRegion(
         const dst = (@as(usize, @intCast(r.y)) + ry) * w + @as(usize, @intCast(r.x));
         @memcpy(layer[dst..][0..rw], tmp[ty * ew + tx ..][0..rw]);
     }
+}
+
+/// Whether any shape of `list` but `skip` reaches into `e`.
+fn touches(list: []const Shape, skip: ?usize, e: Rect) bool {
+    for (list, 0..) |*s, i| {
+        if (skip == i) continue;
+        if (Rect.intersect(s.bounds().expand(s.readMargin()), e) != null) return true;
+    }
+    return false;
 }
 
 /// Paint `s` over the layer as the new topmost shape: no recompose of

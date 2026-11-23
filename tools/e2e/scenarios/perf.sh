@@ -3,8 +3,9 @@
 # 3840x2160 at 1.5 (primary), everything on the 1.5 one.
 #   perf-owner   each surface driven like a hand, then its loop line
 #                (SHOTLET_LOOP_STATS: frame times and the longest time
-#                away from the compositor) printed; a report, the checks
-#                only that each surface came up
+#                away from the compositor) printed, and checked against
+#                bounds (perf_bounds; in a release build: a debug build
+#                is several times slower)
 # The lines are "loop: TITLE: N frames p50 .. p95 .. max ..; longest away
 # from the socket .. ms" in the compositor log ($OUT/loop.txt).
 
@@ -54,6 +55,28 @@ scenario_perf_owner() {
     perf_scroll
     perf_loops | tee "$OUT/loop.txt" | sed 's/^/  /'
     check "each surface logged its frames" test "$(wc -l <"$OUT/loop.txt")" -ge 8
+    perf_bounds
+}
+
+# perf_bounds: on this layout every surface with 20 frames or more keeps
+# its p95 under PERF_P95 ms (default 20: a 60 Hz frame and a margin for
+# the headless compositor), none stays away from the compositor
+# PERF_AWAY ms (default 500), and the editor's first frame is up within
+# PERF_FIRST ms (default 250)
+perf_bounds() {
+    local line title n p95 away first
+    while IFS= read -r line; do
+        title=$(sed -E 's/.*loop\)?: (.*): [0-9]+ frames.*/\1/' <<<"$line")
+        n=$(grep -oE '[0-9]+ frames' <<<"$line" | cut -d' ' -f1)
+        p95=$(grep -oE 'p95 [0-9.]+' <<<"$line" | cut -d' ' -f2)
+        away=$(grep -oE 'socket [0-9]+' <<<"$line" | cut -d' ' -f2)
+        if [ "${n:-0}" -ge 20 ]; then
+            check "  $title: p95 $p95 ms under ${PERF_P95:-20}" "$E2E_PYTHON" -c "import sys; sys.exit(not $p95 < ${PERF_P95:-20})"
+        fi
+        check "  $title: never $away ms away from the compositor (under ${PERF_AWAY:-500})" test "${away:-99999}" -lt "${PERF_AWAY:-500}"
+    done <"$OUT/loop.txt"
+    first=$(grep -o "first frame on every surface [0-9]* ms" "$SHOTLET_E2E_SHELL_LOG" | head -1 | grep -o "[0-9]*" | head -1)
+    check "  the editor's first frame in ${first:-?} ms (under ${PERF_FIRST:-250})" test "${first:-99999}" -lt "${PERF_FIRST:-250}"
 }
 
 # the editor: an area, a rectangle in it, the pointer over everything,
