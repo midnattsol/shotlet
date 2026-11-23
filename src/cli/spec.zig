@@ -74,8 +74,10 @@ pub const Kind = enum {
     int,
     /// one of `choices`
     choice,
-    /// X,Y,W,H in integers
+    /// X,Y,W,H in integers, W and H from 1 to value.max_side
     rect,
+    /// A,B: two integers, each within `min`..`max`
+    pair,
 };
 
 /// Who sees an option: everyone, developers (help lists them apart, the
@@ -134,9 +136,6 @@ pub const Command = struct {
     args: []const Arg = &.{},
     subs: []const Command = &.{},
     examples: []const Example = &.{},
-    /// its arguments go to it unchecked (internal commands keep their own
-    /// parsing)
-    passthrough: bool = false,
 
     pub fn internal(c: *const Command) bool {
         return c.group == .internal;

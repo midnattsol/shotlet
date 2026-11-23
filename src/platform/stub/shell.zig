@@ -15,6 +15,7 @@ pub const Words = types.Words;
 pub const CaptureInfo = types.CaptureInfo;
 pub const Handoff = types.Handoff;
 pub const HandedCapture = types.HandedCapture;
+pub const Cli = types.Cli;
 
 /// How Settings names the integration and the desktop's shortcuts here.
 pub fn words() Words {
@@ -68,9 +69,9 @@ pub fn loadHanded(gpa: std.mem.Allocator, env: Env, args: HandedCapture) error{U
 pub fn finishPendingSetup(env: Env) void {
     _ = env;
 }
-/// The integration's command (`shotlet gnome-integration SUB ARGS`).
-pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const []const u8) error{Unavailable}!void {
-    _ = .{ gpa, env, sub, rest };
+/// The integration's command (`shotlet gnome-integration ...`).
+pub fn runCli(gpa: std.mem.Allocator, env: Env, cmd: Cli) error{Unavailable}!void {
+    _ = .{ gpa, env, cmd };
     return error.Unavailable;
 }
 /// Where its shortcut settings are (into `buf`), when it runs.

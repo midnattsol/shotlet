@@ -29,6 +29,16 @@ pub fn write(w: W) !void {
 }
 
 const files =
+    \\.SH "EXIT STATUS"
+    \\.TP
+    \\.B 0
+    \\The command did what it was asked.
+    \\.TP
+    \\.B 1
+    \\It failed; standard error says why, as "shotlet COMMAND: message".
+    \\.TP
+    \\.B 2
+    \\The command line is wrong (an unknown command or option, a bad value).
     \\.SH FILES
     \\.TP
     \\.I $XDG_CONFIG_HOME/shotlet/config

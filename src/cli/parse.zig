@@ -39,13 +39,14 @@ pub const Opt = struct {
     value: ?[:0]const u8,
 };
 
+/// A command line the table accepted: read its values here, typed (they
+/// were checked against the table, so a value of the right kind is there
+/// whenever the option was given).
 pub const Parsed = struct {
     chain: Chain,
     positionals: []const [:0]const u8 = &.{},
+    /// the options, in the order given
     opts: []const Opt = &.{},
-    /// the positionals, then the options as `--long [value]` in their
-    /// order; a passthrough command's arguments as given
-    rest: []const [:0]const u8,
     /// started as `shotlet --from-shell ...` (the GNOME extension)
     shell_launch: bool = false,
 
@@ -54,17 +55,52 @@ pub const Parsed = struct {
     }
 
     pub fn flag(p: *const Parsed, long: []const u8) bool {
-        for (p.opts) |o| if (std.mem.eql(u8, o.option.long, long)) return true;
+        for (p.opts) |o| if (eql(o.option.long, long)) return true;
         return false;
     }
 
     /// The option's last value.
     pub fn value(p: *const Parsed, long: []const u8) ?[:0]const u8 {
         var v: ?[:0]const u8 = null;
-        for (p.opts) |o| if (std.mem.eql(u8, o.option.long, long)) {
+        for (p.opts) |o| if (eql(o.option.long, long)) {
             v = o.value;
         };
         return v;
+    }
+
+    /// Of the options `longs` names, the one given last (`--gif --mp4`:
+    /// mp4's).
+    pub fn last(p: *const Parsed, longs: []const []const u8) ?Opt {
+        var found: ?Opt = null;
+        for (p.opts) |o| for (longs) |l| if (eql(o.option.long, l)) {
+            found = o;
+        };
+        return found;
+    }
+
+    /// An `int` option's value as `T`.
+    pub fn int(p: *const Parsed, comptime T: type, long: []const u8) ?T {
+        return std.fmt.parseInt(T, p.value(long) orelse return null, 10) catch null;
+    }
+
+    /// A `rect` option's X,Y,W,H.
+    pub fn rect(p: *const Parsed, long: []const u8) ?[4]i32 {
+        return value_mod.rect(p.value(long) orelse return null);
+    }
+
+    /// A `pair` option's A,B as `T`.
+    pub fn pair(p: *const Parsed, comptime T: type, long: []const u8) ?[2]T {
+        return value_mod.pair(T, p.value(long) orelse return null);
+    }
+
+    /// The `i`th positional argument.
+    pub fn arg(p: *const Parsed, i: usize) ?[:0]const u8 {
+        return if (i < p.positionals.len) p.positionals[i] else null;
+    }
+
+    /// An `int` positional as `T`.
+    pub fn argInt(p: *const Parsed, comptime T: type, i: usize) ?T {
+        return std.fmt.parseInt(T, p.arg(i) orelse return null, 10) catch null;
     }
 };
 
@@ -97,7 +133,7 @@ const top_options = [_][]const u8{ "--help", "--version", "--daemon" };
 
 /// `args` without the program name. Errors only when out of memory.
 pub fn parse(arena: std.mem.Allocator, args: []const [:0]const u8) !Outcome {
-    if (args.len == 0) return .{ .run = .{ .chain = .of(commands.default), .rest = &.{} } };
+    if (args.len == 0) return .{ .run = .{ .chain = .of(commands.default) } };
     const first = args[0];
     if (isHelp(first)) return .overview;
     if (eql(first, "--version") or eql(first, "-V")) return .version;
@@ -153,7 +189,6 @@ fn unknownIn(chain: Chain, word: []const u8) Failure {
 }
 
 fn command(arena: std.mem.Allocator, chain: Chain, args: []const [:0]const u8, shell: bool) !Outcome {
-    if (chain.leaf().?.passthrough) return .{ .run = .{ .chain = chain, .rest = args } };
     var st: State = .{ .arena = arena, .chain = chain };
     var i: usize = 0;
     while (i < args.len) : (i += 1) {
@@ -186,7 +221,8 @@ const State = struct {
         }
         if (isHelp(a)) return .{ .help = st.chain };
         if (std.mem.startsWith(u8, a, "--")) return st.long(args, i);
-        if (a.len > 1 and a[0] == '-') return st.short(args, i);
+        // "-1" is a number (a ready fd of none), not an option
+        if (a.len > 1 and a[0] == '-' and !isNumber(a)) return st.short(args, i);
         return st.positional(a);
     }
 
@@ -273,17 +309,10 @@ const State = struct {
         for (st.leaf().args, 0..) |arg, i| {
             if (arg.required and i >= st.positionals.items.len) return st.fail(.missing_arg, arg.name);
         }
-        var rest: std.ArrayList([:0]const u8) = .empty;
-        try rest.appendSlice(st.arena, st.positionals.items);
-        for (st.opts.items) |o| {
-            try rest.append(st.arena, try std.fmt.allocPrintSentinel(st.arena, "--{s}", .{o.option.long}, 0));
-            if (o.value) |v| try rest.append(st.arena, v);
-        }
         return .{ .run = .{
             .chain = st.chain,
             .positionals = st.positionals.items,
             .opts = st.opts.items,
-            .rest = rest.items,
             .shell_launch = shell,
         } };
     }
@@ -294,6 +323,11 @@ fn argAt(c: *const Command, i: usize) ?*const spec.Arg {
     if (i < c.args.len) return &c.args[i];
     if (c.args.len > 0 and c.args[c.args.len - 1].repeat) return &c.args[c.args.len - 1];
     return null;
+}
+
+fn isNumber(a: []const u8) bool {
+    _ = std.fmt.parseInt(i64, a, 10) catch return false;
+    return true;
 }
 
 fn eql(a: []const u8, b: []const u8) bool {

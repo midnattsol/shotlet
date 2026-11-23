@@ -1,11 +1,19 @@
 //! The table's editing, history, settings and integration commands.
 
 const spec = @import("spec.zig");
+const mode = @import("../app/modes/mode.zig");
 const Command = spec.Command;
 
 const smoke: spec.Option = .{ .long = "smoke", .value = "MS", .kind = .int, .vis = .dev, .help = "Close by itself after MS milliseconds (leak checks)" };
 
-const shortcut_words = [_][]const u8{ "area", "fullscreen", "screens", "previous", "window", "scroll", "timer", "thumbnail", "none" };
+/// The shortcuts' names (app/modes/mode.zig), then "none".
+const shortcut_words = blk: {
+    var words: [mode.shortcuts.len + 1][]const u8 = undefined;
+    for (mode.shortcuts, words[0..mode.shortcuts.len]) |s, *w| w.* = s.name;
+    words[mode.shortcuts.len] = "none";
+    const final = words;
+    break :blk final;
+};
 
 const gnome_subs = [_]Command{
     .{
@@ -75,7 +83,7 @@ pub const list = [_]Command{
             .{ .name = "FILE", .kind = .file, .required = true, .help = "The image to open" },
             .{ .name = "ID", .hidden = true, .help = "With a history directory as FILE: edit that capture again" },
         },
-        .options = &.{.{ .long = "pin-fd", .value = "FD", .vis = .hidden, .help = "A pin's Annotate: what is copied, saved or pinned goes back to it through FD" }},
+        .options = &.{.{ .long = "pin-fd", .value = "FD", .kind = .int, .min = 3, .max = 1 << 20, .vis = .hidden, .help = "A pin's Annotate: what is copied, saved or pinned goes back to it through FD" }},
         .examples = &.{.{ .cmd = "edit ~/Pictures/shot.png", .what = "Annotate an image" }},
     },
     .{
@@ -86,7 +94,7 @@ pub const list = [_]Command{
         .usage = &.{"pin [FILE]"},
         .description = "Shows the image at 1:1 in a frameless window: scroll (or - = 0) to zoom, drag to move, Esc to close.",
         .args = &.{.{ .name = "FILE", .kind = .file, .help = "The image to pin (PNG, JPEG, WebP); without it, the clipboard's image" }},
-        .options = &.{.{ .long = "at", .value = "X,Y", .vis = .hidden, .help = "Centre it there (logical pixels): where the capture was" }},
+        .options = &.{.{ .long = "at", .value = "X,Y", .kind = .pair, .min = -(1 << 31), .max = (1 << 31) - 1, .vis = .hidden, .help = "Centre it there (logical pixels): where the capture was" }},
         .examples = &.{
             .{ .cmd = "pin", .what = "Pin the image in the clipboard" },
             .{ .cmd = "pin diagram.png", .what = "Pin a file" },

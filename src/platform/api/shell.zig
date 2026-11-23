@@ -44,6 +44,19 @@ pub const Words = struct {
     custom_shortcuts: []const u8 = "Your desktop\u{2019}s keyboard settings",
 };
 
+/// `shotlet gnome-integration ...` as parsed: what the integration's
+/// command does (src/cli/cmds_more.zig has its words).
+pub const Cli = union(enum) {
+    status,
+    install: Install,
+    uninstall,
+    /// the KEY... words (a mode name first, or none: the area's key)
+    shortcut: []const []const u8,
+
+    /// Whether install gives the desktop's screenshot key to Shotlet.
+    pub const Install = enum { ask, move_shortcut, keep_shortcut };
+};
+
 /// The answer to asking the integration to take a capture itself.
 pub const Handoff = enum { started, declined, unavailable };
 

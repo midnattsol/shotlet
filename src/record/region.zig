@@ -31,15 +31,6 @@ pub const Rect = struct {
     pub fn area(self: Rect) i64 {
         return @as(i64, self.w) * self.h;
     }
-
-    /// "x,y,w,h"
-    pub fn parse(s: []const u8) !Rect {
-        var it = std.mem.splitScalar(u8, s, ',');
-        var v: [4]i32 = undefined;
-        for (&v) |*x| x.* = try std.fmt.parseInt(i32, it.next() orelse return error.BadRegion, 10);
-        if (it.next() != null or v[2] <= 0 or v[3] <= 0 or v[2] > 1 << 15 or v[3] > 1 << 15) return error.BadRegion;
-        return .{ .x = v[0], .y = v[1], .w = v[2], .h = v[3] };
-    }
 };
 
 /// The pixels of a `fw` x `fh` frame showing logical `mon` that hold
@@ -107,11 +98,7 @@ test "sizes for the encoders" {
     try std.testing.expectEqual([2]u32{ 300, 200 }, gifSize(300, 200, 800));
 }
 
-test "regions parse and pick their monitor" {
-    const r = try Rect.parse("100,-20,300,200");
-    try std.testing.expectEqual(Rect{ .x = 100, .y = -20, .w = 300, .h = 200 }, r);
-    try std.testing.expectError(error.BadRegion, Rect.parse("1,2,0,4"));
-    try std.testing.expectError(error.BadRegion, Rect.parse("1,2,3"));
+test "a region picks its monitor" {
     const mons = [_]Rect{ .{ .x = 0, .y = 0, .w = 1600, .h = 900 }, .{ .x = 1600, .y = 0, .w = 1280, .h = 720 } };
     try std.testing.expectEqual(@as(?usize, 1), bestMonitor(.{ .x = 1500, .y = 10, .w = 400, .h = 100 }, &mons));
 }

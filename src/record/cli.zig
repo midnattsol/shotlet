@@ -1,16 +1,8 @@
-//! `shotlet record`: pick an area (or the whole screen) and record it.
-//!
-//!     shotlet record                  pick an area, then record
-//!     shotlet record --full           the whole monitor under the pointer
-//!     shotlet record --region X,Y,W,H an area (logical pixels), no picker
-//!     shotlet record --stop | --pause | --resume | --discard
-//!                                     control the recording under way
-//!     options: --gif | --mp4 | --format mp4|gif, --fps N, --mic, --system-audio, --clicks,
-//!              --keys, --no-countdown, --seconds N (stop after),
-//!              --out FILE, --no-control (no floating control)
-//!
-//! While a recording runs, `shotlet record` again stops it (so one
-//! shortcut starts and stops).
+//! `shotlet record`: pick an area (or the whole screen) and record it,
+//! or control the recording under way (--stop, --pause, --resume,
+//! --discard). src/cli/cmds_record.zig lists the options; the parser
+//! checked them. While a recording runs, `shotlet record` again stops
+//! it (so one shortcut starts and stops).
 
 const std = @import("std");
 const desktop = @import("../platform/api.zig").desktop;
@@ -27,6 +19,8 @@ const config = @import("../app/config.zig");
 const shot = @import("../app/shot.zig");
 const text = @import("../gfx/text.zig");
 const theme = @import("../ui/theme.zig");
+const out = @import("../cli/out.zig");
+const Parsed = @import("../cli/parse.zig").Parsed;
 const Env = env_mod.Env;
 
 pub const Args = struct {
@@ -35,79 +29,44 @@ pub const Args = struct {
     seconds: ?u32 = null,
     out: ?[]const u8 = null,
     control: bool = true,
-    /// a command for the running recording
+    /// a command for the running recording ("stop", "pause", ...)
     command: ?[]const u8 = null,
-    /// the option `parse` did not know, for the caller's message
-    unknown: ?[]const u8 = null,
 };
 
-/// Parse the options into `a` and the settings they override.
-pub fn parse(args: []const []const u8, a: *Args, set: *settings_mod.Settings) !void {
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-        const next = if (i + 1 < args.len) args[i + 1] else "";
-        if (eq(arg, "--region")) {
-            a.area = try region.Rect.parse(next);
-            i += 1;
-        } else if (eq(arg, "--full")) {
-            a.full = true;
-        } else if (eq(arg, "--seconds")) {
-            a.seconds = try std.fmt.parseInt(u32, next, 10);
-            i += 1;
-        } else if (eq(arg, "--out")) {
-            a.out = next;
-            i += 1;
-        } else if (eq(arg, "--fps")) {
-            set.apply(if (set.format == .gif) "record_gif_fps" else "record_fps", next);
-            i += 1;
-        } else if (eq(arg, "--format")) {
-            set.format = std.meta.stringToEnum(@TypeOf(set.format), next) orelse return error.BadArgs;
-            i += 1;
-        } else if (eq(arg, "--gif")) {
-            set.format = .gif;
-        } else if (eq(arg, "--mp4")) {
-            set.format = .mp4;
-        } else if (eq(arg, "--mic")) {
-            set.mic = true;
-        } else if (eq(arg, "--system-audio")) {
-            set.system_audio = true;
-        } else if (eq(arg, "--clicks")) {
-            set.clicks = true;
-        } else if (eq(arg, "--keys")) {
-            set.keys = true;
-        } else if (eq(arg, "--no-countdown")) {
-            set.countdown = 0;
-        } else if (eq(arg, "--no-control")) {
-            a.control = false;
-        } else if (eq(arg, "--stop") or eq(arg, "--pause") or eq(arg, "--resume") or eq(arg, "--discard")) {
-            a.command = arg[2..];
-        } else {
-            a.unknown = arg;
-            return error.BadArgs;
-        }
-    }
-}
-
-fn eq(a: []const u8, b: []const u8) bool {
-    return std.mem.eql(u8, a, b);
-}
-
-/// `shotlet record ARGS...`
-pub fn main(gpa: std.mem.Allocator, env: Env, argv: []const []const u8) !void {
-    var set = settings_mod.load(gpa, env.home);
-    var a: Args = .{};
-    parse(argv, &a, &set) catch |err| {
-        if (a.unknown) |opt| std.log.warn("record: unknown option {s}", .{opt});
-        return err;
+/// The command line's options (src/cli/cmds_record.zig) as `Args` and
+/// the settings they override.
+pub fn options(p: *const Parsed, set: *settings_mod.Settings) Args {
+    var a: Args = .{
+        .full = p.flag("full"),
+        .seconds = p.int(u32, "seconds"),
+        .out = p.value("out"),
+        .control = !p.flag("no-control"),
     };
+    if (p.rect("region")) |r| a.area = .{ .x = r[0], .y = r[1], .w = r[2], .h = r[3] };
+    if (p.last(&.{ "stop", "pause", "resume", "discard" })) |o| a.command = o.option.long;
+    if (p.last(&.{ "format", "gif", "mp4" })) |o| set.format = if (o.value) |v|
+        std.meta.stringToEnum(@TypeOf(set.format), v).?
+    else
+        std.meta.stringToEnum(@TypeOf(set.format), o.option.long).?;
+    // the format is known by now, whatever the order: --fps is its rate
+    if (p.value("fps")) |v| set.apply(if (set.format == .gif) "record_gif_fps" else "record_fps", v);
+    if (p.flag("mic")) set.mic = true;
+    if (p.flag("system-audio")) set.system_audio = true;
+    if (p.flag("clicks")) set.clicks = true;
+    if (p.flag("keys")) set.keys = true;
+    if (p.flag("no-countdown")) set.countdown = 0;
+    return a;
+}
+
+/// `shotlet record [OPTION...]`
+pub fn main(gpa: std.mem.Allocator, env: Env, p: *const Parsed) !void {
+    var set = settings_mod.load(gpa, env.home);
+    const a = options(p, &set);
     var ans: [64]u8 = undefined;
     if (a.command) |c| {
-        const r = ctlsock.send(env.runtime_dir, env.session.tag(), c, &ans) orelse {
-            std.debug.print("no recording under way\n", .{});
-            return error.NotRecording;
-        };
-        std.debug.print("{s}\n", .{r});
+        const r = ctlsock.send(env.runtime_dir, env.session.tag(), c, &ans) orelse
+            out.fail(.failure, "no recording under way", .{});
+        out.say("{s}\n", .{r});
         return;
     }
     // the same shortcut again: stop the recording under way
@@ -149,7 +108,7 @@ fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: settings_mod.Settings
     var set = set0;
     text.init(gpa);
     std.log.info("record: picker up", .{});
-    const res = picker.pick(gpa, env, cap, &set, overlays, appearance(gpa, env));
+    const res = picker.pick(gpa, env, cap, &set, overlays, theme.load(gpa, env, 300));
     text.deinit();
     const area = switch (try res) {
         .area => |r| r,
@@ -161,13 +120,6 @@ fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: settings_mod.Settings
     saveChoices(gpa, env.home, &set0, &set);
     std.log.info("record: picked {d},{d} {d}x{d}", .{ area.x, area.y, area.w, area.h });
     try run_mod.run(gpa, env, a, set, area);
-}
-
-/// The desktop's light or dark look and accent, for the picker.
-fn appearance(gpa: std.mem.Allocator, env: Env) theme.Theme {
-    var bus = desktop.connectBrief(gpa, env) catch return theme.Theme.get(true, null);
-    defer bus.deinit();
-    return theme.of(theme.readPrefs(&bus, 300));
 }
 
 /// Remember the bar's choices for next time.
@@ -184,19 +136,36 @@ fn saveChoices(gpa: std.mem.Allocator, home: []const u8, old: *const settings_mo
     if (old.keys != new.keys) settings_mod.save(gpa, home, "record_keys", tf(new.keys));
 }
 
-test "record options parse" {
-    var a: Args = .{};
+fn parsed(arena: std.mem.Allocator, args: []const [:0]const u8) !Parsed {
+    return (try @import("../cli/parse.zig").parse(arena, args)).run;
+}
+
+test "record options read from the command line" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
     var s: settings_mod.Settings = .{};
-    try parse(&.{ "--region", "10,20,300,200", "--gif", "--fps", "12", "--seconds", "2", "--no-countdown", "--keys" }, &a, &s);
+    const a = options(&try parsed(arena.allocator(), &.{ "record", "--region", "10,20,300,200", "--gif", "--fps", "12", "--seconds", "2", "--no-countdown", "--keys" }), &s);
     try std.testing.expectEqual(region.Rect{ .x = 10, .y = 20, .w = 300, .h = 200 }, a.area.?);
     try std.testing.expectEqual(@as(u32, 12), s.gif_fps);
+    try std.testing.expectEqual(@as(?u32, 2), a.seconds);
     try std.testing.expectEqual(@as(u32, 0), s.countdown);
-    try std.testing.expect(s.keys and !s.clicks);
-    var b: Args = .{};
-    try parse(&.{"--stop"}, &b, &s);
+    try std.testing.expect(s.keys and !s.clicks and a.control and !a.full);
+    const b = options(&try parsed(arena.allocator(), &.{ "record", "--pause", "--stop" }), &s);
     try std.testing.expectEqualStrings("stop", b.command.?);
-    try std.testing.expectError(error.BadArgs, parse(&.{"--bogus"}, &b, &s));
-    try std.testing.expectEqualStrings("--bogus", b.unknown.?);
-    try parse(&.{ "--format", "mp4" }, &b, &s);
+    _ = options(&try parsed(arena.allocator(), &.{ "record", "--gif", "--format", "mp4" }), &s);
     try std.testing.expectEqual(.mp4, s.format);
+}
+
+test "record --fps is the chosen format's rate, before or after it" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    var s: settings_mod.Settings = .{};
+    _ = options(&try parsed(arena.allocator(), &.{ "record", "--fps", "20", "--gif" }), &s);
+    try std.testing.expectEqual(.gif, s.format);
+    try std.testing.expectEqual(@as(u32, 20), s.gif_fps);
+    try std.testing.expectEqual(@as(u32, 30), s.fps);
+    var m: settings_mod.Settings = .{ .format = .gif };
+    _ = options(&try parsed(arena.allocator(), &.{ "record", "--fps", "50", "--format", "mp4" }), &m);
+    try std.testing.expectEqual(@as(u32, 50), m.fps);
+    try std.testing.expectEqual(@as(u32, 15), m.gif_fps);
 }
