@@ -6,6 +6,7 @@ const dbus = @import("dbus.zig");
 const portal = @import("portal.zig");
 const png = @import("../../gfx/png.zig");
 const sys = @import("sys.zig");
+const dump = @import("window/dump.zig");
 const Env = @import("../../app/env.zig").Env;
 const pw = @import("pw.zig");
 const capture = @import("../../app/capture.zig");
@@ -116,7 +117,7 @@ fn testFont(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void 
         const out = try fontLines(gpa, args[0]);
         defer gpa.free(out);
         if (args.len >= 2) {
-            try sys.writeFile(args[1], out);
+            try dump.write(args[1], out);
         } else try writeDebug(gpa, env, "shotlet-font.png", out);
         return;
     }
@@ -179,6 +180,6 @@ fn testDecode(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !voi
 fn writeDebug(gpa: std.mem.Allocator, env: Env, name: []const u8, data: []const u8) !void {
     const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ env.runtime_dir, name });
     defer gpa.free(path);
-    try @import("window/dump.zig").write(path, data);
+    try dump.write(path, data);
     std.debug.print("wrote {s}\n", .{path});
 }
