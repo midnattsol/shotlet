@@ -11,14 +11,14 @@ const window = @import("../window.zig");
 const types = @import("../../api/desktop.zig");
 
 /// Ask where to save; with `over`, the dialog belongs to that window.
-pub fn askSavePath(gpa: std.mem.Allocator, conn: *dbus.Connection, opts: types.SaveOptions, over: ?*window.Window) !types.Choice {
+pub fn askSavePath(gpa: std.mem.Allocator, bus: *dbus.Connection, opts: types.SaveOptions, over: ?*window.Window) !types.Choice {
     var buf: [256]u8 = undefined;
     const parent: []const u8 = if (over) |win| win.parentHandle(&buf) catch |err| blk: {
         std.log.info("save as: no parent for the dialog ({t})", .{err});
         break :blk "";
     } else "";
     defer if (over) |win| win.unexport();
-    var req = try portal.beginSaveFile(gpa, conn, .{
+    var req = try portal.beginSaveFile(gpa, bus, .{
         .title = opts.title,
         .current_name = opts.current_name,
         .current_folder = opts.current_folder,
@@ -26,9 +26,9 @@ pub fn askSavePath(gpa: std.mem.Allocator, conn: *dbus.Connection, opts: types.S
     });
     defer req.deinit(gpa);
     if (over) |win| {
-        try (OverWindow{ .gpa = gpa, .conn = conn, .win = win }).wait(&req);
+        try (OverWindow{ .gpa = gpa, .bus = bus, .win = win }).wait(&req);
     } else {
-        try req.wait(gpa, conn, portal.timeout_file_chooser_ms);
+        try req.wait(gpa, bus, portal.timeout_file_chooser_ms);
     }
     return switch (try portal.savedPath(gpa, &req)) {
         .granted => |p| .{ .chosen = p },
@@ -39,18 +39,15 @@ pub fn askSavePath(gpa: std.mem.Allocator, conn: *dbus.Connection, opts: types.S
 
 const OverWindow = struct {
     gpa: std.mem.Allocator,
-    conn: *dbus.Connection,
+    bus: *dbus.Connection,
     win: *window.Window,
 
     /// Bus messages for the request and Wayland events for the window
     /// until the dialog is answered (or the portal never takes it).
     pub fn wait(self: OverWindow, req: *portal.Request) !void {
-        const start = sys.monoMs();
-        while (!req.done()) {
-            try self.takeMessages(req);
-            if (req.done() or expired(self.conn, req, start)) return;
+        while ((try req.step(self.gpa, self.bus, portal.timeout_file_chooser_ms)) == null) {
             var fds = [_]sys.pollfd{
-                .{ .fd = self.conn.fd, .events = sys.POLL.IN, .revents = 0 },
+                .{ .fd = self.bus.fd, .events = sys.POLL.IN, .revents = 0 },
                 .{ .fd = self.win.conn.fd, .events = sys.POLL.IN, .revents = 0 },
             };
             _ = try sys.poll(&fds, self.win.pollTimeoutMs(250));
@@ -58,30 +55,7 @@ const OverWindow = struct {
             dropInput(self.win);
         }
     }
-
-    fn takeMessages(self: OverWindow, req: *portal.Request) !void {
-        while (try self.conn.nextMessageDeadline(sys.monoMs())) |m| {
-            var msg = m;
-            const kept = req.handle(self.gpa, &msg) catch false;
-            if (!kept) msg.deinit(self.gpa);
-            if (req.done()) return;
-        }
-    }
 };
-
-/// The portal must take the call within timeout_quick_ms, and the
-/// person answer within timeout_file_chooser_ms (as Request.wait).
-fn expired(conn: *dbus.Connection, req: *portal.Request, start: i64) bool {
-    const age = sys.monoMs() - start;
-    if (!req.got_reply and age > portal.timeout_quick_ms) {
-        std.log.warn("save as: no reply from the portal; giving up", .{});
-        req.outcome = .unavailable;
-    } else if (age > portal.timeout_file_chooser_ms) {
-        req.close(conn);
-        req.outcome = .timeout;
-    }
-    return req.done();
-}
 
 /// What reaches the window while the dialog is up is not for it; a
 /// resize is kept for when it is back.

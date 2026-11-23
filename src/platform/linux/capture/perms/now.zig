@@ -8,6 +8,7 @@ const dbus = @import("../../dbus.zig");
 const Env = @import("../../../../app/env.zig").Env;
 const gnome = @import("../../gnome.zig");
 const direct = @import("../direct.zig");
+const switches = @import("../../../api/switches.zig");
 
 pub const Now = union(enum) {
     gnome,
@@ -28,7 +29,7 @@ pub const Now = union(enum) {
 
 pub fn current(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) Now {
     if (gnome.integrationActive(bus)) return .gnome;
-    if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
+    if (!switches.get().no_direct) {
         if (direct.probe(gpa, env.runtime_dir, env.session.display, bus)) |m| return .{ .direct = m };
     }
     return .portal;

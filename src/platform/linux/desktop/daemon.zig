@@ -13,6 +13,7 @@ const env_mod = @import("../../../app/env.zig");
 const statefile = @import("../../../app/statefile.zig");
 const proc = @import("../proc.zig");
 const gnome = @import("../gnome.zig");
+const shell1 = @import("../gnome/shell1.zig");
 const Env = env_mod.Env;
 
 const tray_mod = @import("tray.zig");
@@ -20,16 +21,16 @@ const tray_mod = @import("tray.zig");
 pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     if (!foreground) detach(env);
 
-    var conn = try dbus.Connection.connectSession(gpa, env.session.bus);
-    defer conn.deinit();
+    var bus = try dbus.Connection.connectSession(gpa, env.session.bus);
+    defer bus.deinit();
 
     // single instance: lose the name race -> another daemon already runs
-    if (!(conn.requestName(@import("../../../app_id.zig").app_id) catch true)) {
+    if (!(bus.requestName(@import("../../../app_id.zig").app_id) catch true)) {
         std.log.warn("shotlet daemon is already running", .{});
         return;
     }
-    portal.registerApp(gpa, &conn);
-    if (gnome.isGnome() and gnome.extensionActive(&conn)) gnome.finishPendingSetup(env);
+    portal.registerApp(gpa, &bus);
+    if (gnome.integrationActive(&bus)) gnome.finishPendingSetup(env);
 
     const icon22 = try tray_mod.drawIcon(gpa, 22);
     defer gpa.free(icon22);
@@ -39,11 +40,11 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
         .{ .width = 22, .height = 22, .argb = icon22 },
         .{ .width = 44, .height = 44, .argb = icon44 },
     };
-    var tray = try tray_mod.Tray.init(gpa, &conn, &icons);
+    var tray = try tray_mod.Tray.init(gpa, &bus, &icons);
 
     std.log.info("shotlet daemon running", .{});
     var log = LogFile.init(env, foreground);
-    try serve(gpa, env, &conn, &tray, &log);
+    try serve(gpa, env, &bus, &tray, &log);
 }
 
 /// Double fork + setsid: the shell gets control back and the daemon can
@@ -59,11 +60,11 @@ fn detach(env: Env) void {
 }
 
 /// The bus loop: tray calls until Quit or the session bus goes away.
-fn serve(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, tray: *tray_mod.Tray, log: *LogFile) !void {
+fn serve(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, tray: *tray_mod.Tray, log: *LogFile) !void {
     while (true) {
         // wake up now and then to keep the log bounded: children write to
         // it through the stderr they inherit
-        const maybe = conn.nextMessageDeadline(sys.monoMs() + 60_000) catch |err| {
+        const maybe = bus.nextMessageDeadline(sys.monoMs() + 60_000) catch |err| {
             if (err == error.Disconnected) {
                 std.log.warn("session bus closed; exiting daemon", .{});
                 return;
@@ -80,25 +81,22 @@ fn serve(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, tray: *tray_m
         const action = tray.handleMessage(&msg) catch |err| blk: {
             std.log.warn("tray message error: {t}", .{err});
             if (msg.type == .method_call) {
-                conn.replyError(&msg, "org.freedesktop.DBus.Error.InvalidArgs", "malformed arguments") catch {};
+                bus.replyError(&msg, "org.freedesktop.DBus.Error.InvalidArgs", "malformed arguments") catch {};
             }
             break :blk .none;
         };
         if (action == .quit) return;
-        perform(gpa, env, conn, action);
+        perform(env, bus, action);
     }
 }
 
 /// Starts what a tray menu item asked for.
-fn perform(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, action: tray_mod.MenuAction) void {
+fn perform(env: Env, bus: *dbus.Connection, action: tray_mod.MenuAction) void {
     switch (action) {
         // the GNOME integration captures inside the shell (no prompt)
         // and starts the editor itself; else a capture child as usual
         .capture => {
-            const how: gnome.CaptureRequest = if (gnome.isGnome() and gnome.extensionActive(conn))
-                gnome.requestCapture(gpa, conn)
-            else
-                .unavailable;
+            const how: shell1.CaptureRequest = if (gnome.integrationActive(bus)) shell1.capture(bus) else .unavailable;
             if (how == .unavailable) spawnChild(env, "shot");
         },
         // `shotlet record` stops the recording under way, if any

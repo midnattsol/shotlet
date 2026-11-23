@@ -20,6 +20,7 @@ const path = @import("capture/path.zig");
 const screencast = @import("capture/screencast.zig").screencast;
 const winrects = @import("capture/winrects.zig");
 const reset = @import("capture/perms/reset.zig");
+const switches = @import("../api/switches.zig");
 
 pub const Path = path.Path;
 /// Remember how the last capture went.
@@ -37,7 +38,7 @@ pub fn warmup() void {
 /// person cancelled a dialog (or nobody answered it): stop quietly.
 pub fn screens(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, cfg: *config.Config) !?capture.Capture {
     // the desktop's own capture interface: no consent dialog
-    if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
+    if (!switches.get().no_direct) {
         if (tryDirect(gpa, env, bus)) |cap| return cap;
     }
     if (pw.available()) {

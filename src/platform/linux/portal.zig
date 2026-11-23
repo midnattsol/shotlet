@@ -28,6 +28,7 @@ pub const object_path = request.object_path;
 pub const watch = request.watch;
 pub const Request = request.Request;
 pub const call = request.call;
+pub const notGranted = request.notGranted;
 
 pub const screenshot = screenshot_mod.screenshot;
 pub const beginScreenshot = screenshot_mod.beginScreenshot;
@@ -38,7 +39,6 @@ pub const app_id = app_scope.app_id;
 pub const connectApp = app_scope.connectApp;
 pub const Identity = app_scope.Identity;
 pub const registerApp = app_scope.registerApp;
-pub const registryMissing = app_scope.registryMissing;
 pub const ensureAppScope = app_scope.ensureAppScope;
 
 pub const notify = notify_mod.notify;
@@ -50,17 +50,18 @@ pub const beginChooseFolder = file_chooser.beginChooseFolder;
 pub const beginSaveFile = file_chooser.beginSaveFile;
 pub const savedPath = file_chooser.savedPath;
 pub const chosenPath = file_chooser.chosenPath;
-pub const chooseFolder = file_chooser.chooseFolder;
 
 pub const Stream = screencast.Stream;
-pub const ScStart = screencast.ScStart;
-pub const ScreenCastSession = screencast.ScreenCastSession;
+pub const ScreenCastSession = screencast.Session;
+pub const SelectOptions = screencast.SelectOptions;
+pub const openScreenCast = screencast.open;
+pub const availableCursorModes = screencast.availableCursorModes;
+pub const cursor_hidden = screencast.cursor_hidden;
+pub const cursor_embedded = screencast.cursor_embedded;
+/// The stages open() runs, one by one (portal_test.zig).
 pub const scCreateSession = screencast.scCreateSession;
-pub const scOpenRemote = screencast.scOpenRemote;
 pub const scSelectAndStart = screencast.scSelectAndStart;
-pub const parseStartResults = screencast.parseStartResults;
-pub const openScreenCast = screencast.openScreenCast;
-pub const closeSession = screencast.closeSession;
+pub const scOpenRemote = screencast.scOpenRemote;
 
 comptime {
     _ = request;
@@ -69,4 +70,5 @@ comptime {
     _ = screencast;
     _ = app_scope;
     _ = notify_mod;
+    _ = @import("uri.zig");
 }

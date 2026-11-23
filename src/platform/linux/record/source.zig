@@ -7,10 +7,11 @@ const dbus = @import("../dbus.zig");
 const pwstream = @import("../pwstream.zig");
 const config = @import("../../../app/config.zig");
 const gnome = @import("../gnome.zig");
+const shell1 = @import("../gnome/shell1.zig");
 const portal = @import("../portal.zig");
 const region = @import("../../../record/region.zig");
-const shellrec = @import("../gnome/shellrec.zig");
-const portal_rec = @import("portal_rec.zig");
+const switches = @import("../../api/switches.zig");
+const rememberToken = @import("../capture/screencast.zig").rememberToken;
 
 pub const Want = @import("../../api/record.zig").Want;
 
@@ -21,7 +22,7 @@ pub const Source = struct {
     /// the stream's logical rectangle, and the part of it to keep
     stream_rect: region.Rect,
     crop: ?region.Rect,
-    session: ?portal_rec.Session = null,
+    session: ?portal.ScreenCastSession = null,
 
     pub fn label(self: *const Source) []const u8 {
         return switch (self.kind) {
@@ -34,7 +35,7 @@ pub const Source = struct {
     pub fn close(self: *Source, gpa: std.mem.Allocator, bus: *dbus.Connection) void {
         self.cap.close(gpa);
         switch (self.kind) {
-            .shell => shellrec.stop(bus),
+            .shell => shell1.stopRecording(bus),
             .portal => if (self.session) |*s| s.close(gpa, bus),
         }
     }
@@ -43,15 +44,15 @@ pub const Source = struct {
 pub const Opened = union(enum) { ok: Source, cancelled, failed: anyerror };
 
 pub fn open(gpa: std.mem.Allocator, bus: *dbus.Connection, home: []const u8, cfg: *config.Config, want: Want) Opened {
-    if (std.c.getenv("SHOTLET_NO_SHELL_RECORD") == null and gnome.isGnome() and shellrec.available(gpa, bus)) {
+    if (!switches.get().no_shell_record and gnome.isGnome() and shell1.supports(bus, .recording)) {
         if (openShell(gpa, bus, want)) |s| return .{ .ok = s } else |err| std.log.info("recording: GNOME integration: {t}; the portal", .{err});
     }
     return openPortal(gpa, bus, home, cfg, want) catch |err| .{ .failed = err };
 }
 
 fn openShell(gpa: std.mem.Allocator, bus: *dbus.Connection, want: Want) !Source {
-    const node = try shellrec.start(gpa, bus, .{ .area = want.area, .clicks = want.clicks, .keys = want.keys });
-    errdefer shellrec.stop(bus);
+    const node = try shell1.startRecording(bus, .{ .area = want.area, .clicks = want.clicks, .keys = want.keys });
+    errdefer shell1.stopRecording(bus);
     const cap = try pwstream.Capture.open(gpa, null);
     std.log.info("recording: source GNOME integration (node {d})", .{node});
     return .{ .kind = .shell, .cap = cap, .node = node, .stream_rect = want.area, .crop = null };
@@ -59,21 +60,29 @@ fn openShell(gpa: std.mem.Allocator, bus: *dbus.Connection, want: Want) !Source 
 
 fn openPortal(gpa: std.mem.Allocator, bus: *dbus.Connection, home: []const u8, cfg: *config.Config, want: Want) !Opened {
     portal.registerApp(gpa, bus);
-    var session = switch (try portal_rec.open(gpa, bus, cfg.scToken())) {
+    var session = switch (try openSession(gpa, bus, cfg.scToken())) {
         .granted => |s| s,
         .cancelled, .timeout => return .cancelled,
         .denied => return error.Denied,
         .unavailable => return error.NoScreenCast,
     };
     errdefer session.close(gpa, bus);
-    if (session.start.restore_token) |t| {
-        cfg.setScToken(t);
-        config.saveScreencastToken(gpa, home, t) catch {};
-    }
+    if (session.start.restore_token) |t| rememberToken(gpa, home, cfg, t);
     const pick = pickStream(session.start.streams, want.area) orelse return error.NoStream;
     const cap = try pwstream.Capture.open(gpa, session.fd);
     std.log.info("recording: source ScreenCast portal (node {d}, monitor {d},{d} {d}x{d})", .{ pick.node, pick.rect.x, pick.rect.y, pick.rect.w, pick.rect.h });
     return .{ .ok = .{ .kind = .portal, .cap = cap, .node = pick.node, .stream_rect = pick.rect, .crop = want.area, .session = session } };
+}
+
+/// A ScreenCast session over every monitor, as screenshots open it (one
+/// restore token serves both, so consent is asked once), kept for the
+/// whole recording, with the cursor drawn in when the portal can.
+fn openSession(gpa: std.mem.Allocator, bus: *dbus.Connection, prev_token: ?[]const u8) !portal.Result(portal.ScreenCastSession) {
+    const embedded = portal.availableCursorModes(bus) & portal.cursor_embedded != 0;
+    return portal.openScreenCast(gpa, bus, .{
+        .cursor_mode = if (embedded) portal.cursor_embedded else portal.cursor_hidden,
+        .restore_token = prev_token,
+    });
 }
 
 /// The stream showing most of the area. A portal that gives no position

@@ -239,14 +239,6 @@ pub const Connection = struct {
         return self.checkReply(try self.awaitReply(serial, timeout_ms), "reply");
     }
 
-    /// Like waitReplyTimeout, but an error reply is returned as is (type
-    /// .@"error", error_name set).
-    /// TODO(wave 2): remove once record/portal_rec.zig and
-    /// capture/winrects.zig call call()/waitReplyTimeout.
-    pub fn waitReplyOrError(self: *Connection, serial: u32, timeout_ms: i64) !Message {
-        return self.awaitReply(serial, timeout_ms);
-    }
-
     /// A reply as is, or an error reply logged, freed and classified.
     fn checkReply(self: *Connection, reply: Message, what: []const u8) errors.CallError!Message {
         if (reply.type != .@"error") return reply;

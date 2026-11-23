@@ -9,6 +9,7 @@
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
+const kde = @import("../kde.zig");
 const direct = @import("direct.zig");
 const env_mod = @import("../../../app/env.zig");
 const png = @import("../../../gfx/png.zig");
@@ -35,15 +36,14 @@ fn kwinPick(gpa: std.mem.Allocator, bus: *dbus.Connection) !?direct.Frame {
     var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putU32(0); // a window
-    const arr = try m.beginArray(8);
-    for ([_]struct { []const u8, bool }{ .{ "include-decoration", true }, .{ "include-shadow", false }, .{ "include-cursor", false }, .{ "native-resolution", true } }) |o| {
-        try m.beginStruct();
-        try m.putString(o[0]);
-        try m.putVariantBool(o[1]);
-    }
-    m.endArray(arr);
+    const opts = try m.beginDict();
+    try opts.entry("include-decoration", true);
+    try opts.entry("include-shadow", false);
+    try opts.entry("include-cursor", false);
+    try opts.entry("native-resolution", true);
+    opts.end();
     try m.putU32(0); // fd index
-    const serial = bus.callMethodFds("org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureInteractive", "ua{sv}h", m.buf.items, &.{p[1]}) catch |err| {
+    const serial = bus.callMethodFds(kde.bus_name, "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureInteractive", "ua{sv}h", m.buf.items, &.{p[1]}) catch |err| {
         sys.close(p[1]);
         if (err == error.NoFdPassing) return null;
         return err;

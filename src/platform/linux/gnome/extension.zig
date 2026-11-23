@@ -112,9 +112,8 @@ fn installRemote(gpa: std.mem.Allocator, bus: *dbus.Connection) !bool {
 
 /// The extension's directory under $XDG_DATA_HOME (or ~/.local/share).
 pub fn extensionDir(buf: []u8, home: []const u8) ![]u8 {
-    const data_home = env_mod.absolute(if (std.c.getenv("XDG_DATA_HOME")) |p| std.mem.span(p) else null);
-    if (data_home) |d| return std.fmt.bufPrint(buf, "{s}/gnome-shell/extensions/{s}", .{ d, uuid });
-    return std.fmt.bufPrint(buf, "{s}/.local/share/gnome-shell/extensions/{s}", .{ home, uuid });
+    var data: env_mod.PathBuf = undefined;
+    return std.fmt.bufPrint(buf, "{s}/gnome-shell/extensions/{s}", .{ try env_mod.dataHome(&data, home), uuid });
 }
 
 /// Copy the bundled extension into the user's extension directory.

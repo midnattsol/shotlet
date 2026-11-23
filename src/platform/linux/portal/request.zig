@@ -63,24 +63,23 @@ pub const object_path = "/org/freedesktop/portal/desktop";
 
 /// Subscribe to Response signals and to the portal's bus name changing
 /// owner (once per connection).
-pub fn watch(conn: *dbus.Connection) !void {
-    try conn.addMatchOnce("type='signal',interface='org.freedesktop.portal.Request',member='Response'");
-    try conn.addMatchOnce("type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0='" ++ bus_name ++ "'");
+pub fn watch(bus: *dbus.Connection) !void {
+    try bus.addMatchOnce("type='signal',interface='" ++ request_iface ++ "',member='Response'");
+    try bus.watchNameOwner(bus_name);
 }
 
-fn isDenialError(name: []const u8) bool {
-    return std.mem.eql(u8, name, "org.freedesktop.portal.Error.NotAllowed") or
-        std.mem.eql(u8, name, "org.freedesktop.DBus.Error.AccessDenied");
-}
+const request_iface = "org.freedesktop.portal.Request";
 
 /// One in-flight request-style portal call. Feed it bus messages with
-/// handle(), or block in wait().
+/// handle(), pump it with step(), or block in wait().
 pub const Request = struct {
     serial: u32,
     /// object path of the Request; Response signals arrive on it
     path: []u8,
     /// method name, for log lines (static string)
     what: []const u8,
+    /// when the call went out (monotonic): the deadlines count from here
+    started_ms: i64 = 0,
     got_reply: bool = false,
     outcome: ?Outcome = null,
     /// the Response signal when granted; its body is "ua{sv}"
@@ -88,19 +87,19 @@ pub const Request = struct {
 
     pub fn start(
         alloc: std.mem.Allocator,
-        conn: *dbus.Connection,
+        bus: *dbus.Connection,
         iface: []const u8,
         member: []const u8,
         signature: []const u8,
         body: []const u8,
         handle_token: []const u8,
     ) !Request {
-        try watch(conn);
+        try watch(bus);
         var path_buf: [256]u8 = undefined;
-        const path = try alloc.dupe(u8, try senderPath(conn, &path_buf, "request", handle_token));
+        const path = try alloc.dupe(u8, try senderPath(bus, &path_buf, "request", handle_token));
         errdefer alloc.free(path);
-        const serial = try conn.callMethod(bus_name, object_path, iface, member, signature, body);
-        return .{ .serial = serial, .path = path, .what = member };
+        const serial = try bus.callMethod(bus_name, object_path, iface, member, signature, body);
+        return .{ .serial = serial, .path = path, .what = member, .started_ms = sys.monoMs() };
     }
 
     pub fn deinit(self: *Request, alloc: std.mem.Allocator) void {
@@ -113,22 +112,38 @@ pub const Request = struct {
         return self.outcome != null;
     }
 
+    /// Whether `msg` belongs to this request: the method reply, a
+    /// Response on its path, the portal's bus name changing owner.
+    pub fn concerns(self: *const Request, msg: *const dbus.Message) bool {
+        if (self.isMethodReply(msg)) return true;
+        if (dbus.nameOwnerChange(msg)) |c| return std.mem.eql(u8, c.name, bus_name);
+        if (!msg.isSignal(request_iface, "Response")) return false;
+        const path = msg.path orelse return false;
+        return std.mem.eql(u8, path, self.path);
+    }
+
+    fn isMethodReply(self: *const Request, msg: *const dbus.Message) bool {
+        return !self.got_reply and msg.reply_serial == self.serial and
+            (msg.type == .method_return or msg.type == .@"error");
+    }
+
     /// Look at one message. Returns true when it kept the message (it was
     /// the granted Response; ownership moved into self.response), false
     /// when the caller still owns it.
     pub fn handle(self: *Request, alloc: std.mem.Allocator, msg: *const dbus.Message) !bool {
         if (self.outcome != null) return false;
-        if (!self.got_reply and msg.reply_serial == self.serial and
-            (msg.type == .method_return or msg.type == .@"error"))
-        {
+        if (self.isMethodReply(msg)) {
             try self.handleMethodReply(alloc, msg);
             return false;
         }
-        if (msg.isSignal("org.freedesktop.DBus", "NameOwnerChanged")) {
-            self.handleNameOwnerChanged(msg);
+        if (dbus.nameOwnerChange(msg)) |c| {
+            if (std.mem.eql(u8, c.name, bus_name) and c.new_owner.len == 0) {
+                std.log.warn("the desktop portal exited during {s}", .{self.what});
+                self.outcome = .unavailable;
+            }
             return false;
         }
-        if (msg.isSignal("org.freedesktop.portal.Request", "Response")) return self.handleResponse(msg);
+        if (msg.isSignal(request_iface, "Response")) return self.handleResponse(msg);
         return false;
     }
 
@@ -138,7 +153,7 @@ pub const Request = struct {
         if (msg.type == .@"error") {
             const name = msg.error_name orelse "?";
             std.log.warn("portal {s} failed: {s}", .{ self.what, name });
-            self.outcome = if (isDenialError(name)) .denied else .unavailable;
+            self.outcome = if (dbus.classify(name) == .denied) .denied else .unavailable;
             return;
         }
         var r = msg.reader();
@@ -153,19 +168,6 @@ pub const Request = struct {
             self.path = copy;
         }
         self.got_reply = true;
-    }
-
-    /// The portal losing its bus name ends the request as unavailable.
-    fn handleNameOwnerChanged(self: *Request, msg: *const dbus.Message) void {
-        var r = msg.reader();
-        const name = r.readString() catch return;
-        if (!std.mem.eql(u8, name, bus_name)) return;
-        _ = r.readString() catch return; // old owner
-        const new_owner = r.readString() catch return;
-        if (new_owner.len == 0) {
-            std.log.warn("the desktop portal exited during {s}", .{self.what});
-            self.outcome = .unavailable;
-        }
     }
 
     /// A Response signal on our path sets the outcome; a granted one is
@@ -193,40 +195,62 @@ pub const Request = struct {
         return true;
     }
 
-    /// Pump the connection until the request finishes or `timeout_ms`
-    /// passes. The portal must accept the call (reply with the Request
-    /// handle) within timeout_quick_ms, else it is treated as unavailable:
-    /// only then can a dialog be on screen, and only then is the long wait
-    /// worth it. Unrelated messages are dropped.
-    pub fn wait(self: *Request, alloc: std.mem.Allocator, conn: *dbus.Connection, timeout_ms: i64) !void {
-        const start_ms = sys.monoMs();
-        const deadline = start_ms + timeout_ms;
-        const reply_deadline = start_ms + @min(timeout_ms, timeout_quick_ms);
+    /// handle() a message this request took off the bus, freeing it
+    /// unless it was kept.
+    fn take(self: *Request, alloc: std.mem.Allocator, msg: *dbus.Message) void {
+        const kept = self.handle(alloc, msg) catch false;
+        if (!kept) msg.deinit(alloc);
+    }
+
+    /// When the request gives up: the portal must accept the call (reply
+    /// with the Request handle) within timeout_quick_ms, else it counts
+    /// as unavailable: only then can a dialog be on screen, and only then
+    /// is the wait of `timeout_ms` worth it.
+    fn deadline(self: *const Request, timeout_ms: i64) i64 {
+        return self.started_ms + if (self.got_reply) timeout_ms else @min(timeout_ms, timeout_quick_ms);
+    }
+
+    /// The deadline passed without an outcome.
+    fn expire(self: *Request, bus: *dbus.Connection, timeout_ms: i64) void {
+        if (!self.got_reply) {
+            std.log.warn("portal {s}: no reply from the portal; giving up", .{self.what});
+            self.outcome = .unavailable;
+            return;
+        }
+        std.log.warn("portal {s}: no answer after {d} min; giving up", .{ self.what, @divTrunc(timeout_ms, 60_000) });
+        self.close(bus);
+        self.outcome = .timeout;
+    }
+
+    /// Pump the connection until the request finishes or its deadline
+    /// passes (see deadline). Messages for anyone else stay queued on
+    /// the connection, never dropped.
+    pub fn wait(self: *Request, alloc: std.mem.Allocator, bus: *dbus.Connection, timeout_ms: i64) !void {
         while (self.outcome == null) {
-            const until = if (self.got_reply) deadline else reply_deadline;
-            var msg = (conn.nextMessageDeadline(until) catch |err| {
-                if (dbus.isFatal(err)) return err;
-                std.log.warn("dropped malformed bus message: {t}", .{err});
+            const until = self.deadline(timeout_ms);
+            var msg = (try bus.waitFor(until, @as(*const Request, self), concerns)) orelse {
+                if (sys.monoMs() >= until) self.expire(bus, timeout_ms);
                 continue;
-            }) orelse {
-                if (!self.got_reply) {
-                    std.log.warn("portal {s}: no reply from the portal; giving up", .{self.what});
-                    self.outcome = .unavailable;
-                    break;
-                }
-                std.log.warn("portal {s}: no answer after {d} min; giving up", .{ self.what, @divTrunc(timeout_ms, 60_000) });
-                self.close(conn);
-                self.outcome = .timeout;
-                break;
             };
-            const kept = self.handle(alloc, &msg) catch false;
-            if (!kept) msg.deinit(alloc);
+            self.take(alloc, &msg);
         }
     }
 
+    /// Without blocking: handle what already arrived for this request,
+    /// then apply wait()'s deadlines. The outcome, once there is one. For
+    /// loops that also serve a window.
+    pub fn step(self: *Request, alloc: std.mem.Allocator, bus: *dbus.Connection, timeout_ms: i64) !?Outcome {
+        while (self.outcome == null) {
+            var msg = (try bus.waitFor(sys.monoMs(), @as(*const Request, self), concerns)) orelse break;
+            self.take(alloc, &msg);
+        }
+        if (self.outcome == null and sys.monoMs() >= self.deadline(timeout_ms)) self.expire(bus, timeout_ms);
+        return self.outcome;
+    }
+
     /// Dismiss whatever dialog belongs to this request. Fire-and-forget.
-    pub fn close(self: *const Request, conn: *dbus.Connection) void {
-        _ = conn.callMethod(bus_name, self.path, "org.freedesktop.portal.Request", "Close", "", &.{}) catch {};
+    pub fn close(self: *const Request, bus: *dbus.Connection) void {
+        _ = bus.callMethod(bus_name, self.path, request_iface, "Close", "", &.{}) catch {};
     }
 
     /// Reader over the granted Response's results dict (after the code).
@@ -241,7 +265,7 @@ pub const Request = struct {
 /// start() + wait(): the finished request (caller deinits).
 pub fn call(
     alloc: std.mem.Allocator,
-    conn: *dbus.Connection,
+    bus: *dbus.Connection,
     iface: []const u8,
     member: []const u8,
     signature: []const u8,
@@ -249,23 +273,16 @@ pub fn call(
     handle_token: []const u8,
     timeout_ms: i64,
 ) !Request {
-    var req = try Request.start(alloc, conn, iface, member, signature, body, handle_token);
+    var req = try Request.start(alloc, bus, iface, member, signature, body, handle_token);
     errdefer req.deinit(alloc);
-    try req.wait(alloc, conn, timeout_ms);
+    try req.wait(alloc, bus, timeout_ms);
     return req;
 }
 
-/// A handle token: unique per request, only [A-Za-z0-9_] as the spec asks.
-pub fn makeToken(buf: []u8, prefix: []const u8) ![]u8 {
-    var rnd: [8]u8 = undefined;
-    sys.getRandom(&rnd);
-    return std.fmt.bufPrint(buf, "{s}{d}_{x}", .{ prefix, std.os.linux.getpid(), std.mem.readInt(u64, &rnd, .little) });
-}
-
-fn senderPath(conn: *const dbus.Connection, buf: []u8, kind: []const u8, token: []const u8) ![]u8 {
+fn senderPath(bus: *const dbus.Connection, buf: []u8, kind: []const u8, token: []const u8) ![]u8 {
     var sender_buf: [64]u8 = undefined;
     var n: usize = 0;
-    for (conn.unique_name) |c| {
+    for (bus.unique_name) |c| {
         if (c == ':') continue;
         if (n == sender_buf.len) return error.NameTooLong;
         sender_buf[n] = if (c == '.') '_' else c;
@@ -364,4 +381,54 @@ test "Request outcomes from Response codes, errors and a vanished portal" {
         try std.testing.expectEqualStrings("/other/request", req.path);
         try std.testing.expect(req.outcome == null);
     }
+}
+
+test "a request takes only its own messages; the rest stay queued" {
+    const alloc = std.testing.allocator;
+    const fds = try sys.socketPair();
+    var peer: dbus.Connection = .{ .fd = fds[0], .alloc = alloc };
+    defer peer.deinit();
+    var ours: dbus.Connection = .{ .fd = fds[1], .alloc = alloc };
+    defer ours.deinit();
+    const path = "/org/freedesktop/portal/desktop/request/1_5/tok";
+    var req = Request{ .serial = 7, .path = try alloc.dupe(u8, path), .what = "Start", .got_reply = true, .started_ms = sys.monoMs() };
+    defer req.deinit(alloc);
+
+    var m = dbus.Marshal.init(alloc);
+    defer m.deinit();
+    try screencast.startResponseBody(&m, 1, "s");
+    // someone else's Response, an unrelated signal, then ours
+    try peer.emitSignal("/org/freedesktop/portal/desktop/request/1_5/other", request_iface, "Response", "ua{sv}", m.buf.items);
+    try peer.emitSignal("/t", "org.example", "Changed", "", &.{});
+    try std.testing.expectEqual(@as(?Outcome, null), try req.step(alloc, &ours, timeout_dialog_ms));
+    try peer.emitSignal(path, request_iface, "Response", "ua{sv}", m.buf.items);
+    try req.wait(alloc, &ours, timeout_dialog_ms);
+    try std.testing.expectEqual(Outcome.cancelled, req.outcome.?);
+    try std.testing.expectEqual(@as(usize, 2), ours.pending.items.len);
+    try std.testing.expectEqualStrings("Response", ours.pending.items[0].member.?);
+    try std.testing.expectEqualStrings("Changed", ours.pending.items[1].member.?);
+}
+
+test "a request past its deadline gives up" {
+    const alloc = std.testing.allocator;
+    const saved_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_level;
+    const fds = try sys.socketPair();
+    var peer: dbus.Connection = .{ .fd = fds[0], .alloc = alloc };
+    defer peer.deinit();
+    var ours: dbus.Connection = .{ .fd = fds[1], .alloc = alloc };
+    defer ours.deinit();
+    // never accepted by the portal: unavailable after timeout_quick_ms
+    var mute = Request{ .serial = 7, .path = try alloc.dupe(u8, "/r/1"), .what = "Start", .started_ms = sys.monoMs() - timeout_quick_ms };
+    defer mute.deinit(alloc);
+    try std.testing.expectEqual(Outcome.unavailable, (try mute.step(alloc, &ours, timeout_dialog_ms)).?);
+    // accepted, never answered: closed, timeout
+    var silent = Request{ .serial = 8, .path = try alloc.dupe(u8, "/r/2"), .what = "Start", .got_reply = true, .started_ms = sys.monoMs() - 50 };
+    defer silent.deinit(alloc);
+    try std.testing.expectEqual(@as(?Outcome, null), try silent.step(alloc, &ours, 1000));
+    try std.testing.expectEqual(Outcome.timeout, (try silent.step(alloc, &ours, 10)).?);
+    var close = try peer.readMessage();
+    defer close.deinit(alloc);
+    try std.testing.expectEqualStrings("Close", close.member.?);
 }

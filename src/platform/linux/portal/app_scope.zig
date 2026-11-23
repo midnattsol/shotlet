@@ -75,15 +75,6 @@ fn registerFailure(err: anyerror) RegisterOutcome {
     }
 }
 
-/// Error names meaning "no Registry here".
-/// TODO(wave 2): remove with its re-export in portal.zig (unused).
-pub fn registryMissing(name: []const u8) bool {
-    return switch (dbus.classify(name)) {
-        .unknown_method, .service_unknown => true,
-        else => false,
-    };
-}
-
 test "a missing Registry falls back; a refusal does not" {
     try std.testing.expectEqual(RegisterOutcome.unsupported, registerFailure(error.UnknownMethod));
     try std.testing.expectEqual(RegisterOutcome.unsupported, registerFailure(error.ServiceUnknown));
@@ -180,8 +171,7 @@ fn waitForScopeMove(alloc: std.mem.Allocator) !void {
     var tries: usize = 0;
     while (tries < 20) : (tries += 1) {
         if (try inAppScope(alloc)) return;
-        var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 50 * std.time.ns_per_ms };
-        _ = std.os.linux.nanosleep(&ts, null);
+        sys.sleepMs(50);
     }
     return error.ScopeMoveTimedOut;
 }
