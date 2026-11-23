@@ -21,6 +21,8 @@ const last_area = @import("modes/last_area.zig");
 const deliver = @import("deliver.zig");
 const handoff = @import("shot/handoff.zig");
 const next = @import("shot/next.zig");
+const handed = @import("shot/handed.zig");
+const Timeline = @import("shot/timeline.zig").Timeline;
 const window = @import("../platform/api.zig").window;
 const editor_mod = @import("../ui/editor.zig");
 const open_tool = @import("../ui/tools/open.zig");
@@ -54,54 +56,100 @@ pub const From = struct {
 };
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, smoke_ms: i64) !void {
-    var t: Startup = .{ .t0 = nowMs() };
+    var t = Timeline.start(if (from.shell) |s| s.t0_ms else null);
+    // a capture the shell hands over loads meanwhile (shot/handed.zig)
+    var handed_cap: handed.Loader = .{};
+    handed_cap.start(gpa, env, from.shell);
+    defer handed_cap.deinit();
     var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
-    t.session = nowMs();
-    if (!from.any() and handedToShell(gpa, env, &bus, from.req, t.t0)) return;
+    t.mark(.session);
+    if (!from.any() and handedToShell(gpa, env, &bus, from.req, t.origin)) return;
+    // the shell's frozen frame goes whatever happens next, at the latest
+    // when this run ends (the editor takes it away sooner: onScreen)
+    var frozen: Frozen = .{ .gpa = gpa, .bus = &bus, .id = if (from.shell) |s| s.id else null };
+    defer frozen.end();
 
     // the capture backend's warm-up (Linux: dlopen(libpipewire), ~50-80ms)
     // overlaps the rest of setup
     const warmup_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupCapture, .{}) catch null;
-    desktop.identify(gpa, &bus);
-    t.scope = nowMs();
+    // (a handed capture needs no portal before the editor is up: onScreen)
+    if (from.shell == null) desktop.identify(gpa, &bus);
 
     var cfg = config.load(gpa, env.home);
     const text = @import("../gfx/text.zig");
     text.init(gpa);
     defer text.deinit();
-    t.config = nowMs();
+    t.mark(.setup);
 
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
-    t.window = nowMs();
+    t.mark(.window);
+    // a handed capture that opens the editor: its surfaces (and their
+    // buffers) are made while the pieces still decode
+    const early = if (from.shell) |sh| opensEditor(from.req.mode) and openEarly(&win, sh) else false;
 
     if (warmup_thread) |th| th.join();
-    t.warmup = nowMs();
     // the self-timer, where the GNOME extension did not count down
     if (from.req.delay_s > 0 and !from.any() and !try countDown(&win, &bus, from.req.delay_s)) return;
-    var cap = (try acquire(gpa, env, &bus, &cfg, from)) orelse {
+    var cap = (try acquire(gpa, env, &bus, &cfg, from, &handed_cap)) orelse {
         log.info("capture cancelled", .{});
         return;
     };
     defer cap.deinit(gpa);
     if (from.req.delay_s > 0) win.closeWindow();
-    t.capture = nowMs();
-    var edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .bus = &bus, .cfg = &cfg, .win = &win }, &cap, from.req)) {
-        .done => return,
+    t.mark(.capture);
+    var edit = (try editFor(.{ .gpa = gpa, .env = env, .bus = &bus, .cfg = &cfg, .win = &win }, &cap, from)) orelse return;
+    defer gpa.free(edit.windows);
+
+    if (!early) try openEditor(&win, &cap, perMonitor(&cap));
+    t.mark(.surfaces);
+    log.info("startup: capture={d}ms total={d}ms", .{ t.at.get(.capture) - t.at.get(.shotlet), t.at.get(.surfaces) - t.at.get(.shotlet) });
+    edit.timeline = &t;
+    edit.on_screen = .{ .ctx = &frozen, .f = Frozen.onScreen };
+    try editAndFinish(gpa, env, &bus, &cfg, &win, &cap, preset_sel, smoke_ms, null, edit);
+}
+
+/// What the editor opens with after the capture (null: no editor).
+fn editFor(c: mode_flow.Ctx, cap: *capture.Capture, from: From) !?mode_flow.Edit {
+    var edit = switch (try mode_flow.afterCapture(c, cap, from.req)) {
+        .done => return null,
         .edit => |e| e,
     };
     // where the windows were, for clicking one (an area to pick)
-    if (edit.modes) edit.windows = platform.capture.windows(gpa, env, &bus, &cap, if (from.shell) |s| s.id else null);
-    defer gpa.free(edit.windows);
+    if (edit.modes) edit.windows = platform.capture.windows(c.gpa, c.env, c.bus, cap, if (from.shell) |s| s.id else null);
     edit.from_shell = from.shell != null;
-    if (edit.modes) edit.window_ok = platform.capture.canCaptureWindow(&bus);
-
-    try openEditor(&win, &cap, perMonitor(&cap));
-    t.open = nowMs();
-    t.report(from.shell);
-    try editAndFinish(gpa, env, &bus, &cfg, &win, &cap, preset_sel, smoke_ms, null, edit);
+    if (edit.modes) edit.window_ok = platform.capture.canCaptureWindow(c.bus);
+    return edit;
 }
+
+/// The GNOME integration's frozen frame of a handed capture, given back
+/// once (api.shell.unfreeze): when the editor shows the capture, else
+/// when the run ends.
+const Frozen = struct {
+    gpa: std.mem.Allocator,
+    bus: *desktop.Bus,
+    id: ?[]const u8,
+
+    fn release(f: *Frozen) ?shell.FrozenInput {
+        const id = f.id orelse return null;
+        f.id = null;
+        const input = shell.unfreeze(f.bus, id);
+        // what run() put off for a handed capture
+        desktop.identify(f.gpa, f.bus);
+        return input;
+    }
+
+    fn end(f: *Frozen) void {
+        _ = f.release();
+    }
+
+    /// The editor's first frames are on screen (ui/editor/opening.zig).
+    fn onScreen(ctx: *anyopaque) ?shell.FrozenInput {
+        const f: *Frozen = @ptrCast(@alignCast(ctx));
+        return f.release();
+    }
+};
 
 /// With the GNOME Shell extension, the shell takes the screenshot (no
 /// prompt) and starts another shotlet on it. True when it took over (or
@@ -125,40 +173,26 @@ fn handedToShell(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, req: modes
     }
 }
 
+fn opensEditor(m: modes.Mode) bool {
+    return m == .area or m == .previous;
+}
+
+/// The editor's surfaces for a handed capture, from its layout alone,
+/// as openEditor makes them for the capture; false when the layout says
+/// too little (they are made later then).
+fn openEarly(win: *window.Window, sh: shell.HandedCapture) bool {
+    const l = handed.layoutOf(sh.monitors) orelse return false;
+    const ok = if (l.monitors > 1) win.openOutputs("Shotlet") else win.openOnOutputAt("Shotlet", l.x, l.y);
+    ok catch return false;
+    return true;
+}
+
 /// One fullscreen surface per monitor when the layout is known.
 fn perMonitor(cap: *const capture.Capture) bool {
     return cap.monitors.len > 1 and for (cap.monitors) |m| {
         if (m.logical == null) break false;
     } else true;
 }
-
-/// Startup timestamps (ms), logged once the editor is open.
-const Startup = struct {
-    t0: i64,
-    session: i64 = 0,
-    scope: i64 = 0,
-    config: i64 = 0,
-    window: i64 = 0,
-    warmup: i64 = 0,
-    capture: i64 = 0,
-    open: i64 = 0,
-
-    fn report(t: Startup, handed: ?shell.HandedCapture) void {
-        log.info("startup: capture={d}ms total={d}ms", .{ t.capture - t.t0, t.open - t.t0 });
-        if (handed) |sh| if (sh.t0_ms) |key| {
-            log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t.open - key, t.t0 - key });
-        };
-        log.debug("startup detail: session={d}ms scope={d}ms config={d}ms window={d}ms warmup-wait={d}ms capture={d}ms open={d}ms", .{
-            t.session - t.t0,
-            t.scope - t.session,
-            t.config - t.scope,
-            t.window - t.config,
-            t.warmup - t.window,
-            t.capture - t.warmup,
-            t.open - t.capture,
-        });
-    }
-};
 
 /// The editor's fullscreen surfaces: one per monitor when the capture has
 /// several; for a capture of one monitor (a portal that shares one, like
@@ -192,6 +226,8 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *
     ed.presetSelection(preset_sel);
     if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     ed.keep_alpha = edit.keep_alpha;
+    ed.opening.timeline = edit.timeline;
+    ed.opening.on_screen = edit.on_screen;
     const ctx: mode_flow.Ctx = .{ .gpa = gpa, .env = env, .bus = bus, .cfg = cfg, .win = win };
     ed.capmode = .{ .on = edit.modes, .windows = edit.windows, .window_ok = edit.window_ok, .screen_in_place = edit.modes and mode_flow.screenOpensEditor(ctx) };
     defer ed.deinit();
@@ -227,7 +263,8 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *
 /// preference, accent and reduced motion.
 fn configureEditor(ed: *editor_mod.Editor, bus: *desktop.Bus, cfg: *const config.Config, smoke_ms: i64) void {
     const theme = @import("../ui/theme.zig");
-    ed.setPrefs(theme.readPrefs(bus, 1500));
+    // the desktop's appearance is asked once the capture is on screen
+    // (ui/editor/opening.zig): the first frames show nothing it colours
     theme.watch(bus) catch {};
     ed.bus = bus;
     if (smoke_ms > 0) ed.smoke_deadline_ms = nowMs() + smoke_ms;
@@ -364,21 +401,18 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
 /// caller exits quietly, with no fallback and no further dialogs.
-pub fn acquire(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config, from: From) !?capture.Capture {
-    if (from.any()) return try fromGiven(gpa, env, from);
+pub fn acquire(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config, from: From, handed_cap: ?*handed.Loader) !?capture.Capture {
+    if (from.shell != null) {
+        const cap = try handed_cap.?.take();
+        platform.capture.remember(env.home, .shell);
+        return cap;
+    }
+    if (from.any()) return try fromGiven(gpa, from);
     return platform.capture.screens(gpa, env, bus, cfg);
 }
 
-/// A capture that is already taken: by the GNOME extension, KWin, or a
-/// dev source.
-fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
-    if (from.shell) |args| {
-        const t_load = nowMs();
-        const cap = try shell.loadHanded(gpa, env, args);
-        platform.capture.remember(env.home, .shell);
-        log.info("capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
-        return cap;
-    }
+/// A capture that is already taken: by KWin, or a dev source.
+fn fromGiven(gpa: std.mem.Allocator, from: From) !capture.Capture {
     if (from.image) |img| return try capture.Capture.single(gpa, img);
     if (from.monitors) |list| return try fromMonitorFiles(gpa, list);
     const data = try sys.readFileAlloc(gpa, from.file.?, 256 * 1024 * 1024);

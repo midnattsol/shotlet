@@ -40,6 +40,7 @@ const hit = @import("editor/hit.zig");
 const render = @import("editor/render.zig");
 const exporter = @import("editor/export.zig");
 const fade = @import("editor/fade.zig");
+const opening = @import("editor/opening.zig");
 const dim = @import("dim.zig");
 const areasel = @import("areasel.zig");
 const capmode = @import("editor/capmode.zig");
@@ -66,7 +67,9 @@ pub const Editor = struct {
     img: *const png.Image,
     doc: doc_mod.Document,
 
-    /// image + committed shapes at native resolution (minus `lifted`)
+    /// image + committed shapes at native resolution (minus `lifted`);
+    /// made when the first shape is (until then the image is the layer:
+    /// layerPixels)
     layer: []u32 = &.{},
     /// one per window surface (monitor); `cur` is the one being handled
     panes: [max_panes]Pane = @splat(.{}),
@@ -164,6 +167,8 @@ pub const Editor = struct {
     dim_keep: u32,
     /// the dim fading in as the editor opens (editor/fade.zig)
     enter: fade.Enter = .{},
+    /// the first frames: the plain capture, then the caches (editor/opening.zig)
+    opening: opening.Opening = .{},
     needs_render: bool = true,
     running: bool = true,
     action: Action = .cancel,
@@ -231,6 +236,7 @@ pub const Editor = struct {
     }
 
     pub fn deinit(self: *Editor) void {
+        opening.deinit(self);
         if (self.text) |t| self.alloc.free(t.orig);
         self.text = null;
         if (self.cur) |*s| s.deinit(self.alloc);
@@ -253,6 +259,11 @@ pub const Editor = struct {
     /// The pane being handled (mouse input, or the one rendering).
     pub fn pn(self: anytype) @TypeOf(&self.panes[0]) {
         return &self.panes[self.pane_i];
+    }
+
+    /// What the layer holds: the image itself while nothing is drawn.
+    pub fn layerPixels(self: *const Editor) []const u32 {
+        return if (self.layer.len != 0) self.layer else self.img.pixels;
     }
 
     pub fn isTbPane(self: *const Editor) bool {
@@ -304,6 +315,7 @@ pub const Editor = struct {
 
 comptime {
     _ = fade;
+    _ = opening;
     _ = capmode;
     _ = caches;
 }

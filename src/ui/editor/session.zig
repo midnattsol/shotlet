@@ -17,6 +17,7 @@ const render = @import("render.zig");
 const exporter = @import("export.zig");
 const script = @import("script.zig");
 const fade = @import("fade.zig");
+const opening = @import("opening.zig");
 
 const Editor = editor.Editor;
 
@@ -27,9 +28,9 @@ pub fn nowMs() i64 {
 /// Run the editor; returns the user's chosen action and exported PNG.
 pub fn run(ed: *Editor) !editor.Result {
     if (switches.get().editor_script) |s| ed.script.src = s;
-    const started = nowMs();
-    var shown = false;
     while (ed.running) {
+        // the plain capture first, then the caches (opening.zig)
+        if (try opening.step(ed)) continue;
         const now = nowMs();
         if (ed.smoke_deadline_ms != 0 and now > ed.smoke_deadline_ms) {
             ed.action = .cancel;
@@ -43,23 +44,15 @@ pub fn run(ed: *Editor) !editor.Result {
             try ed.win.drainPending();
             try drainQueue(ed);
             try render.renderFrame(ed);
-            if (!shown and allShown(ed)) {
-                shown = true;
-                log.info("first frame on every surface {d} ms after the editor started", .{nowMs() - started});
-            }
         }
         if (scripted and !ed.needs_render) try script.step(ed);
     }
+    // (closed before the caches were made: they are, before anything
+    // reads them)
+    opening.deinit(ed);
     if (switches.get().editor_dump) |prefix| exporter.dumpAtExit(ed, prefix);
     if (!ed.action.exports()) return .{ .action = ed.action };
     return .{ .action = ed.action, .png_data = try exporter.exportPng(ed) };
-}
-
-/// Every surface has presented a frame.
-fn allShown(ed: *const Editor) bool {
-    if (ed.n_panes == 0) return false;
-    for (ed.panes[0..ed.n_panes]) |p| if (p.alive and p.last_frame.len == 0) return false;
-    return true;
 }
 
 /// How long to wait for input: transitions draw a frame per refresh, a

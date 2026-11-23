@@ -108,8 +108,11 @@ pub fn ftruncate(fd: fd_t, len: u64) !void {
     _ = try check(linux.ftruncate(fd, @intCast(len)));
 }
 
+/// `fd` mapped shared, read and write, its pages made now (a buffer is
+/// written whole soon after: the faults are taken here, at once, not
+/// while drawing the first frame).
 pub fn mmapRw(fd: fd_t, len: usize) ![]align(std.heap.page_size_min) u8 {
-    const rc = linux.mmap(null, len, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED }, fd, 0);
+    const rc = linux.mmap(null, len, .{ .READ = true, .WRITE = true }, .{ .TYPE = .SHARED, .POPULATE = true }, fd, 0);
     _ = try check(rc);
     const ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(rc);
     return ptr[0..len];

@@ -15,6 +15,7 @@ pub const Words = types.Words;
 pub const CaptureInfo = types.CaptureInfo;
 pub const Handoff = types.Handoff;
 pub const HandedCapture = types.HandedCapture;
+pub const FrozenInput = types.FrozenInput;
 pub const Cli = types.Cli;
 
 /// How Settings names the integration and the desktop's shortcuts here.
@@ -60,6 +61,11 @@ pub fn requestCapture(gpa: std.mem.Allocator, bus: *desktop.Bus, req: mode.Reque
 pub fn place(gpa: std.mem.Allocator, bus: *desktop.Bus, title: []const u8, x: i32, y: i32) bool {
     _ = .{ gpa, bus, title, x, y };
     return false;
+}
+/// The capture handed over as `id` is on screen (or never will be).
+pub fn unfreeze(bus: *desktop.Bus, id: []const u8) ?FrozenInput {
+    _ = .{ bus, id };
+    return null;
 }
 /// The capture it handed over.
 pub fn loadHanded(gpa: std.mem.Allocator, env: Env, args: HandedCapture) error{Unavailable}!capture.Capture {

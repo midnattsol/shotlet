@@ -5,6 +5,7 @@ const std = @import("std");
 const png = @import("../gfx/png.zig");
 const geom = @import("../geom.zig");
 const Frozen = @import("../ui/freeze_pick.zig").Frozen;
+const bands = @import("../ui/bands.zig");
 
 /// A monitor's place in the image and in the logical layout (geom.zig).
 pub const Monitor = geom.Monitor;
@@ -53,23 +54,80 @@ const max_pixels: u64 = 256 * 1024 * 1024;
 /// rather than throwing away the 2x detail). Gaps are opaque black.
 /// Without a full layout, frames are placed left to right at native size.
 pub fn stitch(gpa: std.mem.Allocator, parts: []const Part) !Capture {
+    const pl = try plan(gpa, parts);
+    defer gpa.free(pl.native);
+    errdefer gpa.free(pl.mons);
+    const px = try gpa.alloc(u32, @as(usize, pl.width) * pl.height);
+    errdefer gpa.free(px);
+    fill(px, pl, parts, false);
+    return .{ .image = .{ .width = pl.width, .height = pl.height, .pixels = px }, .monitors = pl.mons };
+}
+
+/// Where stitch puts each frame (from the frames' sizes and logical
+/// rects only: their pixels may still be on their way).
+pub const Plan = struct {
+    /// owned, one per part
+    mons: []Monitor,
+    /// owned: the part is at the image's density (copied as it is)
+    native: []bool,
+    width: u32,
+    height: u32,
+};
+
+pub fn plan(gpa: std.mem.Allocator, parts: []const Part) !Plan {
     if (parts.len == 0) return error.NoFrames;
     const mons = try gpa.alloc(Monitor, parts.len);
     errdefer gpa.free(mons);
-
-    // per-monitor pixel rects and whether each needs resampling
     const native = try gpa.alloc(bool, parts.len);
-    defer gpa.free(native);
+    errdefer gpa.free(native);
     if (try hasLayout(parts)) placeByLayout(parts, mons, native) else placeInRow(parts, mons, native);
     const width, const height = try canvasSize(mons);
+    return .{ .mons = mons, .native = native, .width = width, .height = height };
+}
 
-    const px = try gpa.alloc(u32, @as(usize, width) * height);
-    errdefer gpa.free(px);
-    if (parts.len > 1) @memset(px, 0xFF000000);
-    for (parts, mons, native) |p, m, nat| {
-        if (nat) copyNative(p, m, px, width, height) else resampleBilinear(p.pixels, p.width, p.height, px, width, m);
+/// Paint the stitched image `px` as `pl` lays it out: the gaps opaque
+/// black, the native parts copied (unless `natives_placed`: they were
+/// decoded straight into place), the others resampled. In bands of
+/// rows, a thread each (two 4K monitors: tens of millions of pixels).
+pub fn fill(px: []u32, pl: Plan, parts: []const Part, natives_placed: bool) void {
+    const Ctx = struct {
+        parts: []const Part,
+        pl: Plan,
+        px: []u32,
+        placed: bool,
+        fn band(c: @This(), b: geom.Rect) void {
+            const y0: u32 = @intCast(b.y);
+            const y1: u32 = @intCast(b.bottom());
+            var y = y0;
+            while (y < y1) : (y += 1) blackGaps(c.px[@as(usize, y) * c.pl.width ..][0..c.pl.width], c.pl.mons, y);
+            for (c.parts, c.pl.mons, c.pl.native) |p, m, nat| {
+                if (!nat) resampleBilinear(p.pixels, p.width, p.height, c.px, c.pl.width, m, y0, y1) else if (!c.placed) copyNative(p, m, c.px, c.pl.width, y0, y1);
+            }
+        }
+    };
+    bands.run(.ofSize(pl.width, pl.height), Ctx{ .parts = parts, .pl = pl, .px = px, .placed = natives_placed }, Ctx.band);
+}
+
+/// Image row `y`: opaque black where no monitor is.
+fn blackGaps(row: []u32, mons: []const Monitor, y: u32) void {
+    var x: u32 = 0;
+    while (x < row.len) {
+        // the monitor on this row starting at x or covering it, else the
+        // next one to the right
+        var next: u32 = @intCast(row.len);
+        var covered_to: ?u32 = null;
+        for (mons) |m| {
+            if (y < m.y or y >= m.y + m.h) continue;
+            if (m.x <= x and x < m.x + m.w) covered_to = @max(covered_to orelse 0, m.x + m.w);
+            if (m.x > x) next = @min(next, m.x);
+        }
+        if (covered_to) |to| {
+            x = @min(to, @as(u32, @intCast(row.len)));
+            continue;
+        }
+        @memset(row[x..next], 0xFF000000);
+        x = next;
     }
-    return .{ .image = .{ .width = width, .height = height, .pixels = px }, .monitors = mons };
 }
 
 /// True when every part has a usable logical rect; fails on empty frames.
@@ -135,11 +193,17 @@ fn canvasSize(mons: []const Monitor) ![2]u32 {
 }
 
 /// Copies a part at its own scale into `m` of the image, clipped.
-fn copyNative(p: Part, m: Monitor, px: []u32, width: u32, height: u32) void {
+fn copyNative(p: Part, m: Monitor, px: []u32, width: u32, y0: u32, y1: u32) void {
+    const height: u32 = @intCast(px.len / width);
     const w = @min(p.width, width - m.x);
     const h = @min(p.height, height - m.y);
-    for (0..h) |row| {
-        @memcpy(px[(m.y + row) * width + m.x ..][0..w], p.pixels[row * p.width ..][0..w]);
+    // its rows within [y0, y1)
+    const from = @max(m.y, y0);
+    const to = @min(m.y + h, y1);
+    var y = from;
+    while (y < to) : (y += 1) {
+        const row = y - m.y;
+        @memcpy(px[y * width + m.x ..][0..w], p.pixels[row * p.width ..][0..w]);
     }
 }
 
@@ -149,15 +213,18 @@ fn toPx(v: f64) u32 {
 }
 
 /// Scale `src` into the rect `r` of `dst` with a bilinear filter
-/// (pixel-centre aligned, edges clamped). Fixed point, 8 fractional bits.
-fn resampleBilinear(src: []const u32, sw: u32, sh: u32, dst: []u32, dst_w: u32, r: Monitor) void {
+/// (pixel-centre aligned, edges clamped), the rows of `dst` in
+/// [band_y0, band_y1) only. Fixed point, 8 fractional bits.
+fn resampleBilinear(src: []const u32, sw: u32, sh: u32, dst: []u32, dst_w: u32, r: Monitor, band_y0: u32, band_y1: u32) void {
     const dst_h: u32 = @intCast(dst.len / dst_w);
     const w = @min(r.w, dst_w -| r.x);
     const h = @min(r.h, dst_h -| r.y);
     if (w == 0 or h == 0) return;
     const sx_step = @as(f64, @floatFromInt(sw)) / @as(f64, @floatFromInt(r.w));
     const sy_step = @as(f64, @floatFromInt(sh)) / @as(f64, @floatFromInt(r.h));
-    for (0..h) |dy| {
+    const from = @max(r.y, band_y0) -| r.y;
+    const to = @min(r.y + h, band_y1) -| r.y;
+    for (from..@max(from, to)) |dy| {
         const fy = @max(0, (@as(f64, @floatFromInt(dy)) + 0.5) * sy_step - 0.5);
         const y0: u32 = @min(sh - 1, @as(u32, @intFromFloat(fy)));
         const y1: u32 = @min(sh - 1, y0 + 1);
@@ -222,6 +289,19 @@ test "stitch lays monitors out by logical position at the highest scale" {
     try std.testing.expectEqual(@as(u32, 0xFF0000FF), cap.image.pixels[3 * 12 + 8]);
 }
 
+test "the gaps of a row are black, the monitors' pixels left alone" {
+    var row: [10]u32 = @splat(0xFF777777);
+    const mons = [_]Monitor{
+        .{ .x = 2, .y = 0, .w = 3, .h = 1 },
+        .{ .x = 4, .y = 0, .w = 2, .h = 1 },
+        .{ .x = 8, .y = 1, .w = 2, .h = 1 },
+    };
+    blackGaps(&row, &mons, 0);
+    const k: u32 = 0xFF000000;
+    const g: u32 = 0xFF777777;
+    try std.testing.expectEqualSlices(u32, &.{ k, k, g, g, g, g, k, k, k, k }, &row);
+}
+
 test "stitch handles negative positions, gaps and unknown layouts" {
     const gpa = std.testing.allocator;
     var a: [4]u32 = @splat(0xFF111111);
@@ -251,7 +331,7 @@ test "stitch handles negative positions, gaps and unknown layouts" {
 test "bilinear upscale keeps flat colors and blends edges" {
     var src = [_]u32{ 0xFF000000, 0xFFFFFFFF };
     var dst: [4]u32 = @splat(0);
-    resampleBilinear(&src, 2, 1, &dst, 4, .{ .x = 0, .y = 0, .w = 4, .h = 1 });
+    resampleBilinear(&src, 2, 1, &dst, 4, .{ .x = 0, .y = 0, .w = 4, .h = 1 }, 0, 1);
     try std.testing.expectEqual(@as(u32, 0xFF000000), dst[0]);
     try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), dst[3]);
     try std.testing.expect(dst[1] & 0xFF > 0 and dst[1] & 0xFF < 0xFF);

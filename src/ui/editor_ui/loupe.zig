@@ -303,7 +303,7 @@ fn lensFor(ed: *const Editor, r: Rect, size: i32, radius: f64) lens_mod.Lens {
 
 /// The composed picture (annotations included) the lens magnifies.
 fn pixels(ed: *const Editor) lens_mod.Pixels {
-    return .{ .px = ed.layer, .w = ed.img.width, .h = ed.img.height };
+    return .{ .px = ed.layerPixels(), .w = ed.img.width, .h = ed.img.height };
 }
 
 /// `r` scaled by `k` toward its point `anchor`.

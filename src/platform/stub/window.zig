@@ -220,6 +220,18 @@ pub const Window = struct {
     pub fn drainPending(w: *Window) Error!void {
         _ = w;
     }
+    /// The next frame of surface `idx` need not wait for the last one's.
+    pub fn skipFrameWait(w: *Window, idx: u8) void {
+        _ = .{ w, idx };
+    }
+    /// Wait at most `ms` for the display server, input left queued.
+    pub fn dispatchFor(w: *Window, ms: i32) Error!void {
+        _ = .{ w, ms };
+    }
+    /// Until the display server handled everything sent so far.
+    pub fn roundtrip(w: *Window) Error!void {
+        _ = w;
+    }
 
     // input
     /// Relative pointer motion since the last call (logical pixels).

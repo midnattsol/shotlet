@@ -254,6 +254,7 @@ pub const Window = struct {
     pub const present = buffers.present;
     pub const presentSurface = buffers.presentSurface;
     pub const presentDamaged = buffers.presentDamaged;
+    pub const skipFrameWait = buffers.skipFrameWait;
 
     // events
     pub const nextEvent = events.nextEvent;
@@ -261,7 +262,10 @@ pub const Window = struct {
     pub const waitKeyboardFocus = events.waitKeyboardFocus;
     pub const pollTimeoutMs = events.pollTimeoutMs;
     pub const drainPending = events.drainPending;
-    const roundtrip = registry.roundtrip;
+    pub const dispatchFor = events.dispatchFor;
+    /// Until the compositor has handled every request sent so far (what
+    /// arrives meanwhile stays queued).
+    pub const roundtrip = registry.roundtrip;
     const handleGlobalRemove = registry.handleGlobalRemove;
 
     // input

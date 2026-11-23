@@ -99,7 +99,7 @@ fn pickThenRun(gpa: std.mem.Allocator, env: Env, a: Args, set: Settings, cfg: *c
     defer bus.deinit();
     if (media.pickInShell(gpa, &bus)) return;
     desktop.identify(gpa, &bus);
-    var cap = (try shot.acquire(gpa, env, &bus, cfg, .{})) orelse return;
+    var cap = (try shot.acquire(gpa, env, &bus, cfg, .{}, null)) orelse return;
     defer cap.deinit(gpa);
     try pickOn(gpa, env, a, set, cfg, &cap, false);
 }

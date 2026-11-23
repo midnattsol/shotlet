@@ -105,6 +105,7 @@ pub fn monitorView(mon: Rect, bw: u32, bh: u32) View {
 pub fn resample(src: []const u32, sw: u32, sh: u32, view: View, dst: []u32, dw: u32, dh: u32, region: Rect) void {
     @setRuntimeSafety(false);
     const r = Rect.intersect(region, .ofSize(dw, dh)) orelse return;
+    if (view.scale == 1.0) return copyRows(src, sw, sh, view, dst, dw, r);
     const n = view.taps();
     const inv = 1.0 / view.scale;
     const swi: i64 = sw;
@@ -151,11 +152,65 @@ pub fn resample(src: []const u32, sw: u32, sh: u32, view: View, dst: []u32, dw: 
                     cnt += 1;
                 }
             }
+            const k = recip[cnt];
             row[@intCast(x)] = if (cnt == 0)
                 letterbox
             else
-                0xFF000000 | (acc_r / cnt) << 16 | (acc_g / cnt) << 8 | (acc_b / cnt);
+                0xFF000000 | ((acc_r * k) >> 18) << 16 | ((acc_g * k) >> 18) << 8 | ((acc_b * k) >> 18);
         }
+    }
+}
+
+/// ceil(2^18 / n): (acc * recip[n]) >> 18 is acc / n for every sum of
+/// up to 16 samples of 255 (a multiply where a divide was, per channel)
+const recip = blk: {
+    var t: [17]u32 = undefined;
+    t[0] = 0;
+    for (1..17) |n| t[n] = ((1 << 18) + n - 1) / n;
+    break :blk t;
+};
+
+test "the reciprocals divide exactly" {
+    for (1..17) |n| {
+        var acc: u32 = 0;
+        while (acc <= 255 * 16) : (acc += 1) try std.testing.expectEqual(acc / @as(u32, @intCast(n)), (acc * recip[n]) >> 18);
+    }
+}
+
+/// resample at scale 1: image rows copied as they are (a monitor
+/// captured at its own scale on its own surface), letterbox outside.
+fn copyRows(src: []const u32, sw: u32, sh: u32, view: View, dst: []u32, dw: u32, r: Rect) void {
+    const img = Rect.ofSize(sw, sh);
+    var y = r.y;
+    while (y < r.bottom()) : (y += 1) {
+        const row = dst[@as(usize, @intCast(y)) * dw ..][0..dw];
+        const sy = y - view.off_y;
+        const span = Rect.intersect(.{ .x = r.x - view.off_x, .y = sy, .w = r.w, .h = 1 }, img);
+        const x0 = if (span) |s| s.x + view.off_x else r.right();
+        const x1 = if (span) |s| s.right() + view.off_x else r.right();
+        @memset(row[@intCast(r.x)..@intCast(@max(r.x, @min(x0, r.right())))], letterbox);
+        if (span) |s| {
+            const from = @as(usize, @intCast(sy)) * sw + @as(usize, @intCast(s.x));
+            @memcpy(row[@intCast(x0)..@intCast(x1)], src[from..][0..@intCast(s.w)]);
+        }
+        @memset(row[@intCast(@max(r.x, x1))..@intCast(r.right())], letterbox);
+    }
+}
+
+test "at scale 1 resample copies rows, letterbox outside, as the general path" {
+    var src: [6 * 4]u32 = undefined;
+    for (&src, 0..) |*p, i| p.* = 0xFF000000 | @as(u32, @intCast(i * 77));
+    const views = [_]View{ .{}, .{ .off_x = 2, .off_y = -1 }, .{ .off_x = -3, .off_y = 2 } };
+    for (views) |v| {
+        var fast: [9 * 5]u32 = @splat(0);
+        var slow: [9 * 5]u32 = @splat(0);
+        const region: Rect = .{ .x = 1, .y = 0, .w = 7, .h = 5 };
+        resample(&src, 6, 4, v, &fast, 9, 5, region);
+        // the general path, nudged off 1.0 by nothing it can see
+        var w = v;
+        w.scale = 1.0 - 1e-12;
+        resample(&src, 6, 4, w, &slow, 9, 5, region);
+        try std.testing.expectEqualSlices(u32, &slow, &fast);
     }
 }
 

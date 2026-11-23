@@ -106,6 +106,10 @@ pub const max_panes = 8;
 /// What one surface shows: a View of the document and its caches. With
 /// one surface per monitor, each pane maps its monitor's image rect.
 pub const Pane = struct {
+    /// where the all-zero masks come from: whole pages straight from
+    /// the kernel, zero until written
+    pub const zeroed = std.heap.page_allocator;
+
     alive: bool = false,
     /// buffer size and scale of the surface
     width: u32 = 0,
@@ -144,9 +148,9 @@ pub const Pane = struct {
         self.viewc = &.{};
         gpa.free(self.viewc_dim);
         self.viewc_dim = &.{};
-        gpa.free(self.stroke_mask);
+        zeroed.free(self.stroke_mask);
         self.stroke_mask = &.{};
-        gpa.free(self.live_cov);
+        zeroed.free(self.live_cov);
         self.live_cov = &.{};
         gpa.free(self.bcache);
         self.bcache = &.{};

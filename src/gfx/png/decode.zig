@@ -78,6 +78,24 @@ pub fn decode(gpa: std.mem.Allocator, data: []const u8) !Image {
     return .{ .width = hdr.width, .height = hdr.height, .pixels = pixels };
 }
 
+/// Decode a `w` x `h` non-interlaced PNG straight into `dst`, its rows
+/// `stride` pixels apart (a strip of a bigger image). error.SizeMismatch,
+/// with nothing written, when the image is not that (decode it then).
+pub fn decodeInto(gpa: std.mem.Allocator, data: []const u8, dst: []u32, stride: u32, w: u32, h: u32) !void {
+    if (data.len < 8 or !std.mem.eql(u8, data[0..8], &chunks.signature)) return error.NotPng;
+    var idat: std.ArrayList(u8) = .empty;
+    defer idat.deinit(gpa);
+    const info = try readChunks(gpa, data, &idat);
+    const hdr = info.header;
+    if (hdr.width != w or hdr.height != h or hdr.interlaced or stride < w) return error.SizeMismatch;
+    if (dst.len < (@as(usize, h) - 1) * stride + w) return error.SizeMismatch;
+    const raw_len, _ = rawSize(hdr, &.{whole_image});
+    const raw = try gpa.alloc(u8, @intCast(raw_len));
+    defer gpa.free(raw);
+    try inflate(gpa, idat.items, raw);
+    try decodePassStrided(&info, whole_image, raw, dst, stride);
+}
+
 const Header = struct {
     width: u32,
     height: u32,
@@ -218,12 +236,18 @@ fn inflate(gpa: std.mem.Allocator, zdata: []const u8, raw: []u8) !void {
 /// Unfilter one pass's scanlines in `raw` and convert them into `out`
 /// (pw*ph pixels).
 fn decodePass(info: *const Info, ps: Pass, raw: []u8, out: []u32) !void {
+    const pw, _ = ps.size(info.header.width, info.header.height);
+    return decodePassStrided(info, ps, raw, out, pw);
+}
+
+/// decodePass into rows `out_stride` pixels apart.
+fn decodePassStrided(info: *const Info, ps: Pass, raw: []u8, out: []u32, out_stride: usize) !void {
     const hdr = info.header;
     const pw, const ph = ps.size(hdr.width, hdr.height);
     const stride = hdr.stride(pw);
     const filter_bpp: usize = @intCast(@max(1, hdr.bitsPerPixel() / 8));
     try unfilter(raw, stride, ph, filter_bpp);
-    convert(raw, out, stride, pw, ph, hdr.color_type, hdr.bit_depth, &info.palette, info.trns_key);
+    convert(raw, out, stride, out_stride, pw, ph, hdr.color_type, hdr.bit_depth, &info.palette, info.trns_key);
 }
 
 /// Copy a pass's pixels to their places in the full image.
@@ -262,11 +286,11 @@ pub const adam7 = [7]Pass{
 };
 
 /// Expand unfiltered scanlines to 0xAARRGGBB.
-fn convert(raw: []const u8, pixels: []u32, stride: usize, width: u32, height: u32, color_type: u8, depth: u8, palette: *const [256]u32, trns: ?[3]u16) void {
+fn convert(raw: []const u8, pixels: []u32, stride: usize, out_stride: usize, width: u32, height: u32, color_type: u8, depth: u8, palette: *const [256]u32, trns: ?[3]u16) void {
     var y: u32 = 0;
     while (y < height) : (y += 1) {
         const line = raw[y * stride + 1 ..][0 .. stride - 1];
-        const out = pixels[y * width ..][0..width];
+        const out = pixels[y * out_stride ..][0..width];
         if (depth < 8) {
             convertPackedRow(line, out, color_type, depth, palette, trns);
         } else {
@@ -443,4 +467,24 @@ test "crop clips to the image and refuses what lies outside" {
     try std.testing.expectEqual(@as(u32, 2), out.height);
     try std.testing.expectEqualSlices(u32, &.{ 2, 3, 6, 7 }, out.pixels);
     try std.testing.expectError(error.OutsideImage, img.crop(std.testing.allocator, .{ .x = 4, .y = 0, .w = 2, .h = 2 }));
+}
+
+test "decodeInto writes the image into a strip of a bigger one, and refuses another size" {
+    const gpa = std.testing.allocator;
+    const enc = @import("encode.zig");
+    const src = [_]u32{ 0xFF010203, 0xFF040506, 0xFF070809, 0xFF0A0B0C, 0xFF0D0E0F, 0xFF101112 };
+    const data = try enc.encode(gpa, &src, 3, 2);
+    defer gpa.free(data);
+    var big: [5 * 4]u32 = @splat(0);
+    // rows 1..2, columns 1..3 of a 5-wide image
+    try decodeInto(gpa, data, big[5 + 1 ..], 5, 3, 2);
+    try std.testing.expectEqualSlices(u32, src[0..3], big[6..9]);
+    try std.testing.expectEqualSlices(u32, src[3..6], big[11..14]);
+    try std.testing.expectEqual(@as(u32, 0), big[5]);
+    try std.testing.expectEqual(@as(u32, 0), big[9]);
+    var img = try decode(gpa, data);
+    defer img.deinit(gpa);
+    try std.testing.expectEqualSlices(u32, &src, img.pixels);
+    try std.testing.expectError(error.SizeMismatch, decodeInto(gpa, data, &big, 5, 2, 2));
+    try std.testing.expectError(error.SizeMismatch, decodeInto(gpa, data, big[0..7], 5, 3, 2));
 }

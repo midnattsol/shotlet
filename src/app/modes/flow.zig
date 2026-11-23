@@ -54,6 +54,10 @@ pub const Edit = struct {
     from_shell: bool = false,
     /// `shotlet window` can pick a window here
     window_ok: bool = true,
+    /// the opening's steps (app/shot/timeline.zig) and who hears when the
+    /// capture is on screen (ui/editor/opening.zig)
+    timeline: ?*@import("../shot/timeline.zig").Timeline = null,
+    on_screen: ?@import("../../ui/editor/opening.zig").Hook = null,
 };
 
 pub const Outcome = union(enum) {

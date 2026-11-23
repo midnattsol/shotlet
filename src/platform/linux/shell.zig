@@ -22,6 +22,7 @@ pub const Words = types.Words;
 pub const CaptureInfo = types.CaptureInfo;
 pub const Handoff = types.Handoff;
 pub const HandedCapture = types.HandedCapture;
+pub const FrozenInput = types.FrozenInput;
 pub const Cli = types.Cli;
 
 /// How Settings names the integration (GNOME's) and the desktop's
@@ -86,6 +87,11 @@ pub fn requestCapture(_: std.mem.Allocator, bus: *dbus.Connection, req: mode.Req
 
 /// Put our window titled `title` at x, y (logical); false when it cannot.
 pub const place = shell1.place;
+
+/// The capture handed over as `id` is on screen in Shotlet (or never
+/// will be): the shell takes its frozen frame away, and says what the
+/// pointer and keyboard did while it was up.
+pub const unfreeze = shell1.unfreeze;
 
 /// The capture it handed over.
 pub fn loadHanded(gpa: std.mem.Allocator, env: Env, args: HandedCapture) !capture.Capture {

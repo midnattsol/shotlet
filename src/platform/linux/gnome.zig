@@ -79,5 +79,6 @@ comptime {
     _ = @import("gnome/gtk_accel.zig");
     _ = @import("gnome/mode_keys.zig");
     _ = @import("gnome/shellcap.zig");
+    _ = @import("gnome/shellcap_place.zig");
     _ = @import("gnome/gsettings.zig");
 }

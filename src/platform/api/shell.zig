@@ -60,6 +60,22 @@ pub const Cli = union(enum) {
 /// The answer to asking the integration to take a capture itself.
 pub const Handoff = enum { started, declined, unavailable };
 
+/// What the pointer and keyboard did while the integration showed its
+/// frozen frame of a handed capture (it holds them meanwhile), in the
+/// desktop's logical coordinates: the editor takes it up from there.
+pub const FrozenInput = struct {
+    /// the left button went down at (x, y)
+    pressed: bool = false,
+    x: i32 = 0,
+    y: i32 = 0,
+    /// ... and came up again at (rx, ry) (a click), or is still down
+    released: bool = false,
+    rx: i32 = 0,
+    ry: i32 = 0,
+    /// Escape was pressed
+    escaped: bool = false,
+};
+
 /// A capture the integration took and started Shotlet on (`shotlet
 /// --from-shell ID ...`): where its pieces are.
 pub const HandedCapture = struct {

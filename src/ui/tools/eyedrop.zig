@@ -28,7 +28,7 @@ pub fn toggle(ed: *Editor) !void {
 fn colorAt(ed: *const Editor, m: Point) ?u32 {
     const ip = ed.pn().view.toImg(m);
     if (ip.x < 0 or ip.y < 0 or ip.x >= ed.img.width or ip.y >= ed.img.height) return null;
-    return ed.layer[@as(usize, @intCast(ip.y)) * ed.img.width + @as(usize, @intCast(ip.x))] | 0xFF000000;
+    return ed.layerPixels()[@as(usize, @intCast(ip.y)) * ed.img.width + @as(usize, @intCast(ip.x))] | 0xFF000000;
 }
 
 /// A click while picking. True when it was the picker's.

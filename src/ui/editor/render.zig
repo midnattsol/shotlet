@@ -16,6 +16,7 @@ const fade = @import("fade.zig");
 const winpick = @import("winpick.zig");
 const caches = @import("caches.zig");
 const bands = @import("../bands.zig");
+const opening = @import("opening.zig");
 
 const Editor = editor.Editor;
 const Canvas = render.Canvas;
@@ -76,20 +77,25 @@ pub fn renderFrame(ed: *Editor) !void {
     }
     const surfs = ed.win.surfaceList();
     for (ed.panes[0..ed.n_panes], 0..) |*p, i| {
-        if (!p.alive or !p.due or p.viewc.len == 0 or i >= surfs.len or surfs[i].frame_pending) continue;
+        if (!p.alive or !p.due or i >= surfs.len or surfs[i].frame_pending) continue;
         ed.pane_i = @intCast(i);
         try renderPane(ed, @intCast(i));
         p.due = false;
     }
+    if (allShown(ed)) opening.readyShown(ed);
+}
+
+/// Every surface has presented a full frame.
+fn allShown(ed: *const Editor) bool {
+    if (ed.n_panes == 0) return false;
+    for (ed.panes[0..ed.n_panes]) |p| if (p.alive and p.last_frame.len == 0) return false;
+    return true;
 }
 
 /// Draw pane `idx` (the current one) into its surface's back buffer and
 /// present it.
 pub fn renderPane(ed: *Editor, idx: u8) !void {
-    if (ed.pn().view_stale) {
-        ed.pn().view_stale = false;
-        caches.refreshView(ed, ed.screenRect());
-    }
+    try caches.preparePane(ed, idx);
     try beauty_cache.ensure(ed);
     ed.pn().overlays.len = 0;
     ui.collectOverlays(ed, &ed.pn().overlays);
@@ -116,6 +122,7 @@ pub fn renderPane(ed: *Editor, idx: u8) !void {
     drawLiveShapes(ed, &canvas);
     ui.drawChrome(ed, &canvas);
     if (entering) |k| fade.blendIn(ed, px, k);
+
     p.len = 0;
     p.addAll(&ed.pn().overlays);
     ed.pn().last_frame = px;

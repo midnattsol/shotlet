@@ -45,6 +45,15 @@ pub fn outputBufferSize(logical_w: u32, logical_h: u32, approx: [2]u32, o: *cons
     return .{ mw, mh };
 }
 
+/// An output's scale * 120 from its mode and logical size (what
+/// fractional-scale-v1 announces for a surface on it); null when unknown.
+pub fn outputScale120(o: *const Output) ?u32 {
+    const out = o.logicalRect();
+    if (!o.has_logical or out.w <= 0 or o.mode_w <= 0 or o.mode_h <= 0) return null;
+    const mw: i64 = if (o.transform & 1 != 0) o.mode_h else o.mode_w;
+    return @intCast(@divTrunc(mw * 120 + @divTrunc(out.w, 2), out.w));
+}
+
 /// Integer buffer scale: the compositor's preferred_buffer_scale when it
 /// sent one, else the largest scale among the outputs the surface is on,
 /// else the assigned output's, else 1.
@@ -66,12 +75,21 @@ pub fn applySize(w: *Window, idx: u8) !void {
     var size = bufferSize(s.logical_w, s.logical_h, s.scale120, fractional, s.int_scale);
     if (fractional) {
         if (w.outputs.covering(s)) |o| {
-            if (outputBufferSize(s.logical_w, s.logical_h, size, o)) |px| size = px;
+            // a surface made for this output takes its pixels, whatever
+            // scale the compositor announces first (mutter: the primary
+            // monitor's, until the surface is on its own)
+            const k = if (s.output != 0) outputScale120(o) orelse s.scale120 else s.scale120;
+            const approx = bufferSize(s.logical_w, s.logical_h, k, true, s.int_scale);
+            if (outputBufferSize(s.logical_w, s.logical_h, approx, o)) |px| size = px;
         }
     }
     if (size[0] == 0 or size[1] == 0) return;
     if (size[0] != s.width or size[1] != s.height or s.pool.id == 0) {
         try buffers.createBuffers(w, idx, size[0], size[1]);
+    } else if (s.scale120 != s.told_scale120) {
+        // the same pixels at another scale: the UI's size changes
+        s.told_scale120 = s.scale120;
+        try w.queue.append(w.alloc, .{ .resize = .{ .w = size[0], .h = size[1], .surface = idx } });
     }
     if (s.viewport != 0) {
         try w.conn.request(s.viewport, wl.wp_viewport.set_destination, &.{
@@ -149,6 +167,18 @@ test "buffer size for fractional and integer scales" {
     try t.expectEqual([2]u32{ 1200, 1820 }, bufferSize(600, 910, 240, false, 2));
     // nonsense scale clamps to 1
     try t.expectEqual([2]u32{ 600, 910 }, bufferSize(600, 910, 120, false, 0));
+}
+
+test "an output's scale from its mode and logical size" {
+    const t = std.testing;
+    try t.expectEqual(@as(?u32, 240), outputScale120(&testOutput(1728, 1080, 3456, 2160, 0)));
+    try t.expectEqual(@as(?u32, 180), outputScale120(&testOutput(2560, 1440, 3840, 2160, 0)));
+    try t.expectEqual(@as(?u32, 180), outputScale120(&testOutput(1440, 2560, 3840, 2160, 1)));
+    try t.expectEqual(@as(?u32, null), outputScale120(&testOutput(1728, 1080, 0, 0, 0)));
+    // the buffer of a surface made for the 2x output while 1.5 is announced
+    const o = testOutput(1728, 1080, 3456, 2160, 0);
+    const approx = bufferSize(1728, 1080, outputScale120(&o).?, true, 1);
+    try t.expectEqual([2]u32{ 3456, 2160 }, outputBufferSize(1728, 1080, approx, &o).?);
 }
 
 test "integer scale selection" {

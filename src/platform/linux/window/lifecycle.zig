@@ -4,6 +4,7 @@
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
+const scale = @import("scale.zig");
 const output = @import("output.zig");
 const buffers = @import("buffers.zig");
 const registry = @import("registry.zig");
@@ -66,7 +67,9 @@ fn openOn(w: *Window, idx: u8, title: []const u8, o: *const Output) !void {
     try surface.create(w, idx, title, .{ .fullscreen = true }, o.id, o.global);
     const s = &w.surfaces[idx];
     s.int_scale = @max(1, o.scale);
-    if (s.fs_obj == 0) s.scale120 = @intCast(s.int_scale * 120);
+    // the output's own scale until the compositor says (the buffers are
+    // made at the right size on the first configure)
+    s.scale120 = if (s.fs_obj == 0) @intCast(s.int_scale * 120) else scale.outputScale120(o) orelse s.scale120;
     output.setOutputRect(s, o);
 }
 

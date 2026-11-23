@@ -48,6 +48,10 @@ fn monitorOf(ed: *Editor, idx: u8) ?capture.Monitor {
 }
 
 /// Surface `idx` is now `w` x `h` buffer pixels (0 x 0: it went away).
+/// Nothing big is made here: a pane's caches (and the layer) are made
+/// by preparePane, right before its first full frame (a size replaced
+/// before then costs nothing; editor/opening.zig makes them off the
+/// event loop while the capture itself is on screen).
 pub fn onResize(ed: *Editor, idx: u8, w: u32, h: u32) !void {
     if (idx >= editor.max_panes) return;
     if (w == 0 or h == 0) return dropPane(ed, idx);
@@ -61,19 +65,49 @@ pub fn onResize(ed: *Editor, idx: u8, w: u32, h: u32) !void {
     defer ed.pane_i = if (ed.panes[saved].alive) saved else idx;
     ed.pane_i = idx;
     const p = &ed.panes[idx];
-    try allocPane(ed, p, idx, w, h);
-    if (ed.layer.len == 0) {
-        ed.layer = try ed.alloc.alloc(u32, ed.img.pixels.len);
-        try doc_mod.composeRegion(ed.alloc, ed.layer, ed.img.pixels, ed.img.width, ed.img.height, ed.doc.shapes.items, ed.lifted, ed.doc.imageRect());
-    }
+    sizePane(ed, p, idx, w, h);
     if (idx == 0) applyPresetSelection(ed);
-    // made whole right before its first frame (renderPane)
+    // made whole right before its first frame (preparePane)
     p.view_stale = true;
     for (&p.pending) |*q| {
         q.len = 0;
         q.add(ed.screenRect());
     }
     ed.needs_render = true;
+}
+
+/// Make what pane `idx` needs for a full frame: the layer (when shapes
+/// are drawn), the pane's caches at its size, its view made whole.
+/// Cheap once done.
+pub fn preparePane(ed: *Editor, idx: u8) !void {
+    const saved = ed.pane_i;
+    defer ed.pane_i = saved;
+    ed.pane_i = idx;
+    if (!ed.panes[idx].alive) return;
+    if (ed.doc.shapes.items.len > 0) try ensureLayer(ed);
+    try fillPane(ed, &ed.panes[idx]);
+    ed.pn().content_dirty.add(ed.screenRect());
+    ed.pn().gen +%= 1;
+}
+
+/// Pane `p`'s caches and its view made whole, touching nothing else of
+/// the editor (the opening makes several panes at once, a thread each;
+/// the layer must not change meanwhile).
+pub fn fillPane(ed: *const Editor, p: *Pane) !void {
+    if (!p.alive) return;
+    if (p.viewc.len == 0) try allocPane(ed, p);
+    if (!p.view_stale) return;
+    p.view_stale = false;
+    viewBands(ed, p, .ofSize(p.width, p.height));
+    p.bcache_valid = false;
+}
+
+/// The layer: the image with every committed shape, made when the
+/// first shape is (layerPixels is the image until then).
+pub fn ensureLayer(ed: *Editor) !void {
+    if (ed.layer.len != 0) return;
+    ed.layer = try ed.alloc.alloc(u32, ed.img.pixels.len);
+    try doc_mod.composeRegion(ed.alloc, ed.layer, ed.img.pixels, ed.img.width, ed.img.height, ed.doc.shapes.items, ed.lifted, ed.doc.imageRect());
 }
 
 /// The surface of pane `idx` went away (output unplugged): move the
@@ -91,19 +125,34 @@ fn dropPane(ed: *Editor, idx: u8) void {
     ed.needs_render = true;
 }
 
-/// Start pane `p` over at the surface's size, with fresh caches.
-fn allocPane(ed: *Editor, p: *Pane, idx: u8, w: u32, h: u32) !void {
+/// Pane `p` at the surface's size and view; its caches are kept when
+/// the size is the same (a tall image scrolled), else dropped.
+fn sizePane(ed: *Editor, p: *Pane, idx: u8, w: u32, h: u32) void {
     const sf = ed.win.surfaceList()[idx];
-    p.release(ed.alloc);
-    p.* = .{ .alive = true, .width = w, .height = h, .scale120 = sf.scale120 };
-    const n: usize = @as(usize, w) * h;
+    const keep = p.alive and p.width == w and p.height == h and p.viewc.len == @as(usize, w) * h;
+    if (keep) {
+        p.scale120 = sf.scale120;
+        p.bcache_valid = false;
+        for (&p.backdrops) |*b| b.hash = 0;
+        p.gen +%= 1;
+    } else {
+        p.release(ed.alloc);
+        p.* = .{ .alive = true, .width = w, .height = h, .scale120 = sf.scale120 };
+    }
     p.view = viewFor(ed, idx);
+}
+
+/// Pane `p`'s buffer-sized caches. The two masks start all zero and
+/// are mostly never written: fresh pages from the kernel (Pane.zeroed)
+/// cost nothing until a stroke touches them.
+fn allocPane(ed: *const Editor, p: *Pane) !void {
+    const n: usize = @as(usize, p.width) * p.height;
+    errdefer p.release(ed.alloc);
     p.viewc = try ed.alloc.alloc(u32, n);
     p.viewc_dim = try ed.alloc.alloc(u32, n);
-    p.stroke_mask = try ed.alloc.alloc(u8, n);
-    @memset(p.stroke_mask, 0);
-    p.live_cov = try ed.alloc.alloc(u8, n);
-    @memset(p.live_cov, 0);
+    p.stroke_mask = try editor.Pane.zeroed.alloc(u8, n);
+    p.live_cov = try editor.Pane.zeroed.alloc(u8, n);
+    p.view_stale = true;
 }
 
 /// Dev: the selection presetSelection asked for, once the first pane
@@ -128,7 +177,7 @@ pub fn scrollTall(ed: *Editor, notches: i32) !void {
 /// Re-render `b` (buffer pixels) of the view caches from the layer.
 pub fn refreshView(ed: *Editor, b: Rect) void {
     const r = Rect.intersect(b, ed.screenRect()) orelse return;
-    viewBands(ed, r);
+    viewBands(ed, ed.pn(), r);
     ed.pn().content_dirty.add(r);
     ed.pn().gen +%= 1;
     if (ed.selBuf()) |s| {
@@ -139,14 +188,14 @@ pub fn refreshView(ed: *Editor, b: Rect) void {
 /// Make the current pane's view (and its dimmed copy) of buffer rect
 /// `r`: a big one in bands, a thread each (a 4K pane is tens of
 /// millions of source pixels to average).
-fn viewBands(ed: *Editor, r: Rect) void {
+fn viewBands(ed: *const Editor, pane: *const Pane, r: Rect) void {
     const Ctx = struct {
         ed: *const Editor,
         p: *const Pane,
         fn band(c: @This(), b: Rect) void {
             const e = c.ed;
             const p = c.p;
-            view_mod.resample(e.layer, e.img.width, e.img.height, p.view, p.viewc, p.width, p.height, b);
+            view_mod.resample(e.layerPixels(), e.img.width, e.img.height, p.view, p.viewc, p.width, p.height, b);
             const w: usize = p.width;
             var y: usize = @intCast(b.y);
             while (y < @as(usize, @intCast(b.bottom()))) : (y += 1) {
@@ -155,7 +204,7 @@ fn viewBands(ed: *Editor, r: Rect) void {
             }
         }
     };
-    bands.run(r, Ctx{ .ed = ed, .p = ed.pn() }, Ctx.band);
+    bands.run(r, Ctx{ .ed = ed, .p = pane }, Ctx.band);
 }
 
 /// Re-render image rect `r` on every pane.
@@ -184,7 +233,7 @@ pub fn dirtyAll(ed: *Editor, comptime whole: bool) void {
 
 /// Recompose image rect `r` of the layer and everything derived.
 pub fn recompose(ed: *Editor, r: Rect) !void {
-    if (ed.layer.len == 0) return;
+    try ensureLayer(ed);
     var margin: i32 = 0;
     for (ed.doc.shapes.items) |*s| margin += s.readMargin();
     const reg = r.expand(margin);

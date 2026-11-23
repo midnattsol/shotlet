@@ -23,6 +23,8 @@ const ext_modules = [_][2][]const u8{
     .{ "windowpick.js", @embedFile("gnome_ext_windowpick_js") },
     .{ "scroll.js", @embedFile("gnome_ext_scroll_js") },
     .{ "util.js", @embedFile("gnome_ext_util_js") },
+    .{ "freeze.js", @embedFile("gnome_ext_freeze_js") },
+    .{ "spawn.js", @embedFile("gnome_ext_spawn_js") },
 };
 const ext_schema = @embedFile("gnome_ext_schema");
 const ext_schema_compiled = @embedFile("gnome_ext_schema_compiled");

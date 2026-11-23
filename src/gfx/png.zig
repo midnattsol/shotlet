@@ -17,6 +17,7 @@ pub const Image = dec.Image;
 pub const max_side = dec.max_side;
 pub const max_pixels = dec.max_pixels;
 pub const decode = dec.decode;
+pub const decodeInto = dec.decodeInto;
 
 pub const EncodeOptions = enc.EncodeOptions;
 pub const encode = enc.encode;

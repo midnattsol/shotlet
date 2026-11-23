@@ -19,6 +19,7 @@ scenario_shell() {
     plain_desktop
     shell_install
     shell_print
+    shell_early
     shell_refused
     "$BIN" gnome-integration uninstall >"$OUT/uninstall.log" 2>&1
     dump_keys >"$OUT/keys-after.txt"
@@ -65,13 +66,38 @@ shell_print() {
     check "  ... with the desktop's pixels, not the cursor or a dim" pixel_near "$OUT/clip.png" 200 100 "$DESKTOP_BG"
 }
 
+# input on the shell's frozen frame, before Shotlet's editor is up, is
+# the editor's: a drag begun there selects, Escape closes it
+shell_early() {
+    local n f
+    ext_gap
+    n=$(shell_count "frozen screen shown")
+    drv key print
+    wait_until 5 _shell_count_ge "frozen screen shown" $((n + 1))
+    drv move 0 300 200 && drv down && drv move 0 500 350 && drv move 0 700 500
+    check "a drag begun on the shell's frozen frame goes on in the editor" shell_wait 15 "startup: capture=" 2
+    sleep 1.5
+    drv move 0 700 500 && drv up
+    keys enter
+    check "  ... and selects from where it began" clip_is clip 400x300
+    ext_gap
+    n=$(shell_count "open timeline")
+    f=$(shell_count "frozen screen shown")
+    drv key print
+    wait_until 5 _shell_count_ge "frozen screen shown" $((f + 1))
+    keys esc
+    check "Escape on the frozen frame closes the editor as it comes up" shell_wait 15 "Escape on the frozen frame: closed" 1
+    sleep 1
+    check "  ... before it was ever ready" eq "$(shell_count "open timeline")" "$n"
+}
+
 # anyone else asking over the bus is refused
 shell_refused() {
     gdbus call --session --dest dev.shotlet.Shell1 --object-path /dev/shotlet/Shell1 \
         --method dev.shotlet.Shell1.Capture >"$OUT/gdbus.txt" 2>&1
     check "Capture() from another program is refused" grep -q "AccessDenied" "$OUT/gdbus.txt"
     sleep 1
-    check "  ... and takes no screenshot" eq "$(shell_count "startup: capture=")" 1
+    check "  ... and takes no screenshot" eq "$(shell_count "startup: capture=")" 3
     check "  ... nor leaves a file" capture_dir_empty
 }
 

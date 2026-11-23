@@ -58,6 +58,8 @@ pub const Surface = struct {
     geom_extra_w: u32 = 0,
     geom_extra_h: u32 = 0,
     viewport: u32 = 0,
+    /// the scale120 the editor was last told of (a .resize)
+    told_scale120: u32 = 0,
     fs_obj: u32 = 0, // wp_fractional_scale_v1
     frame_cb: u32 = 0,
     /// integer buffer scale used when fractional scaling is unavailable

@@ -22,6 +22,8 @@ comptime {
     _ = @import("relaunch.zig");
     _ = @import("report.zig");
     _ = @import("shot.zig");
+    _ = @import("shot/timeline.zig");
+    _ = @import("shot/handed.zig");
     _ = @import("shot_args.zig");
     _ = @import("statefile.zig");
     _ = @import("stateflag.zig");

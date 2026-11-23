@@ -1,11 +1,14 @@
-# How fluid each surface is on two 4K-class monitors (sourced by
-# tools/e2e.sh's inner side, with its helpers): 3456x2160 at 2 beside
-# 3840x2160 at 1.5 (primary), everything on the 1.5 one.
-#   perf-owner   each surface driven like a hand, then its loop line
-#                (SHOTLET_LOOP_STATS: frame times and the longest time
-#                away from the compositor) printed, and checked against
-#                bounds (perf_bounds; in a release build: a debug build
-#                is several times slower)
+# How fast the editor opens and how fluid each surface is on two
+# 4K-class monitors (sourced by tools/e2e.sh's inner side, with its
+# helpers): 3456x2160 at 2 beside 3840x2160 at 1.5 (primary), everything
+# on the 1.5 one.
+#   perf-owner   three captures from the key, each one's timeline (the
+#                shell's frozen frame, Shotlet's: open timeline) printed
+#                and checked (perf_open); then each surface driven like a
+#                hand, its loop line (SHOTLET_LOOP_STATS: frame times and
+#                the longest time away from the compositor) printed, and
+#                checked against bounds (perf_bounds). Bounds hold in a
+#                release build: a debug build is several times slower
 # The lines are "loop: TITLE: N frames p50 .. p95 .. max ..; longest away
 # from the socket .. ms" in the compositor log ($OUT/loop.txt).
 
@@ -48,6 +51,10 @@ scenario_perf_owner() {
     free_print
     require_pygtk || return
     drv move 1 1900 1000
+    perf_open
+    # PERF_OPEN_ONLY=1: the captures' timelines and the editor's first
+    # frames only
+    if [ -n "${PERF_OPEN_ONLY:-}" ]; then perf_loops | sed 's/^/  /'; return; fi
     start_page "$PAGE_H"
     perf_editor
     perf_card
@@ -58,11 +65,45 @@ scenario_perf_owner() {
     perf_bounds
 }
 
+# perf_open: three captures from the key, each closed with Esc; their
+# lines in $OUT/open.txt. The second and third (the first one also wakes
+# the desktop's portal) must show the frozen screen within PERF_FROZEN ms
+# of the key (default 100: the shell's own frame), have Shotlet's first
+# frame on screen within PERF_SHOWN ms (default 600) and the editor ready
+# within PERF_READY ms (default 900)
+perf_open() {
+    local i n
+    for i in 1 2 3; do
+        n=$(shell_count "open timeline")
+        drv key print
+        check "capture $i: the editor opens" shell_wait 15 "open timeline" $((n + 1))
+        sleep 0.5
+        keys esc
+        sleep 1.5
+        ext_gap
+    done
+    grep -E "frozen screen (shown|given)|Shotlet: captured|capture detail|first frame on|ready [0-9]|open timeline" "$SHOTLET_E2E_SHELL_LOG" >"$OUT/open.txt"
+    sed 's/^/  /' "$OUT/open.txt"
+    perf_open_bounds 2
+    perf_open_bounds 3
+}
+
+# perf_open_bounds N: capture N's timeline against the bounds
+perf_open_bounds() {
+    local frozen shown ready
+    frozen=$(grep -o "frozen screen shown [0-9]* ms" "$OUT/open.txt" | sed -n "$1p" | grep -o "[0-9]*")
+    shown=$(grep -o "open timeline.*" "$OUT/open.txt" | sed -n "$1p" | grep -o "on screen [0-9]*" | grep -o "[0-9]*")
+    ready=$(grep -o "open timeline.*" "$OUT/open.txt" | sed -n "$1p" | grep -o "ready [0-9]*" | grep -o "[0-9]*")
+    check "  capture $1: frozen screen ${frozen:-?} ms after the key (under ${PERF_FROZEN:-100})" test "${frozen:-99999}" -lt "${PERF_FROZEN:-100}"
+    check "  capture $1: Shotlet's first frame on screen at ${shown:-?} ms (under ${PERF_SHOWN:-600})" test "${shown:-99999}" -lt "${PERF_SHOWN:-600}"
+    check "  capture $1: the editor ready at ${ready:-?} ms (under ${PERF_READY:-900})" test "${ready:-99999}" -lt "${PERF_READY:-900}"
+}
+
 # perf_bounds: on this layout every surface with 20 frames or more keeps
 # its p95 under PERF_P95 ms (default 20: a 60 Hz frame and a margin for
 # the headless compositor), none stays away from the compositor
 # PERF_AWAY ms (default 500), and the editor's first frame is up within
-# PERF_FIRST ms (default 250)
+# PERF_FIRST ms of its start (default 100)
 perf_bounds() {
     local line title n p95 away first
     while IFS= read -r line; do
@@ -76,14 +117,16 @@ perf_bounds() {
         check "  $title: never $away ms away from the compositor (under ${PERF_AWAY:-500})" test "${away:-99999}" -lt "${PERF_AWAY:-500}"
     done <"$OUT/loop.txt"
     first=$(grep -o "first frame on every surface [0-9]* ms" "$SHOTLET_E2E_SHELL_LOG" | head -1 | grep -o "[0-9]*" | head -1)
-    check "  the editor's first frame in ${first:-?} ms (under ${PERF_FIRST:-250})" test "${first:-99999}" -lt "${PERF_FIRST:-250}"
+    check "  the editor's first frame in ${first:-?} ms (under ${PERF_FIRST:-100})" test "${first:-99999}" -lt "${PERF_FIRST:-100}"
 }
 
 # the editor: an area, a rectangle in it, the pointer over everything,
 # the magnifier (Ctrl held); copied: the thumbnail
 perf_editor() {
+    local n
+    n=$(shell_count "startup: capture=")
     drv key print
-    check "the editor comes up" shell_editor 1
+    check "the editor comes up" shell_editor $((n + 1))
     perf_drag 1 600 400 3000 1700 60
     keys r
     perf_drag 1 900 600 2400 1400 60
@@ -125,6 +168,8 @@ perf_record() {
 # the scrolling capture's picker, the capture with its control, the
 # tall image in the editor
 perf_scroll() {
+    local n
+    n=$(shell_count "startup: capture=")
     ext_gap
     drv key ctrl+super+print
     check "the scrolling picker comes up" shell_wait 10 "scrolling capture: pick a region" 1
@@ -134,7 +179,7 @@ perf_scroll() {
     perf_wander 1 20
     keys enter
     check "the scrolling capture ends" shell_wait 90 "scrolling capture ended" 1
-    shell_wait 10 "startup: capture=" 2
+    shell_wait 10 "startup: capture=" $((n + 1))
     sleep 1.5
     perf_wander 1 40
     keys esc esc

@@ -121,6 +121,35 @@ pub fn captureWindows(bus: *dbus.Connection, id: []const u8, out: []i32) []const
     return readInts(&r, out) catch &.{};
 }
 
+/// Unfreeze(id): Shotlet shows capture `id` (or never will): the
+/// extension's frozen frame of it goes, and the reply says what the
+/// pointer and keyboard did meanwhile (Version 5; null from an older
+/// extension, or when it does not answer soon).
+pub fn unfreeze(bus: *dbus.Connection, id: []const u8) ?FrozenInput {
+    var m = dbus.Marshal.init(bus.alloc);
+    defer m.deinit();
+    m.putString(id) catch return null;
+    var reply = call(bus, "Unfreeze", "s", m.buf.items, 500) catch return null;
+    defer reply.deinit(bus.alloc);
+    var r = reply.reader();
+    return readFrozenInput(&r) catch null;
+}
+
+pub const FrozenInput = @import("../../api/shell.zig").FrozenInput;
+
+/// Unfreeze's reply, (bbiibiib): pressed, x, y, released, rx, ry, escaped.
+fn readFrozenInput(r: *dbus.Reader) !FrozenInput {
+    var in: FrozenInput = .{};
+    in.pressed = try r.readU32() != 0;
+    in.x = @bitCast(try r.readU32());
+    in.y = @bitCast(try r.readU32());
+    in.released = try r.readU32() != 0;
+    in.rx = @bitCast(try r.readU32());
+    in.ry = @bitCast(try r.readU32());
+    in.escaped = try r.readU32() != 0;
+    return in;
+}
+
 /// An `ai` array into `out` (whole rectangles only, the topmost ones).
 fn readInts(r: *dbus.Reader, out: []i32) ![]const i32 {
     const bytes = try r.readU32();

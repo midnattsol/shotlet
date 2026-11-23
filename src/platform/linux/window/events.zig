@@ -112,6 +112,20 @@ pub fn drainPending(w: *Window) !void {
     try pumpRepeat(w);
 }
 
+/// Wait at most `ms` on the socket and dispatch whatever came, input
+/// included, leaving it queued for nextEvent (a caller that is not ready
+/// for input yet but must keep answering the compositor).
+pub fn dispatchFor(w: *Window, ms: i32) !void {
+    try w.conn.flush();
+    var fds = [_]sys.pollfd{.{ .fd = w.conn.fd, .events = sys.POLL.IN, .revents = 0 }};
+    if (try sys.poll(&fds, pollTimeoutMs(w, ms)) > 0) {
+        loopstats.arrive();
+        defer loopstats.leave();
+        try dispatchOne(w);
+    }
+    try drainPending(w);
+}
+
 /// Block for one event and dispatch it.
 pub fn dispatchOne(w: *Window) !void {
     const ev = try w.conn.readEvent();

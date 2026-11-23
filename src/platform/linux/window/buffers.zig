@@ -42,6 +42,7 @@ pub fn createBuffers(w: *Window, idx: u8, width: u32, height: u32) !void {
     for (&s.buffers, 0..) |*b, i| try createBuffer(c, s, b, i * buf_size, width, height);
     s.width = width;
     s.height = height;
+    s.told_scale120 = s.scale120;
     try c.flush();
     if (idx == 0) surface.syncPrimary(w);
     try w.queue.append(w.alloc, .{ .resize = .{ .w = width, .h = height, .surface = idx } });
@@ -81,6 +82,15 @@ pub fn backBufferOf(w: *Window, idx: u8) ![]u32 {
     const s = &w.surfaces[idx];
     const b = &s.buffers[s.cur_buf];
     return @as([*]u32, @ptrCast(b.pixels.ptr))[0 .. b.pixels.len / 4];
+}
+
+/// Draw surface idx's next frame without waiting for the frame callback
+/// of the one presented last (the compositor may hold it back for long
+/// while something covers the surface; the second buffer is free).
+pub fn skipFrameWait(w: *Window, idx: u8) void {
+    if (idx >= w.n_surfaces) return;
+    w.surfaces[idx].frame_pending = false;
+    if (idx == 0) surface.syncPrimary(w);
 }
 
 /// Attach + commit surface 0's current back buffer.

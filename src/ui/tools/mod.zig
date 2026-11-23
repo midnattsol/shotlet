@@ -327,7 +327,7 @@ pub fn exportPixels(ed: *Editor) !doc_mod.Exported {
     const keep_all = ed.tools.export_measures or for (doc.shapes.items) |s| {
         if (s.tool == .ruler) break false;
     } else true;
-    if (keep_all) return doc_mod.exportImage(ed.alloc, ed.layer, ed.img.width, ed.img.height, doc.exportRect(), ed.beautify);
+    if (keep_all) return doc_mod.exportImage(ed.alloc, ed.layerPixels(), ed.img.width, ed.img.height, doc.exportRect(), ed.beautify);
     var list: std.ArrayList(Shape) = .empty;
     defer list.deinit(ed.alloc);
     for (doc.shapes.items) |s| if (s.tool != .ruler) try list.append(ed.alloc, s);

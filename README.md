@@ -713,6 +713,8 @@ Each job has one place; use it rather than writing another:
 | Colours and metrics of every surface, light and dark | `src/ui/theme.zig` (buttons: `src/ui/barkit.zig`) |
 | Picking an area: drag, move, resize, click, arrows | `src/ui/areasel.zig` (the editor through `src/ui/editor/area.zig`) |
 | A picker over the frozen desktop (surfaces, dim, fade, the area's chrome) | `src/ui/freeze_pick.zig` (the recording and scrolling capture pickers) |
+| Opening the editor: the capture as the first frame, the caches made off the event loop; when each step happened | `src/ui/editor/opening.zig` (the steps: `src/app/shot/timeline.zig`) |
+| A capture the GNOME integration hands over: its frozen frame in the shell, waiting for its pieces, decoding each into place | `gnome-extension/shotlet@midnattsol.github.io/freeze.js`; `src/platform/linux/gnome/shellcap.zig`, `shellcap_place.zig` (loaded while Shotlet starts: `src/app/shot/handed.zig`) |
 | The `SHOTLET_*` switches | `src/platform/api/switches.zig` |
 | Unit-test helpers (temporary dirs and `$HOME`, images, fonts) | `src/testutil.zig` |
 
@@ -760,9 +762,11 @@ Both suites print PASS, FAIL or SKIP per check and a summary, and exit
 `scenario_NAME` function in `tools/e2e/scenarios/*.sh` or
 `tools/container/scenarios/*.sh`, with a row in that suite's
 `table.sh` (monitors, flags, what it checks: what `--list` prints).
-`rec-bench` (the encoders' CPU, memory and size) and `perf-owner` (each
-surface's frame times on two 4K monitors at 2 and 1.5) only run when
-named. Every window in the GNOME suite logs its frame times as it closes
+`rec-bench` (the encoders' CPU, memory and size) and `perf-owner` (on
+two 4K monitors at 2 and 1.5: the time from the key to the frozen
+screen, to the editor's first frame and to a ready editor, then each
+surface's frame times; build it with `-Doptimize=ReleaseSafe` for its
+bounds) only run when named. Every window in the GNOME suite logs its frame times as it closes
 (`SHOTLET_LOOP_STATS`); `modes-scroll-mixed` fails when the scrolling
 capture's picker or control kept the compositor's pings waiting.
 `zig build e2e-driver` builds the binaries the scripts need when run
