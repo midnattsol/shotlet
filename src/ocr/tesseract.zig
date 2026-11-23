@@ -1,13 +1,12 @@
 //! Optional text recognition with Tesseract, loaded at run time
-//! (api.libs: libtesseract.so.5 or .so.4 on Linux) through its C API, so Shotlet keeps zero
+//! (optlib: libtesseract.so.5 or .so.4 on Linux) through its C API, so Shotlet keeps zero
 //! build dependencies: without the library the history simply has no
 //! search field. Pixels are handed over as packed RGB, so Leptonica's own
 //! API is not needed (libtesseract pulls it in itself).
 
 const std = @import("std");
 const switches = @import("../platform/api/switches.zig");
-const SpinLock = @import("spinlock.zig").SpinLock;
-const libs = @import("../platform/api.zig").libs;
+const optlib = @import("../optlib.zig");
 
 const Handle = *opaque {};
 
@@ -23,30 +22,22 @@ const Api = struct {
     TessBaseAPIEnd: *const fn (Handle) callconv(.c) void,
 };
 
-var lib: ?libs.Lib = null;
-var api: ?Api = null;
-var tried = false;
-var mutex: SpinLock = .{};
+const engine = optlib.Once(optlib.Table(Api), load);
 
-/// Tesseract is installed (loads it on first call).
-pub fn available() bool {
-    mutex.lock();
-    defer mutex.unlock();
-    if (tried) return api != null;
-    tried = true;
-    if (switches.get().no_ocr) return false;
-    lib = libs.open("tesseract", &.{ "5", "4" });
-    var l = &(lib orelse return false);
-    var a: Api = undefined;
-    const info = @typeInfo(Api).@"struct";
-    inline for (info.field_names, info.field_types) |name, T| {
-        @field(a, name) = l.lookup(T, name) orelse {
-            std.log.info("libtesseract lacks {s}; no text search", .{name});
-            return false;
-        };
+fn load(why: *[]const u8) anyerror!optlib.Table(Api) {
+    if (switches.get().no_ocr) {
+        why.* = "turned off (SHOTLET_NO_OCR)";
+        return error.Off;
     }
-    api = a;
-    return true;
+    return optlib.bind(Api, "tesseract", &.{ "5", "4" }, why) catch |err| {
+        if (err == error.MissingSymbol) std.log.info("{s}; no text search", .{why.*});
+        return err;
+    };
+}
+
+/// Tesseract is installed (loads it on first call, from any thread).
+pub fn available() bool {
+    return engine.available();
 }
 
 /// Languages to recognise: $SHOTLET_OCR_LANG (e.g. "eng+spa"), else the
@@ -97,8 +88,7 @@ pub fn recognizeTsv(alloc: std.mem.Allocator, pixels: []const u32, width: u32, h
 }
 
 fn run(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, what: enum { text, tsv }, ppi: u32) ?[]u8 {
-    if (!available()) return null;
-    const a = api.?;
+    const a = &(engine.get() orelse return null).api;
     if (width == 0 or height == 0) return null;
     const rgb = alloc.alloc(u8, @as(usize, width) * height * 3) catch return null;
     defer alloc.free(rgb);

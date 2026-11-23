@@ -5,7 +5,7 @@
 //! repeats or skips pictures, never queues them).
 
 const std = @import("std");
-const sync = @import("sync.zig");
+const sync = @import("../sync.zig");
 const region = @import("region.zig");
 const media = @import("../platform/api.zig").record;
 

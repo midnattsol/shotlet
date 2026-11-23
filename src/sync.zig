@@ -1,9 +1,11 @@
-//! Small thread primitives on the platform's futex (api.sys; std's need
-//! an Io instance, which PipeWire's callback threads do not have): a mutex and an event
-//! counter to wait on with a timeout.
+//! The program's thread primitives, on the platform's futex (api.sys;
+//! std's need an Io instance, which PipeWire's callback threads do not
+//! have): a mutex, and an event counter to wait on with a timeout. Used
+//! by recording, OCR, the history's background reading and the optional
+//! native libraries (optlib.zig).
 
 const std = @import("std");
-const sys = @import("../platform/api.zig").sys;
+const sys = @import("platform/api.zig").sys;
 
 const wait = sys.futexWait;
 const wake = sys.futexWake;

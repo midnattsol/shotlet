@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const timeline = @import("timeline.zig");
-const sync = @import("sync.zig");
+const sync = @import("../sync.zig");
 
 pub const rate = 48000;
 pub const channels = 2;
