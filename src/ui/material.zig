@@ -373,6 +373,6 @@ pub const Snapshot = struct {
     }
 };
 
-test {
+comptime {
     _ = @import("material_test.zig");
 }

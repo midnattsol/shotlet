@@ -106,7 +106,7 @@ fn writeIdat(alloc: std.mem.Allocator, out: *std.ArrayList(u8), bands: []Band, d
 }
 
 const decode = @import("decode.zig").decode;
-const testImage = @import("testing.zig").testImage;
+const screenLike = @import("../../testutil.zig").screenLike;
 
 test "png roundtrip" {
     const alloc = std.testing.allocator;
@@ -138,7 +138,7 @@ test "png parallel bands roundtrip, every filter, odd sizes" {
         const h = sz[1];
         const px = try alloc.alloc(u32, w * h);
         defer alloc.free(px);
-        testImage(px, w, k);
+        screenLike(px, w, k);
         for ([_]u32{ 1, 3, 8 }) |threads| {
             for ([_]bool{ true, false }) |filter| {
                 const enc = try encodeWith(alloc, px, w, h, .{ .threads = threads, .filter = filter });
@@ -159,7 +159,7 @@ test "png rgba: transparent pixels round-trip, rgb stays the default" {
     const h = 200;
     const px = try alloc.alloc(u32, w * h);
     defer alloc.free(px);
-    testImage(px, w, 9);
+    screenLike(px, w, 9);
     for (px, 0..) |*p, i| p.* = (p.* & 0x00FFFFFF) | (@as(u32, @intCast((i * 7) % 256)) << 24);
     for ([_]u32{ 1, 4 }) |threads| {
         for ([_]EncodeOptions.Alpha{ .always, .auto }) |mode| {

@@ -197,13 +197,11 @@ pub fn box(src: []const u32, ss: usize, sw: usize, sh: usize, dst: []u32, dw: us
 
 const testing = std.testing;
 
-fn checkerboard(px: []u32, w: u32) void {
-    for (px, 0..) |*p, i| p.* = if (((i % w) + (i / w)) % 2 == 0) 0xFFFFFFFF else 0xFF000000;
-}
+const checker = @import("../testutil.zig").checker;
 
 test "a 1 px checkerboard shrunk 4x is an even grey" {
     var src: [64 * 64]u32 = undefined;
-    checkerboard(&src, 64);
+    checker(&src, 64);
     var dst: [16 * 16]u32 = undefined;
     try scale(testing.allocator, &src, 64, 64, &dst, 16, 16);
     for (dst) |p| {
@@ -217,7 +215,7 @@ test "a 1 px checkerboard shrunk 4x is an even grey" {
 
 test "odd ratios stay near grey and never overshoot" {
     var src: [50 * 30]u32 = undefined;
-    checkerboard(&src, 50);
+    checker(&src, 50);
     var dst: [20 * 12]u32 = undefined;
     // 2.5x: each target pixel covers 2.5 x 2.5 source pixels
     try scale(testing.allocator, &src, 50, 30, &dst, 20, 12);

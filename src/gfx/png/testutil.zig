@@ -1,34 +1,13 @@
-//! Test-only helpers: synthetic images, a reference PNG writer for every
-//! colour type, and a mutation fuzzer for the decoder.
+//! The PNG tests' helpers: a reference PNG writer for every colour type
+//! and a mutation fuzzer for the decoder (synthetic images are
+//! src/testutil.zig's).
 
 const std = @import("std");
 const flate = std.compress.flate;
-const sys = @import("../../platform/api.zig").sys;
 const chunks = @import("chunks.zig");
 const dec = @import("decode.zig");
 const paeth = @import("filters.zig").paeth;
 const Pass = dec.Pass;
-
-pub fn testImage(px: []u32, w: u32, seed: u64) void {
-    var prng = std.Random.DefaultPrng.init(seed);
-    const r = prng.random();
-    for (px, 0..) |*p, i| {
-        const x: u32 = @intCast(i % w);
-        const y: u32 = @intCast(i / w);
-        // flat areas, gradients and noise, like a screenshot
-        p.* = if ((x / 7 + y / 5) % 3 == 0)
-            0xFF000000 | ((x * 8 & 0xFF) << 16) | ((y * 13 & 0xFF) << 8) | @as(u32, @intCast(i % 251))
-        else if (r.intRangeAtMost(u8, 0, 9) == 0)
-            0xFF000000 | @as(u32, r.int(u24))
-        else
-            0xFF202428;
-    }
-}
-
-/// A sample file of the system, whole (up to 4 MiB); error when absent.
-pub fn readTestFile(alloc: std.mem.Allocator, path: [:0]const u8) ![]u8 {
-    return sys.readFileAlloc(alloc, path, 4 * 1024 * 1024);
-}
 
 /// Decode must fail cleanly (never panic or over-allocate) on mutated input.
 pub fn fuzzDecode(alloc: std.mem.Allocator, seed_png: []const u8, iterations: usize, rng_seed: u64) !void {

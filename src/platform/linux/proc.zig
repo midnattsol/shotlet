@@ -199,9 +199,10 @@ pub fn output(gpa: std.mem.Allocator, argv: []const ?[*:0]const u8, envp: Envp, 
 }
 
 test "spawn runs a program with pipes and reports its status" {
-    const envp: Envp = @ptrCast(std.c.environ);
+    const testutil = @import("../../testutil.zig");
+    const envp = testutil.envp();
     var buf: [256]u8 = undefined;
-    const sh = which(&buf, envp, "sh") orelse return error.SkipZigTest;
+    const sh = try testutil.program(&buf, "sh");
     const gpa = std.testing.allocator;
     const r = try output(gpa, &.{ sh.ptr, "-c", "echo hi; exit 3" }, envp, 1024, 5000);
     defer gpa.free(r.out);

@@ -3,7 +3,7 @@
 
 const std = @import("std");
 const joining_mod = @import("joining.zig");
-const u32s = @import("test_util.zig").u32s;
+const u32s = @import("testutil.zig").u32s;
 const Joining = joining_mod.Joining;
 const joining = joining_mod.joining;
 

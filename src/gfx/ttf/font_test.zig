@@ -2,7 +2,7 @@
 //! it (plus system fonts as extra seeds, when installed).
 
 const std = @import("std");
-const sys = @import("../../platform/api.zig").sys;
+const testutil = @import("../../testutil.zig");
 const Font = @import("font.zig").Font;
 const sfnt_truetype = @import("sfnt.zig").sfnt_truetype;
 
@@ -210,14 +210,15 @@ test "font parser survives mutated fonts" {
     defer alloc.free(embedded);
     try fuzzFont(alloc, embedded, 3000, 1, 8);
 
+    const fonts = testutil.fonts;
     const seeds = [_]struct { path: []const u8, iters: usize, glyphs: u16 }{
-        .{ .path = "/usr/share/fonts/truetype/noto/NotoSansLycian-Regular.ttf", .iters = 400, .glyphs = 64 },
-        .{ .path = "/usr/share/fonts/opentype/urw-base35/StandardSymbolsPS.otf", .iters = 150, .glyphs = 256 },
-        .{ .path = "/usr/share/fonts/opentype/urw-base35/D050000L.otf", .iters = 100, .glyphs = 256 },
-        .{ .path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", .iters = 40, .glyphs = 200 },
+        .{ .path = fonts.noto_lycian, .iters = 400, .glyphs = 64 },
+        .{ .path = fonts.standard_symbols, .iters = 150, .glyphs = 256 },
+        .{ .path = fonts.dingbats, .iters = 100, .glyphs = 256 },
+        .{ .path = fonts.dejavu_sans, .iters = 40, .glyphs = 200 },
     };
     for (seeds, 0..) |s, i| {
-        const data = sys.readFileAlloc(alloc, s.path, 2 * 1024 * 1024) catch continue;
+        const data = (try testutil.optionalFile(s.path, 2 * 1024 * 1024)) orelse continue;
         defer alloc.free(data);
         try fuzzFont(alloc, data, s.iters, 10 + i, s.glyphs);
     }

@@ -321,10 +321,10 @@ inline fn convertRow(line: []const u8, out: []u32, color_type: u8, bps: usize, p
 }
 
 const encode = @import("encode.zig").encode;
-const helpers = @import("testing.zig");
-const testImage = helpers.testImage;
+const helpers = @import("testutil.zig");
+const testutil = @import("../../testutil.zig");
+const screenLike = testutil.screenLike;
 const fuzzDecode = helpers.fuzzDecode;
-const readTestFile = helpers.readTestFile;
 const buildTestPng = helpers.buildTestPng;
 const testSample = helpers.testSample;
 
@@ -332,7 +332,7 @@ test "png decoder survives mutated input" {
     const alloc = std.testing.allocator;
     // embedded seed: a small encoded image
     var px: [24 * 16]u32 = undefined;
-    testImage(&px, 24, 7);
+    screenLike(&px, 24, 7);
     const seed = try encode(alloc, &px, 24, 16);
     defer alloc.free(seed);
     try fuzzDecode(alloc, seed, 3000, 1);
@@ -352,7 +352,7 @@ test "png decoder survives mutated input" {
         "/usr/share/lyx/images/classic/buffer-reload.png", // 16-bit rgba
     };
     for (files, 0..) |path, i| {
-        const data = readTestFile(alloc, path) catch continue;
+        const data = (try testutil.optionalFile(path, 4 * 1024 * 1024)) orelse continue;
         defer alloc.free(data);
         // the unmodified file must decode
         var img = try decode(alloc, data);

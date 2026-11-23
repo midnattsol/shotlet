@@ -126,15 +126,13 @@ pub fn saveScreencastToken(alloc: std.mem.Allocator, home: []const u8, token: []
     try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = token }});
 }
 
-fn testDir() ![]u8 {
-    return sys.makeTempDir(std.testing.allocator, "/tmp", "shotlet-test");
-}
+const testutil = @import("../testutil.zig");
 
 test "config save/load roundtrip" {
     const alloc = std.testing.allocator;
-    const root = try testDir();
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-config");
+    defer tmp.deinit();
+    const root = tmp.path;
     var dir_buf: [512]u8 = undefined;
     const dir = try std.fmt.bufPrint(&dir_buf, "{s}/shotlet", .{root});
 
@@ -177,9 +175,9 @@ test "config save/load roundtrip" {
 
 test "saving merges: a stale snapshot never reverts other keys" {
     const alloc = std.testing.allocator;
-    const root = try testDir();
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-config");
+    defer tmp.deinit();
+    const root = tmp.path;
     var dir_buf: [512]u8 = undefined;
     const dir = try std.fmt.bufPrint(&dir_buf, "{s}/shotlet", .{root});
 
@@ -210,15 +208,15 @@ test "saving merges: a stale snapshot never reverts other keys" {
     var path_buf: [600]u8 = undefined;
     const data = try sys.readFileAlloc(alloc, try configFile(dir, &path_buf), 64 * 1024);
     defer alloc.free(data);
-    try std.testing.expect(std.mem.indexOf(u8, data, "future_option=42\n") != null);
+    try testutil.expectContains(data, "future_option=42\n");
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, data, "notify="));
 }
 
 test "forgetting the restore token asks again and survives a settings save" {
     const alloc = std.testing.allocator;
-    const root = try testDir();
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-config");
+    defer tmp.deinit();
+    const root = tmp.path;
     var dir_buf: [512]u8 = undefined;
     const dir = try std.fmt.bufPrint(&dir_buf, "{s}/shotlet", .{root});
     try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = "tok" }});
@@ -236,9 +234,9 @@ test "forgetting the restore token asks again and survives a settings save" {
 
 test "settings from cliptux are carried over once, also from XDG_CONFIG_HOME" {
     const alloc = std.testing.allocator;
-    const root = try testDir();
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-config");
+    defer tmp.deinit();
+    const root = tmp.path;
 
     var b1: [512]u8 = undefined;
     var b2: [512]u8 = undefined;
@@ -248,9 +246,8 @@ test "settings from cliptux are carried over once, also from XDG_CONFIG_HOME" {
     var b3: [512]u8 = undefined;
     try sys.writeFile(try std.fmt.bufPrint(&b3, "{s}/config", .{old_dir}), "default_thickness=11\n");
 
-    const saved = env.xdg;
-    defer env.xdg = saved;
-    env.xdg.config_home = xdg_home;
+    const xdg = testutil.useXdg(.{ .config_home = xdg_home });
+    defer xdg.restore();
 
     const migrated = load(alloc, root);
     try std.testing.expectEqual(@as(i32, 11), migrated.default_thickness);
@@ -265,9 +262,9 @@ test "settings from cliptux are carried over once, also from XDG_CONFIG_HOME" {
 
 test "migration copies when the new directory already exists" {
     const alloc = std.testing.allocator;
-    const root = try testDir();
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-config");
+    defer tmp.deinit();
+    const root = tmp.path;
     var b1: [512]u8 = undefined;
     var b2: [512]u8 = undefined;
     var b3: [512]u8 = undefined;
@@ -283,9 +280,9 @@ test "migration copies when the new directory already exists" {
 
 test "binds of an older file are written anew in the neutral notation" {
     const alloc = std.testing.allocator;
-    const root = try testDir();
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-config");
+    defer tmp.deinit();
+    const root = tmp.path;
     var b1: [512]u8 = undefined;
     var b2: [600]u8 = undefined;
     const dir = try std.fmt.bufPrint(&b1, "{s}/shotlet", .{root});
@@ -306,9 +303,9 @@ test "binds of an older file are written anew in the neutral notation" {
 
 test "an older file's loupe=selecting or auto is written anew as hold" {
     const alloc = std.testing.allocator;
-    const root = try testDir();
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-config");
+    defer tmp.deinit();
+    const root = tmp.path;
     var b1: [512]u8 = undefined;
     var b2: [600]u8 = undefined;
     const dir = try std.fmt.bufPrint(&b1, "{s}/shotlet", .{root});

@@ -28,5 +28,5 @@ comptime {
     _ = @import("png/decode.zig");
     _ = @import("png/bands.zig");
     _ = @import("png/encode.zig");
-    _ = @import("png/testing.zig");
+    _ = @import("png/testutil.zig");
 }

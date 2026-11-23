@@ -1,6 +1,7 @@
 const std = @import("std");
 const capture = @import("platform/api.zig").capture;
 const front = @import("cli/front.zig");
+const out = @import("cli/out.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
 const launch = @import("ui/tools/launch.zig");
@@ -31,7 +32,12 @@ pub fn main(init: std.process.Init) !void {
     // for code handed no Env, then the Env everyone else gets
     switches.init(init.environ_map);
     env_mod.xdg = .read(init.environ_map);
-    const env = try readEnv(arena, init);
+    out.command = parsed.chain;
+    const env = readEnv(arena, init) catch |err| switch (err) {
+        error.NoRuntimeDir => out.fail(.failure, "XDG_RUNTIME_DIR is not set to an absolute path", .{}),
+        error.NoHome => out.fail(.failure, "HOME is not set to an absolute path", .{}),
+        else => out.failWith(err),
+    };
     launch.env = env;
     try @import("app/dispatch.zig").run(gpa, env, parsed);
 }
@@ -54,91 +60,26 @@ fn nonEmpty(v: ?[]const u8) ?[]const u8 {
     return if (s.len == 0) null else s;
 }
 
+// The test root, the one `test {}` that reaches other files. Every folder
+// has one root that reaches, in a `comptime {}` block (which, unlike
+// `test {}`, does not count as a test), the files of the folder that
+// have tests and the roots of its subfolders, nothing outside it. A
+// folder's root is the file that fronts it (`gfx/text.zig` for gfx/text/,
+// ui/tools/mod.zig, linux/backend.zig, platform/api.zig for platform/ and
+// api/), else a `tests.zig` inside it. A file with tests kept apart
+// reaches them itself (`material.zig` → material_test.zig). Shared test
+// helpers: src/testutil.zig.
 test {
-    _ = @import("platform/api.zig");
+    _ = @import("app/tests.zig");
     _ = @import("cli/tests.zig");
-    _ = @import("app/dispatch.zig");
-    _ = @import("app/config.zig");
-    _ = @import("app/history.zig");
-    _ = @import("app/annot.zig");
-    _ = @import("app/keep.zig");
-    _ = @import("app/quick.zig");
-    _ = @import("app/accel.zig");
-    _ = @import("app/scroll/stitch.zig");
-    _ = @import("app/modes/mode.zig");
-    _ = @import("app/modes/settings.zig");
-    _ = @import("app/modes/geom.zig");
-    _ = @import("app/modes/last_area.zig");
-    _ = @import("app/modes/window_frame.zig");
-    _ = @import("app/modes/cli.zig");
-    _ = @import("app/scroll/capture.zig");
-    _ = @import("app/scroll/available.zig");
-    _ = @import("app/scroll/session.zig");
-    _ = @import("app/scroll/stop.zig");
-    _ = @import("app/pin.zig");
-    _ = @import("app/clipimg.zig");
-    _ = @import("app/binds.zig");
-    _ = @import("app/quick_ipc.zig");
-    _ = @import("app/editor_prefs.zig");
-    _ = @import("app/stateflag.zig");
-    _ = @import("ui/beautify.zig");
-    _ = @import("ui/drag.zig");
-    _ = @import("ui/help.zig");
-    _ = @import("ui/rect_list.zig");
-    _ = @import("ui/caret.zig");
-    _ = @import("ui/scroll_steps.zig");
-    _ = @import("ui/scroll_hud.zig");
-    _ = @import("ui/transfer.zig");
-    _ = @import("app/editfile.zig");
-    _ = @import("app/toastwin.zig");
-    _ = @import("app/history_ui.zig");
-    _ = @import("ocr/search.zig");
+    _ = @import("encode/tests.zig");
+    _ = @import("gfx/tests.zig");
+    _ = @import("ocr/tests.zig");
+    _ = @import("platform/api.zig");
+    _ = @import("record/tests.zig");
+    _ = @import("redact/tests.zig");
+    _ = @import("ui/tests.zig");
     _ = @import("sync.zig");
     _ = @import("optlib.zig");
-    _ = @import("ocr/page.zig");
-    _ = @import("ocr/reflow.zig");
-    _ = @import("redact/detect.zig");
-    _ = @import("redact/locate.zig");
-    _ = @import("ui/floatui.zig");
-    _ = @import("gfx/text.zig");
-    _ = @import("ui/editor.zig");
-    _ = @import("ui/textbox.zig");
-    _ = @import("ui/shapes.zig");
-    _ = @import("ui/tools/mod.zig");
-    _ = @import("ui/editor_ui.zig");
-    _ = @import("ui/doc.zig");
-    _ = @import("ui/view.zig");
-    _ = @import("ui/tall_view.zig");
-    _ = @import("ui/script_input.zig");
-    _ = @import("ui/hsv.zig");
-    _ = @import("ui/textedit.zig");
-    _ = @import("gfx/png.zig");
-    _ = @import("gfx/jpeg.zig");
-    _ = @import("gfx/imgload.zig");
-    _ = @import("gfx/codec_libs.zig");
-    _ = @import("gfx/effects.zig");
-    _ = @import("gfx/resample.zig");
-    _ = @import("app/capture.zig");
-    _ = @import("app/env.zig");
-    _ = @import("app/statefile.zig");
-    _ = switches;
-    _ = @import("app/clock.zig");
-    _ = @import("app/shot.zig");
-    _ = @import("gfx/font.zig");
-    _ = @import("gfx/render.zig");
-    _ = @import("platform/api.zig").window;
-    _ = @import("ui/settings.zig");
-    _ = @import("ui/frame.zig");
-    _ = @import("ui/barkit.zig");
-    _ = @import("ui/selchrome.zig");
-    _ = @import("ui/lens.zig");
-    _ = @import("ui/dim.zig");
-    _ = @import("ui/settings_modes.zig");
-    _ = @import("ui/settings_steps.zig");
-    _ = @import("ui/theme.zig");
-    _ = @import("ui/motion.zig");
-    _ = @import("ui/icons.zig");
-    _ = @import("gfx/path.zig");
-    _ = @import("gfx/hint.zig");
-    _ = @import("record/tests.zig");
+    _ = @import("testutil.zig");
 }

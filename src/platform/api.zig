@@ -66,7 +66,10 @@ pub const ocr = backend.ocr;
 /// Optional shared libraries opened at run time (image codecs, libav*).
 pub const libs = backend.libs;
 
-test {
+comptime {
     _ = backend;
     _ = contract;
+    _ = @import("api/window.zig");
+    _ = @import("api/keys.zig");
+    _ = @import("api/switches.zig");
 }

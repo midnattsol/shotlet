@@ -298,7 +298,7 @@ pub fn decode(alloc: std.mem.Allocator, data: []const u8) Error!png.Image {
     return d.pixels();
 }
 
-test {
+comptime {
     _ = huff;
     _ = idct_mod;
     _ = @import("jpeg_test.zig");

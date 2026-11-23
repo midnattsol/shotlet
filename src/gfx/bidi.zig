@@ -47,5 +47,5 @@ comptime {
     _ = arabic;
     _ = @import("bidi/explicit.zig");
     _ = @import("bidi/sequence.zig");
-    _ = @import("bidi/test_util.zig");
+    _ = @import("bidi/testutil.zig");
 }

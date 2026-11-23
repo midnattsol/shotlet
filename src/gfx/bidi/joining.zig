@@ -2,7 +2,7 @@
 //! joining form of every character as OpenType feature masks.
 
 const std = @import("std");
-const u32s = @import("test_util.zig").u32s;
+const u32s = @import("testutil.zig").u32s;
 
 pub const Joining = enum { U, R, D, C, T };
 

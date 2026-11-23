@@ -93,7 +93,7 @@ fn tableName(t: store.Table) []const u8 {
     };
 }
 
-test {
+comptime {
     _ = @import("perms/select.zig");
     _ = store;
     _ = reset;

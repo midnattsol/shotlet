@@ -193,10 +193,9 @@ test "libav writes a playable MP4 when the libraries are there" {
     if (!av.available()) return error.SkipZigTest;
     const sys = @import("../platform/api.zig").sys;
     const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-av");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
-    const path = try std.fmt.allocPrintSentinel(gpa, "{s}/t.mp4", .{dir}, 0);
+    var tmp = try @import("../testutil.zig").TmpDir.init("shotlet-av");
+    defer tmp.deinit();
+    const path = try tmp.joinZ("t.mp4");
     defer gpa.free(path);
     const w = 160;
     const h = 90;

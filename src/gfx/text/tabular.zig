@@ -56,7 +56,8 @@ pub fn digitOf(cp: u21) ?u4 {
 
 test "tabular digits all take the same advance" {
     const alloc = std.testing.allocator;
-    var font = ttf.Font.load(alloc, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") catch return; // skip if absent
+    const testutil = @import("../../testutil.zig");
+    var font = try testutil.systemFont(testutil.fonts.dejavu_sans);
     defer font.deinit();
     const t = compute(alloc, &font);
     var adv: ?f64 = null;

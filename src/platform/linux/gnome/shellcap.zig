@@ -255,11 +255,7 @@ test "pieces must tile the monitors" {
     try std.testing.expectError(error.BadLayout, assignPieces(mons, scale, owner[0..scale.len]));
 }
 
-fn solid(gpa: std.mem.Allocator, w: u32, h: u32, color: u32) !png.Image {
-    const px = try gpa.alloc(u32, @as(usize, w) * h);
-    @memset(px, color);
-    return .{ .width = w, .height = h, .pixels = px };
-}
+const testutil = @import("../../../testutil.zig");
 
 test "pieces stitch into mixed-scale monitors" {
     const gpa = std.testing.allocator;
@@ -269,9 +265,9 @@ test "pieces stitch into mixed-scale monitors" {
     const mons = try parseLayout("0,0,1280,720,2;1280,0,1280,720,1", &mb);
     const pieces = try parseLayout("0,0,1280,360,2;0,360,1280,360,2;1280,0,1280,720,1", &pb);
     var imgs = [_]png.Image{
-        try solid(gpa, 2560, 720, 0xFFFF0000),
-        try solid(gpa, 2560, 720, 0xFF00FF00),
-        try solid(gpa, 1280, 720, 0xFF0000FF),
+        try testutil.solidImage(2560, 720, 0xFFFF0000),
+        try testutil.solidImage(2560, 720, 0xFF00FF00),
+        try testutil.solidImage(1280, 720, 0xFF0000FF),
     };
     defer for (&imgs) |*im| im.deinit(gpa);
     var cap = try build(gpa, mons, pieces, &imgs);
@@ -291,7 +287,7 @@ test "a fractional monitor in one piece next to a 1x one" {
     const gpa = std.testing.allocator;
     var mb: [4]LogicalMonitor = undefined;
     const mons = try parseLayout("0,0,1712,963,1.4953271150588989;1712,0,1280,720,1", &mb);
-    var imgs = [_]png.Image{ try solid(gpa, 2560, 1440, 0xFF111111), try solid(gpa, 1280, 720, 0xFF222222) };
+    var imgs = [_]png.Image{ try testutil.solidImage(2560, 1440, 0xFF111111), try testutil.solidImage(1280, 720, 0xFF222222) };
     defer for (&imgs) |*im| im.deinit(gpa);
     var cap = try build(gpa, mons, mons, &imgs);
     defer cap.deinit(gpa);
@@ -303,9 +299,9 @@ test "a fractional monitor in one piece next to a 1x one" {
 
 test "pieces are read once, deleted, and never through a symlink" {
     const gpa = std.testing.allocator;
-    const rt = try sys.makeTempDir(gpa, "/tmp", "shotlet-rt");
-    defer gpa.free(rt);
-    defer sys.removeTree(rt);
+    var tmp = try testutil.TmpDir.init("shotlet-rt");
+    defer tmp.deinit();
+    const rt = tmp.path;
     var dbuf: [1024]u8 = undefined;
     const dir = try dirPath(&dbuf, rt);
     sys.mkdirMode(dir, 0o700);

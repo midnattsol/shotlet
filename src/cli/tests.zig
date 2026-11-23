@@ -1,6 +1,6 @@
-//! The command line's tests.
+//! The command line's tests: the folder's test root (src/main.zig).
 
-test {
+comptime {
     _ = @import("commands.zig");
     _ = @import("suggest.zig");
     _ = @import("value.zig");

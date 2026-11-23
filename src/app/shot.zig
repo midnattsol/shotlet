@@ -26,11 +26,6 @@ const open_tool = @import("../ui/tools/open.zig");
 const launch = @import("../ui/tools/launch.zig");
 const Env = env_mod.Env;
 
-comptime {
-    _ = deliver;
-    _ = @import("filename.zig");
-}
-
 fn warmupCapture() void {
     platform.capture.warmup();
 }

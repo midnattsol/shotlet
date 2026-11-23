@@ -244,9 +244,10 @@ pub const Font = struct {
     }
 };
 
+const testutil = @import("../../testutil.zig");
+
 test "load system font and rasterize" {
-    const alloc = std.testing.allocator;
-    var font = Font.load(alloc, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") catch return; // skip if absent
+    var font = try testutil.systemFont(testutil.fonts.dejavu_sans);
     defer font.deinit();
     const gid = font.glyphIndex('A');
     try std.testing.expect(gid != 0);
@@ -266,9 +267,7 @@ test "load system font and rasterize" {
 }
 
 test "cff collection: CJK glyph from a .ttc" {
-    const alloc = std.testing.allocator;
-    const path = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc";
-    var font = Font.loadFace(alloc, path, 0) catch return; // skip if absent
+    var font = try testutil.systemFace(testutil.fonts.noto_cjk, 0);
     defer font.deinit();
     try std.testing.expect(font.cff != null);
     const gid = font.glyphIndex(0x6F22); // 漢
@@ -283,8 +282,7 @@ test "cff collection: CJK glyph from a .ttc" {
 }
 
 test "otf with cff outlines" {
-    const alloc = std.testing.allocator;
-    var font = Font.load(alloc, "/usr/share/fonts/opentype/urw-base35/NimbusSans-Regular.otf") catch return;
+    var font = try testutil.systemFont(testutil.fonts.nimbus_sans);
     defer font.deinit();
     const g = try font.rasterize(font.glyphIndex('B'), 24.0);
     try std.testing.expect(g.w > 8 and g.h > 12);

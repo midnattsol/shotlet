@@ -299,6 +299,5 @@ pub const Editor = struct {
 
 comptime {
     _ = fade;
-    _ = dim;
     _ = capmode;
 }
