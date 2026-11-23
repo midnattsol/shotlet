@@ -1,5 +1,5 @@
-//! Colour matching on 0xAARRGGBB pictures for shotlet-drive's `find` and
-//! `runs` commands.
+//! Colour matching on 0xAARRGGBB pictures for the drivers' `find`,
+//! `findpng` and `runs` commands.
 
 const std = @import("std");
 
@@ -67,4 +67,17 @@ pub fn columnRuns(px: []const u32, w: u32, h: u32, x: u32, want: u32, tol: u32) 
         inside = hit;
     }
     return runs;
+}
+
+test "blobs, masks and runs" {
+    // 4x3: a 2x2 red square at (1,0) and a lone red pixel at (3,2)
+    const r: u32 = 0xFFFF2020;
+    const k: u32 = 0xFF000000;
+    var px = [_]u32{ k, r, r, k, k, r, r, k, k, k, k, r };
+    const gpa = std.testing.allocator;
+    try std.testing.expectEqual([4]u32{ 1, 0, 2, 1 }, try findBlob(gpa, &px, 4, 3, 0xFF2020, 8, 1));
+    try std.testing.expectError(error.NotFound, findBlob(gpa, &px, 4, 3, 0xFF2020, 8, 3));
+    try std.testing.expectEqual(@as(u32, 1), columnRuns(&px, 4, 3, 1, 0xFF2020, 8));
+    maskOutside(&px, 4, .{ 3, 0, 4, 3 }, 0xFF2020);
+    try std.testing.expectEqual([4]u32{ 3, 2, 3, 2 }, try findBlob(gpa, &px, 4, 3, 0xFF2020, 8, 1));
 }

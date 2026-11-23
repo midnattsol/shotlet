@@ -1,6 +1,7 @@
 //! shotlet-wldrive's connection state: the Wayland globals and outputs it
 //! tracks, and its virtual pointer and keyboard (wlroots' virtual input or
-//! KWin's fake input).
+//! KWin's fake input): the backend half of the drivers' command set
+//! (tools/drivers/common/commands.zig).
 
 const std = @import("std");
 const kit = @import("shotlet");
@@ -9,13 +10,13 @@ const dbus = kit.dbus;
 const sys = kit.sys;
 const proto = @import("proto.zig");
 const grab_ = @import("grab.zig");
-const util = @import("util.zig");
+const common = @import("driver_common");
 const Output = proto.Output;
 const vp = proto.vp;
 const vk = proto.vk;
 const fake = proto.fake;
-const eql = util.eql;
-const sleepMs = util.sleepMs;
+const eql = common.loop.eql;
+const sleepMs = common.loop.sleepMs;
 
 const Driver = @This();
 
@@ -26,6 +27,8 @@ g: proto.Globals = .{},
 outputs: std.ArrayList(Output) = .empty,
 kwin: bool = false,
 bus: ?dbus.Connection = null,
+/// the session bus's address, when there is one
+bus_addr: ?[]const u8 = null,
 pointer: u32 = 0,
 keyboard: u32 = 0,
 /// modifiers held on the virtual keyboard (xkb masks, us keymap)
@@ -218,7 +221,7 @@ pub fn key(self: *Driver, code: u32, pressed: bool) !void {
         try self.conn.request(self.keyboard, vk.key, &.{ .{ .uint = now() }, .{ .uint = code }, .{ .uint = @intFromBool(pressed) } });
         // wlroots does not derive modifiers from a virtual keyboard's
         // keys: say which are held
-        const m = util.modMask(code);
+        const m = common.keys.modMask(code);
         if (m != 0) {
             if (pressed) self.mods |= m else self.mods &= ~m;
             try self.conn.request(self.keyboard, vk.modifiers, &.{ .{ .uint = self.mods }, .{ .uint = 0 }, .{ .uint = 0 }, .{ .uint = 0 } });
@@ -239,18 +242,61 @@ pub fn button(self: *Driver, btn: u32, pressed: bool) !void {
     sleepMs(15);
 }
 
-/// The output's current picture (the caller frees its pixels).
-pub fn grab(self: *Driver, o: *const Output) !grab_.Frame {
+/// The monitor's current picture.
+pub fn grab(self: *Driver, name: []const u8) !common.images.Frame {
+    const o = try self.monitor(name);
     if (self.kwin) return grab_.kwin(self, o);
     if (self.g.screencopy == 0) return error.NoScreencopy;
     return grab_.screencopy(self, o);
 }
 
-/// Write `px` as a PNG at `path`; answers WxH.
-pub fn writePng(self: *Driver, path: []const u8, px: []const u32, w: u32, h: u32) ![]const u8 {
-    const data = try kit.png.encode(self.gpa, px, w, h);
-    defer self.gpa.free(data);
-    sys.unlink(path) catch {};
-    try sys.writeFile(path, data);
-    return std.fmt.bufPrint(&self.out, "{d}x{d}", .{ w, h });
+/// Absolute motion to X, Y of monitor `name` (logical pixels).
+pub fn move(self: *Driver, name: []const u8, x: f64, y: f64) !void {
+    const o = try self.monitor(name);
+    try self.moveTo(@as(f64, @floatFromInt(o.x)) + x, @as(f64, @floatFromInt(o.y)) + y);
+}
+
+/// Relative pointer motion.
+pub fn rel(self: *Driver, dx: f64, dy: f64) !void {
+    if (self.kwin) {
+        try self.conn.request(self.g.fake, fake.pointer_motion, &.{ .{ .fixed = dx }, .{ .fixed = dy } });
+    } else {
+        try self.conn.request(self.pointer, vp.motion, &.{ .{ .uint = now() }, .{ .fixed = dx }, .{ .fixed = dy } });
+        try self.conn.request(self.pointer, vp.frame, &.{});
+    }
+    try self.conn.flush();
+    sleepMs(15);
+}
+
+/// "NAME:X,Y,WxH@SCALE ..." in the logical layout.
+pub fn monitors(self: *Driver) []const u8 {
+    var w: usize = 0;
+    for (self.outputs.items) |o| {
+        const s = std.fmt.bufPrint(self.out[w..], "{s}{s}:{d},{d},{d}x{d}@{d}", .{ if (w > 0) " " else "", o.name(), o.x, o.y, o.w, o.h, o.scale }) catch break;
+        w += s.len;
+    }
+    return self.out[0..w];
+}
+
+/// Own the tray watcher on the session bus (KWin's connection, else one
+/// made now).
+pub fn sniWatcher(self: *Driver, ms: u32) ![]const u8 {
+    if (self.bus == null) self.bus = try dbus.Connection.connectSession(self.gpa, self.bus_addr orelse return error.NoBus);
+    return common.sni.watch(self.gpa, &self.bus.?, ms, &self.out);
+}
+
+// Mutter only: keysyms and filming a monitor's PipeWire stream
+pub fn keysym(_: *Driver, _: u32) !void {
+    return error.Unsupported;
+}
+pub fn film(_: *Driver, _: []const u8) !void {
+    return error.Unsupported;
+}
+pub fn cut(_: *Driver, _: []const u8, _: ?[4]u32) ![]const u8 {
+    return error.Unsupported;
+}
+
+/// Read whatever events arrived meanwhile (between commands).
+pub fn idle(self: *Driver) !void {
+    return self.drain();
 }
