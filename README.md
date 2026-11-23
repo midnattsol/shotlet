@@ -23,8 +23,10 @@ Wayland and DBus wire protocols directly.
   its style is remembered either way.
 - One floating toolbar in a translucent, blurred material; colour, size
   and style in a popover, the rest under More. Light or dark and the
-  accent colour follow the desktop (Settings portal), and transitions
-  stop when the desktop asks for reduced motion. The pointer is the
+  accent colour follow the desktop (Settings portal), in the editor and
+  in every floating window (thumbnail, pins, pickers, countdown,
+  recording control, trim), and transitions stop when the desktop asks
+  for reduced motion. The pointer is the
   desktop's own (cursor theme and size, through cursor-shape-v1): a hand
   over what a drag moves, closed while it does, and resize arrows on
   edges and corners; compositors without the protocol get drawn
@@ -59,7 +61,17 @@ with the standard portals should work.
 ## Install
 
 Requires Zig 0.17 to build. At runtime: a Wayland session with
-xdg-desktop-portal (PipeWire recommended for fast capture).
+xdg-desktop-portal. Everything else is optional and loaded only when
+present:
+
+| Library or program | For |
+| --- | --- |
+| `libpipewire-0.3.so.0` | fast portal capture (else the Screenshot portal) and recording |
+| `libxkbcommon.so.0` | your keyboard layout (else US) |
+| `libfontconfig.so.1` | finding fonts (else the XDG font directories) |
+| `libtesseract.so.5` or `.4`, with language data | Copy text, Redact, the history's search |
+| `ffmpeg`, or `libavcodec`/`libavformat` 59–61 | MP4 recordings (else GIF only); sound needs the program |
+| `libturbojpeg`, `libwebp` | progressive JPEGs and WebP files |
 
 ```sh
 zig build -Doptimize=safe
@@ -89,8 +101,8 @@ entry declares `X-KDE-DBUS-Restricted-Interfaces=org.kde.KWin.ScreenShot2`;
 KWin matches the running executable against that entry's `Exec`, so this
 works for the `shotlet` that `install.sh` put in `~/.local/bin` (run from
 the source tree it is refused and the portal asks instead). Settings shows
-"captured directly (no prompts)" when this is what happened. The log
-says `capture path: direct (...)` or `capture path: portal (...)`.
+"captured directly (no prompts)" when this is what happened, and
+`shotlet permissions` says which way the last capture went.
 
 ## Usage
 
@@ -127,8 +139,16 @@ shotlet record --stop | --pause | --resume | --discard
 `man shotlet` has all of it. `install.sh` installs the man page and
 completions for bash, zsh and fish (`shotlet completions bash|zsh|fish`
 prints them; for zsh, `~/.local/share/zsh/site-functions` must be in
-`fpath`). Unknown commands and options are refused with a hint and exit
-status 2; `shotlet --version` prints the version.
+`fpath`). `shotlet --version` prints the version.
+
+Every command answers the same way: results on stdout, problems on
+stderr as `shotlet COMMAND: message`, exit status 0 when it worked, 1
+when it failed and 2 for a command line it refuses (unknown command or
+option, bad value; with a hint). A problem you would otherwise miss
+because Shotlet was started from a shortcut or the tray (no image on
+the clipboard to pin, a recording already running, a scrolling capture
+that cannot run here...) also shows as a small card at the bottom of
+the screen.
 
 ## Capture modes
 
@@ -289,8 +309,12 @@ thumbnail stays until closed. `shotlet thumbnail` (with the GNOME
 integration, Shift+Super+T) brings the last one back.
 
 Save As opens the file chooser over the editor; cancelling it returns to
-the editor as it was. With a thumbnail showing, saving sends no desktop
-notification (`notify=true` still does when there is none).
+the editor as it was. A save works the same from the editor, the
+thumbnail, Recent captures, a pin or a capture mode that skips the
+editor: a new name in the screenshots folder (or the one the chooser
+gave), also copied with `copy_on_save=true`, and a "Saved to…" desktop
+notification with `notify=true` (the default), except when a thumbnail
+already shows the save.
 
 **Pins** show the capture at 1:1 in a frameless window, where the
 capture was (pinned from the editor, a thumbnail or Recent captures):
@@ -602,13 +626,11 @@ the editor for the full list.
   replaces the picture; drop one on a thumbnail or the Recent captures
   panel and it opens in a new editor.
 
-Copy text and Redact need Tesseract (`libtesseract.so.5` or `.so.4`
-and its language data); without it they say so and how to install it:
-`apt install tesseract-ocr` (Debian, Ubuntu; `tesseract-ocr-spa` and so
-on for more languages), `dnf install tesseract` (Fedora), `pacman -S
-tesseract tesseract-data-eng` (Arch). JPEG files are read by Shotlet's
-own decoder (baseline); progressive JPEGs need `libturbojpeg` and WebP
-`libwebp`, both loaded only when present.
+Copy text and Redact need Tesseract ([Install](#install)); without it
+they say so and how to install it: `apt install tesseract-ocr` (Debian,
+Ubuntu; `tesseract-ocr-spa` and so on for more languages), `dnf install
+tesseract` (Fedora), `pacman -S tesseract tesseract-data-eng` (Arch).
+Baseline JPEGs are read by Shotlet's own decoder.
 
 ## Files
 
@@ -626,6 +648,7 @@ own decoder (baseline); progressive JPEGs need `libturbojpeg` and WebP
 | Pending GNOME setup | `$XDG_STATE_HOME/shotlet/gnome-setup-pending`: install's answer, until the extension loads |
 | Hints already shown | `$XDG_STATE_HOME/shotlet/editor-hint-shown`, `zoom-hint-shown` (empty files) |
 | Moved GNOME shortcuts | `$XDG_CONFIG_HOME/shotlet/gnome-moved-shortcuts`, `gnome-moved-keys`: what `gnome-integration uninstall` puts back |
+| Running instances | `$XDG_RUNTIME_DIR/shotlet-quick-<session>.sock`, `shotlet-record-<session>.sock`, `shotlet-pins-<session>/` (one socket per pin): how a new `shotlet` reaches the thumbnail, the recording and the pins |
 
 Shotlet's own state and record files are private (0600, in 0700
 directories) and replaced atomically, never written through a symlink.
@@ -643,11 +666,44 @@ reaches it only through `src/platform/api.zig`. `docs/PLATFORM.md` maps
 the seams, how a backend is chosen and what a Windows or macOS port
 implements.
 
-`zig build test` also runs the guards: `check-size` (files up to 600
-lines), `check-layers` (nothing outside `src/platform/linux` imports it)
-and `check-portable` (the core compiles for Windows and macOS against a
-stub backend). Keep functions within 60 lines (`zig build long-fns --
-60`) and the tree formatted (`zig fmt --check src build.zig tools`).
+Each job has one place; use it rather than writing another:
+
+| Job | Where |
+| --- | --- |
+| Points, rectangles, monitors; logical layout ↔ capture pixels | `src/geom.zig` (core and backend alike; a surface's own scale: `src/ui/scale.zig`) |
+| `file://` URIs, both ways | `src/uri.zig` |
+| Optional native libraries, opened at run time | `src/optlib.zig`, over `api.libs` |
+| Mutex and event on the platform's futex | `src/sync.zig` |
+| How a capture leaves: save, copy, `copy_on_save`, the notification | `src/app/deliver.zig` (file names: `src/app/filename.zig`) |
+| Starting another shotlet subcommand, detached | `src/app/relaunch.zig` (names from `src/cli/commands.zig`) |
+| Talking to a running shotlet (thumbnail, pins, recording) | `src/app/ipc.zig` |
+| A history entry's `meta` and `video` files | `src/app/kvfile.zig` |
+| Shotlet's own state files and one-time flags | `src/app/statefile.zig`, `src/app/stateflag.zig` |
+| Telling the person about a problem: card, stderr, log | `src/app/report.zig` |
+| A command's output and exit status | `src/cli/out.zig` |
+| Colours and metrics of every surface, light and dark | `src/ui/theme.zig` (buttons: `src/ui/barkit.zig`) |
+| The `SHOTLET_*` switches | `src/platform/api/switches.zig` |
+| Unit-test helpers (temporary dirs and `$HOME`, images, fonts) | `src/testutil.zig` |
+
+Unit tests are reached from one root: `src/main.zig`'s `test {}` names
+each folder's root (`src/app/tests.zig`, `src/ui/tests.zig`...), which
+names the files of its folder that have tests; the comment there has
+the rule. A new file with tests goes into its folder's root.
+
+`zig build test` also runs the guards (`tools/sources.sh` holds the
+limits and the files they check):
+
+| Step | Fails when |
+| --- | --- |
+| `check-size` | a source file grows past 600 lines (`tools/size-allowlist.txt` may only shrink) |
+| `check-layers` | a file outside `src/platform/linux` imports it, `std.os.linux` or the raw backend, or names Wayland, D-Bus, keysyms, evdev codes or GTK accelerators in code |
+| `check-tests` | a file's tests are not reached from the test root, or a `test {}` block sits outside `src/main.zig` |
+| `check-portable` | the core does not compile for Windows and macOS against the stub backend |
+
+Keep functions within 60 lines (`zig build long-fns -- 60` lists the
+longer ones) and the tree formatted (`zig fmt --check src build.zig
+tools`). CI (`.github/workflows/ci.yml`) runs the formatting check, the
+guards, `zig build test` and the builds on every pull request.
 
 The version comes from git (`tools/version.zig`): a build past the last
 tag calls itself the next patch's prerelease (`0.1.7-dev.12+abc1234`).
@@ -658,139 +714,93 @@ only to plan a minor or major release.
 ## Tests
 
 ```sh
-zig build test --summary all   # unit tests (+ a portal test on a private dbus-daemon)
-zig build e2e                  # end-to-end suite, see below
-zig build e2e -- keyboard ime  # only some scenarios
+zig build test --summary all             # unit tests and the guards
+zig build e2e                            # end-to-end, private headless GNOME
+zig build e2e -- quick pin               # only those scenarios
+zig build e2e-container                  # sway, labwc and KWin, in containers
+zig build e2e-container -- labwc         # one compositor
+zig build e2e-container -- sway:pin      # one scenario on one compositor
+tools/e2e.sh --list                      # the GNOME scenarios and what each checks
+tools/container/run.sh --list            # the container scenarios
 ```
 
-The end-to-end suite runs the real binary against real portal dialogs,
-PipeWire and the clipboard, inside a private, invisible GNOME session
-(`tools/e2e/session.sh`: its own `HOME`, session bus, PipeWire and
-`gnome-shell --headless` with virtual monitors). Nothing reaches the desktop
-you are logged into. `shotlet-drive` (`tools/e2e/drive.zig`) holds a Mutter
-RemoteDesktop session for a virtual keyboard and pointer, and ScreenCast
-streams to aim the pointer and screenshot each monitor. `tools/e2e.sh`
-prints PASS/FAIL per check and skips when the session cannot run.
+Both suites print PASS, FAIL or SKIP per check and a summary, and exit
+1 when a check failed, 2 for an unknown scenario. Each scenario is a
+`scenario_NAME` function in `tools/e2e/scenarios/*.sh` or
+`tools/container/scenarios/*.sh`, with a row in that suite's
+`table.sh` (monitors, flags, what it checks: what `--list` prints).
+`rec-bench` (the encoders' CPU, memory and size) only runs when named.
+`zig build e2e-driver` builds the binaries the scripts need when run
+directly. CI runs both suites nightly and on demand
+(`.github/workflows/e2e.yml`, `e2e-container.yml`), never on pull
+requests.
 
-Needs `gnome-shell`, `xdg-desktop-portal-gnome`, `pipewire`, `wireplumber`,
-`wl-clipboard`, `python3` and `gdbus`; the IME scenario also uses
-`ibus-hangul` (skipped without it), and the quick-access scenarios
-(`quick`, `quick-plain`, `annotate`, `history`, and `pin`: where a pin
-opens, its menu, opacity, Copy, Lock, Annotate and Close All Pins in the
-light and dark appearance) use Python's GTK 4
-bindings for "another app" (`tools/e2e/target.py`: focus, clicks, drops;
-`python3-gi gir1.2-gtk-4.0`). They load the bundled GNOME Shell extension
-into the private session (`HL_EXTENSIONS`), except `quick-plain`, which
-checks the fallback without it. So do the prompt-free capture scenarios:
-`shell` (stock bindings: install takes Print, Print captures with no
-dialog and nothing in the permission store, the capture files gone and
-no PNG written anywhere else, the pixels, a Capture() from another
-program refused, uninstall restoring GNOME's keys), `shell-owner`
-(a custom shortcut running shotlet on Print, moved and put back),
-the recording scenarios `rec-shell` (an MP4 of an area through the
-extension: no dialog, size, codec, rate, length, pictures that change,
-a click ripple in the video, StartRecording() refused to others, the
-thumbnail's Copy, `shotlet record` again stops), `rec-pick` (the picker,
-its bar and the floating control outside the area), `rec-gif` (size,
-length, frames, file size, pause), `rec-trim`, `rec-settings` and
-`rec-portal` (no extension: one consent, then the restore token); they
-need `ffmpeg`/`ffprobe` and skip without; `perms` (a portal grant,
-`shotlet permissions` reporting it, `reset --dry-run` and `reset`
-removing only Shotlet's entries, the next capture asking again),
-`perms-shell` (a capture through the extension stores no permission and
-`permissions` says so) and `gnome-install` (a copy-install with the shell
-running: enabled-extensions, "loads at your next login", then the
-private gnome-shell restarted as a new login: active, and the first
-capture finishing the setup); `rec-bench` (not run by
-default) measures the encoder paths. `shell-mixed` (two monitors at scales 2
-and 1, checked across the seam), `shell-tray` (the tray's Activate and
-menu, the rate limit) and `shell-terminal` (`shotlet` from a terminal,
-and the portal when the extension cannot capture). The capture modes'
-scenarios (`tools/e2e/modes.sh`) also run with the extension:
-`modes-screen` (two monitors: the one under the pointer, all screens,
-the previous area, each `after_fullscreen`), `modes-strip`
-(`tools/e2e/strip.sh`: the mode strip and its keys, a GTK window lit
-under the pointer and selected by a click at exactly its frame, a drag
-over it still a free area, Record handing the capture to its picker,
-light and dark), `modes-timer` (the countdown
-on screen but not in the capture), `modes-window` (a 640x480 GTK window
-captured at exactly its size with see-through corners, then with its
-shadow), `modes-scroll` (a 3000 px GTK page scrolled and stitched to the
-expected height, its marker band exactly once, scrolling in the editor),
-`modes-scroll-manual` (the person scrolls, a jump warns and scrolling back
-lines it up, Stop ends it), `modes-scroll-stops` and `modes-scroll-dark`
-(each stop reason in the light and dark control: the page didn't move and C
-continues, couldn't match and Continue then scrolling back keeps what was
-stitched, the height limit, Esc on a pause; `tools/e2e/scroll.sh`),
-`scroll-unavailable` (without the extension, then with it installed for
-the next login: `shotlet scroll` exits 1 with the reason on stderr and
-in a notice, no picker, nothing captured; after a new login the picker)
-and `modes-keys` (per-mode shortcuts from the command line and Settings). The portal scenarios
-run without the extension. `blink` and `blink-ext` (`tools/e2e/scenarios/blink.sh`)
-film the editor's open and close frame by frame with GNOME's animations on
-(`shotlet-drive`'s `film` and `cut`) and fail on any frame that is neither
-the desktop, the editor nor a cross-fade of the two: without the extension
-the close (Esc, Copy) must have none, with it the open too. `cursors` and `cursors-drawn`
-(`tools/e2e/scenarios/cursors.sh`) follow the editor's pointer over a
-selection, dragging it and on its edge and corner, through
-cursor-shape-v1 and, with `SHOTLET_NO_CURSOR_SHAPE=1` on a 2x monitor,
-drawn by Shotlet (debug builds log each cursor shown). `tools` (`tools/e2e/tools.sh`) checks the
-editor's tools on a known picture: the colour picker's copies (read back
-with `wl-paste`), the ruler's snapped length, the spotlight's dimming and
-crop (and its undo) in the copies, `shotlet edit FILE`, `shotlet pin`
-from the clipboard, and a PNG file dragged from a GTK window onto the
-editor. On Debian/Ubuntu:
-`apt install gnome-shell xdg-desktop-portal-gnome pipewire wireplumber wl-clipboard ibus-hangul python3-gi gir1.2-gtk-4.0`.
-`E2E_OUT=dir` keeps the logs and screenshots of a run. CI runs the suite
-nightly and on demand (`.github/workflows/e2e.yml`), never on pull requests.
+**GNOME.** `tools/e2e.sh` runs the real binary against real portal
+dialogs, PipeWire and the clipboard, each scenario in a private,
+invisible GNOME session (`tools/e2e/session.sh`: its own `HOME`,
+session bus, PipeWire and `gnome-shell --headless` with virtual
+monitors; with the Shotlet extension where the table says `ext`).
+Nothing reaches the desktop you are logged into: the drivers refuse
+to start outside the sandbox. `shotlet-drive` (`tools/e2e/drive.zig`)
+types and points through a Mutter RemoteDesktop session and screenshots
+each monitor through ScreenCast; `tools/e2e/target.py` (GTK 4) and
+`shotlet-droptarget` play the other apps. The suite skips without
+`gnome-shell`, `dbus-run-session`, PipeWire and WirePlumber, `gdbus`,
+`wl-clipboard`, `xdg-desktop-portal` and `xdg-desktop-portal-gnome`;
+checks skip without Python's GTK 4 bindings (scenarios with another
+app: thumbnail, pins, modes, scrolling, tools), `ffmpeg`/`ffprobe`
+(`rec-*`), `ibus-hangul` (`ime`) or `dbus-monitor` (the "Saved to…"
+notifications). What CI installs on Ubuntu:
 
 ```sh
-zig build e2e-container                 # sway, labwc and KWin, in containers
-zig build e2e-container -- labwc        # one compositor
-zig build e2e-container -- kwin:pin     # one scenario
+apt install gnome-shell mutter xdg-desktop-portal xdg-desktop-portal-gnome \
+  pipewire wireplumber libpipewire-0.3-0 libxkbcommon0 wl-clipboard \
+  ibus ibus-hangul dbus-daemon dbus-bin libglib2.0-bin python3 python3-gi \
+  gir1.2-gtk-4.0 ffmpeg mesa-utils libgl1-mesa-dri fonts-noto-core fonts-noto-cjk
 ```
 
-The container suite (`tools/container/`) covers what GNOME cannot: the
-layer-shell thumbnail, pins and history panel on wlroots (sway, labwc) and
-KWin; direct capture with no dialog (wlr-screencopy, KWin's ScreenShot2
-authorized by Shotlet's installed desktop entry, never by KWin's
-permission-check overrides), two outputs at mixed scales and rotated or
-flipped outputs; the portal path (`xdg-desktop-portal-wlr` with direct
-capture turned off by `SHOTLET_NO_DIRECT=1`, `xdg-desktop-portal-kde` when
-Shotlet is not installed and KWin refuses it) with restore tokens; and the
-text search with Tesseract (English and Spanish), and the editor's text
-tools with it (`sway:ocr-tools`: `shotlet text`, Copy text, Redact
-sensitive data finding an e-mail address and a token); `modes`: screen
-capture without the editor and window capture (KWin's picker; an area on
-wlroots), `shotlet scroll` opening its region picker, and with
-`SHOTLET_NO_DIRECT=1` saying it cannot run here (exit status 1); on sway, `record`: a GIF recording through
-`xdg-desktop-portal-wlr`, one chooser and then none. Scenarios count the
-consent prompts: zero on the direct path. Shotlet is installed in each
-container with `install.sh`. Each scenario runs in a throwaway
-container (Debian trixie, `--rm`, no network) with its own session bus,
-PipeWire and a headless compositor; nothing is installed on the host and
-nothing reaches its display, bus or PipeWire. The image
-(`shotlet-e2e:trixie`, about 1.5 GB) is built from
-`tools/container/Containerfile` on first use; `docker rmi
-shotlet-e2e:trixie` removes it. Docker or Podman is needed (without
-either the suite skips).
+**Containers.** `tools/container/run.sh` covers what GNOME cannot: the
+layer-shell thumbnail, pins and history on wlroots (sway, labwc) and
+KWin, direct capture with no dialog (wlr-screencopy; KWin's ScreenShot2
+authorized by the installed desktop entry, never by KWin's
+permission-check overrides), mixed scales and rotated outputs, the
+wlroots and KDE portals, and Tesseract. Each scenario runs in a
+throwaway Debian trixie container (`--rm`, no network) with its own
+session bus, PipeWire and headless compositor, and Shotlet installed by
+`install.sh`; nothing reaches the host's display, bus or PipeWire.
+Docker or Podman is needed (the suite skips without). The image
+(`shotlet-e2e:trixie`, about 1.5 GB, its packages in
+`tools/container/Containerfile`) is built on first use; `docker rmi
+shotlet-e2e:trixie` removes it. `shotlet-wldrive`
+(`tools/container/wldrive.zig`) is the input driver: wlroots' virtual
+pointer and keyboard plus screencopy, or KWin's fake input and
+ScreenShot2. A GPU render node (`/dev/dri/renderD*`, never a display
+node) is passed in when the host has one; `xdg-desktop-portal-wlr` and
+KWin need it (the table's `gpu`), so without one those skip and the
+rest runs on software rendering. Debian trixie's wlroots offers only
+wlr-screencopy; `Containerfile.sid` is for the ext-image-copy-capture
+path: `SHOTLET_E2E_IMAGE=shotlet-e2e:sid tools/container/run.sh
+sway:capture sway:multimon sway:rotated`.
 
-`shotlet-wldrive` (`tools/container/wldrive.zig`) is the input driver:
-wlroots' virtual pointer and keyboard plus screencopy, or KWin's fake input
-plus its ScreenShot2 D-Bus interface, authorized like Shotlet by a desktop
-entry. The wlroots portal's output chooser is a script that answers
-without a dialog and logs each call; the KDE portal's dialog is clicked
-through. A GPU render node (`/dev/dri/renderD*`, passed to the container
-when the host has one, never a display node; `CTR_GPU=0` to not pass it)
-is needed by `xdg-desktop-portal-wlr` (dmabuf-capable screencopy) and by
-KWin (screenshots and screencasts only when compositing with OpenGL);
-without one, the wlroots portal scenarios and KWin skip, and the rest,
-direct capture on wlroots included, runs on software rendering. Debian
-trixie's wlroots offers only wlr-screencopy; `Containerfile.sid` builds
-`shotlet-e2e:sid` (sway on a newer wlroots) for the
-ext-image-copy-capture path: `CTR_IMAGE=shotlet-e2e:sid
-tools/container/run.sh sway:capture sway:multimon sway:rotated`. CI runs it nightly and on demand
-(`.github/workflows/e2e-container.yml`).
+The suites' variables (the runners set the rest themselves):
+
+| Variable | Effect |
+| --- | --- |
+| `E2E_OUT=dir` | keep the run's logs and screenshots there (both suites) |
+| `E2E_MONITORS="WxH ..."` | containers: these outputs for every scenario |
+| `SHOTLET_E2E_KEEP=1` | GNOME: keep the private `HOME` (its path is printed) |
+| `SHOTLET_E2E_WLDEBUG=1` | GNOME: gnome-shell's `WAYLAND_DEBUG` |
+| `SHOTLET_E2E_TARGET_DEBUG=1` | the GTK test app logs its Wayland traffic |
+| `SHOTLET_E2E_MONITORS`, `_LAYOUT`, `_IBUS`, `_APPS`, `_EXTENSIONS` | `tools/e2e/session.sh` run by hand: its monitors, XKB layout, IBus engine, desktop files and extensions (`e2e.sh` sets them from the table) |
+| `SHOTLET_E2E_ENGINE=docker\|podman` | containers: the engine (default: whichever works) |
+| `SHOTLET_E2E_GPU=0` | containers: never pass a render node |
+| `SHOTLET_E2E_IMAGE=name:TAG` | containers: the image (built from `Containerfile.TAG` when missing) |
+| `SHOTLET_E2E_PROBE='code'`, `SHOTLET_E2E_PROBE0` | containers: shell code the `probe` scenario runs (after, before the driver starts) |
+| `SHOTLET_E2E_KWIN_LOG=rules` | containers: KWin's `QT_LOGGING_RULES` |
+
+`tools/e2e/session.sh` also runs any one command in such a session, e.g.
+`SHOTLET_E2E_MONITORS="1600x900 1280x720" tools/e2e/session.sh
+zig-out/bin/shotlet shot --from IMG.png`.
 
 ### Debugging and test switches
 
@@ -816,11 +826,10 @@ turns something off is on when set at all (`=1`); the others take a value.
 | `SHOTLET_SETTINGS_FOCUS=n` | Settings starts with its n-th control focused | `ui/settings/app.zig` |
 | `SHOTLET_SETTINGS_VIEW=general\|editor\|shortcuts\|recording` | the view Settings starts on | `ui/settings/app.zig` |
 
-Only the tests read these: `SHOTLET_LIVE_WINDOW_TEST=1` (with
-`SHOTLET_LIVE_WAIT_MS`) runs the window unit test against a live
-compositor (inside `tools/headless.sh` only); `SHOTLET_CONTAINER` and
-`SHOTLET_BIN` are set by the container runner; `E2E_OUT` keeps an
-end-to-end run's logs and screenshots.
+One more, read by a unit test only: `SHOTLET_LIVE_WINDOW_TEST=1` (with
+`SHOTLET_LIVE_WAIT_MS`) runs the window test against a live compositor;
+run it inside `tools/e2e/session.sh`, never on your desktop. The test
+suites' own variables are under [Tests](#tests).
 
 ## License
 

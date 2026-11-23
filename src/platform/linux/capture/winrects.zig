@@ -6,7 +6,7 @@
 //! - GNOME with the Shotlet extension: it notes them in the very frame it
 //!   captures; CaptureWindows(ID) hands them to the shotlet started on
 //!   that capture (once, Shotlet's executable only).
-//! - KWin: a one-off KWin script (winrects/kwin.zig), right after the
+//! - KWin: a one-off KWin script (kde/winrects.zig), right after the
 //!   capture, through KWin's scripting interface (no permission needed).
 //! - anywhere else nothing tells a client where windows are: none, and the
 //!   editor simply offers no window clicks.

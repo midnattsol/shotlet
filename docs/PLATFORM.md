@@ -21,6 +21,9 @@ src/platform/linux/     the Linux backend: everything that speaks Wayland,
                         D-Bus, the portals, PipeWire, GNOME Shell, KWin,
                         wlroots or raw syscalls (the only place
                         std.os.linux may appear)
+src/geom.zig, uri.zig   neutral (std only), shared by both sides: points,
+                        rectangles, monitors and the logical/image pixel
+                        conversions; file:// URIs
 everything else         the portable core
 ```
 
@@ -34,7 +37,10 @@ never a file under `platform/linux/`, never `std.os.linux`, never the raw
   or holds a GTK accelerator (`<Super>`). Its allowlist (tools/layers-allowlist.txt)
   is empty and may only stay so. The e2e drivers' module root
   (`src/testkit.zig`, Linux tooling) is the one file that takes the Linux
-  plumbing, through `api.backend.native`.
+  plumbing, through `api.backend.native`. The other direction is not
+  checked: the backend still imports a few core files for their types
+  and helpers (`app/env.zig`, `app/config.zig`, `app/capture.zig`,
+  `cli/out.zig`...).
 - `zig build check-portable` compiles the whole program and its tests
   for `x86_64-windows` and `aarch64-macos` against the stub backend
   (analysis only, nothing is emitted). It catches what text cannot, like
@@ -57,8 +63,13 @@ never a file under `platform/linux/`, never `std.os.linux`, never the raw
   that the backend has every declaration the stub has, and every type
   there has the stub type's declarations and fields (a missing one is
   `platform contract: backend.window.Window.flush is missing from the
-  backend`). The stub is the contract written down; check-portable
-  proves the core uses nothing beyond it.
+  backend`). Every function's signature is compared too: the same
+  parameters and the same return payload (the error set may differ).
+  The types the core shares with the backend (`api/`, `src/geom.zig`,
+  `app/`...) must be the very same type; the backend's own types
+  (`Window`, `desktop.Session`...) are matched by name. The stub is the
+  contract written down; check-portable proves the core uses nothing
+  beyond it.
 - **Run time, among Linux desktops: inside the backend**, as before. The
   GNOME Shell extension when it runs, the compositor directly (KWin's
   ScreenShot2, wlroots screencopy), then the ScreenCast portal over
@@ -80,7 +91,7 @@ Each is `api.<name>`; the stub file of the same name lists it in full.
 | `record` | `open` a `Source` for an area (its `Stream`: `addVideo`, `addAudio`, `failed`, `videoFrames`, `close`), `shellHasControls`, `pickInShell`, `watchStop`, `pollStop`; frame types in `api/record.zig` | the extension's recorder or a ScreenCast session, PipeWire streams |
 | `sys` | clocks, sleep, futex, randomness, files, directories, descriptors, pipes, `poll`, local sockets, mapped files, `isTerminal`, `processId` (POSIX-shaped: a port maps handles onto small integers) | raw syscalls (`linux/sys/`) |
 | `proc` | programs with pipes (`spawn`, `output`, `which`), Shotlet itself detached (`spawnSelf`), `processEnv`, `hwEncodeDevices` | fork/exec, `/proc/self/exe`, VA-API render nodes |
-| `libs` | optional libraries by base name and version (`open`, `Lib.lookup`) | `lib<name>.so.<v>` with `std.DynLib` |
+| `libs` | optional libraries by base name and version (`open`, `Lib.lookup`; the core binds them through `src/optlib.zig`) | `lib<name>.so.<v>` with `std.DynLib` |
 | `fonts` | `Db`: the UI faces and a face for a codepoint | fontconfig, else the XDG font directories |
 | `ocr` | `available`, `recognize`, `recognizeTsv` | Tesseract (`src/ocr/tesseract.zig`, portable code over `libs`) |
 | `devtools` | `shotlet test-window` and friends | Wayland/portal/PipeWire probes |
@@ -130,7 +141,9 @@ recording picker's tooltips, log lines) that name GNOME.
 | --- | --- |
 | `platform/{wayland,dbus,portal,pw,pwstream,permstore,sys}*`, `portal_test.zig` | `platform/linux/` (same names) |
 | `ui/window*`, `ui/keyboard*` | `platform/linux/window*`, `platform/linux/keyboard*` (types: `api/window.zig`) |
-| `platform/ocr.zig` | `ocr/tesseract.zig` (+ `ocr/search.zig`, `ocr/spinlock.zig`) |
+| `platform/ocr.zig` | `ocr/tesseract.zig` (+ `ocr/search.zig`; its loader is `src/optlib.zig`) |
+| `ocr/spinlock.zig`, `record/sync.zig` | `src/sync.zig` |
+| the Rect/Point copies in `record/region.zig`, `app/modes/geom.zig`, `ui/shapes/geometry.zig`, `gfx/effects/rect.zig`, `api/window.zig`; `app/capture.zig`'s `Monitor` | `src/geom.zig` |
 | `gfx/fontdb.zig` | `platform/linux/fonts.zig` (types: `api/fonts.zig`) |
 | `encode/proc.zig` | `platform/linux/proc.zig` |
 | `app/gnome*`, `gnome_bundle.zig`, `gsettings.zig`, `shellcap.zig`, `modes/{shell_bus,gnome_keys}.zig`, `record/shellrec.zig` | `platform/linux/gnome/` |
