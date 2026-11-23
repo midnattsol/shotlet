@@ -139,6 +139,9 @@ pub const DragOut = struct {
     }
 };
 
+/// Behind a dragged picture whose shape does not fill the icon
+const letterbox: u32 = 0xFF2A2E37;
+
 /// The image under the pointer while dragging a card out: the picture at
 /// w x h, rounded, a little see-through, premultiplied (caller frees).
 /// `k` is the integer buffer scale the icon is drawn at.
@@ -148,7 +151,7 @@ pub fn dragIcon(gpa: std.mem.Allocator, src: Image, w: u32, h: u32, k: i32) ![]u
     @memset(out, 0);
     const pic = try gpa.alloc(u32, @as(usize, w) * h);
     defer gpa.free(pic);
-    drawImage(gpa, .{ .px = pic, .w = w, .h = h }, src, .auto, pixels.card_bg);
+    drawImage(gpa, .{ .px = pic, .w = w, .h = h }, src, .auto, letterbox);
     effects.blitRounded(out, w, h, pic, w, h, 0, 0, @intCast(10 * @max(1, k)));
     pixels.fadeAlpha(out, 0.92);
     pixels.premultiply(out, w, h, .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) });

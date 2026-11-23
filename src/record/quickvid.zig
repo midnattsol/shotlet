@@ -41,8 +41,6 @@ const Quick = struct {
     strip: ?png.Image,
     strip_n: u32 = 0,
     /// the desktop's appearance (motion.enabled follows it too)
-    // TODO(wave 3): pass to card.paint once ui/recui/vidcard.zig takes a
-    // Theme; its overlay controls use the tokens that do not change with it
     th: theme.Theme,
     hover: ?card.Control = null,
     /// the left button held on a control (a click is its release there)
@@ -109,6 +107,7 @@ const Quick = struct {
             .hovered = self.hover != null,
             .notice = if (now < self.notice_until) self.notice else "",
             .alpha = alpha,
+            .th = self.th,
         });
         try floatwin.presentStraight(&self.win, px);
     }

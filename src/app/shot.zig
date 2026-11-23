@@ -87,7 +87,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     if (warmup_thread) |th| th.join();
     t.warmup = nowMs();
     // the self-timer, where the GNOME extension did not count down
-    if (from.req.delay_s > 0 and !from.any() and !try @import("../ui/countdown.zig").run(&win, from.req.delay_s)) return;
+    if (from.req.delay_s > 0 and !from.any() and !try countDown(&win, &conn, from.req.delay_s)) return;
     var cap = (try acquire(gpa, env, &conn, &cfg, from)) orelse {
         std.log.info("capture cancelled", .{});
         return;
@@ -114,6 +114,12 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
 /// With the GNOME Shell extension, the shell takes the screenshot (no
 /// prompt) and starts another shotlet on it. True when it took over (or
 /// declined): this process has nothing left to do.
+/// The self-timer's countdown, in the desktop's light/dark mode and accent.
+fn countDown(win: *window.Window, conn: *desktop.Session, seconds: u8) !bool {
+    const theme = @import("../ui/theme.zig");
+    return @import("../ui/countdown.zig").run(win, seconds, theme.of(theme.readPrefs(conn, 300)));
+}
+
 fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, req: modes.Request, t0: i64) bool {
     if (!shell.applies() or !shell.active(conn)) return false;
     launch.handOff(env.runtime_dir);

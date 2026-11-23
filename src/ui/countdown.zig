@@ -52,17 +52,10 @@ fn vanish(win: *window.Window) !void {
     sys.sleepMs(50);
 }
 
-/// Count `seconds` down in the dark theme.
-/// TODO(wave 3): remove; app/shot.zig calls runThemed with the desktop's
-/// theme (theme.load, or theme.of(theme.readPrefs(&conn, ...))).
-pub fn run(win: *window.Window, seconds: u8) !bool {
-    return runThemed(win, seconds, theme.Theme.get(true, null));
-}
-
 /// Count `seconds` down on a card in `th`. True when it ran out (the
 /// card is invisible now and is closed by the caller), false when
 /// cancelled: Escape, or a click on the card.
-pub fn runThemed(win: *window.Window, seconds: u8, th: theme.Theme) !bool {
+pub fn run(win: *window.Window, seconds: u8, th: theme.Theme) !bool {
     _ = try floatwin.open(win, .{ .title = "shotlet:timer", .namespace = "shotlet-timer", .size = .{ size, size } });
     const end = sys.monoMs() + @as(i64, seconds) * 1000;
     var shown: u32 = 0;

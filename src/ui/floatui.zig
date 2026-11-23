@@ -54,46 +54,6 @@ pub const scrimPill = overlay.scrimPill;
 pub const scrimPillWidth = overlay.scrimPillWidth;
 pub const scrim_pill_h = overlay.scrim_pill_h;
 
-// TODO(wave 2): remove the palette below; use the theme's overlay tokens
-// (scrim, round_btn, light_pill, on_scrim) and Theme.accent_fill.
-
-/// Palette of the floating UI (dark glass, as on macOS)
-pub const veil: u32 = 0x6B000000;
-/// round buttons over a picture: dark discs, so their white icons read
-/// on any capture (7:1 over white under the veil; 9.9:1 hovered)
-pub const btn_round: u32 = 0x66000000;
-pub const btn_round_hover: u32 = 0x8C000000;
-pub const pill: u32 = 0xEBFFFFFF;
-pub const pill_hover: u32 = 0xFFFFFFFF;
-pub const pill_text: u32 = 0xFF1D1D1F;
-pub const white: u32 = 0xFFFFFFFF;
-pub const accent: u32 = 0xFF0A84FF;
-pub const card_bg: u32 = 0xFF2A2E37;
-pub const shadow: u32 = 0x48000000;
-
-/// Panel colours for light and dark (history panel, pin frame)
-/// TODO(wave 2): remove; use theme.Opaque.of(theme.Theme).
-pub const Theme = struct {
-    panel: u32,
-    fg: u32,
-    muted: u32,
-    field: u32,
-    line: u32,
-    hover: u32,
-
-    accent: u32 = accent,
-
-    /// From the desktop's preferences (ui/theme.zig): the Glass panel
-    /// made opaque (there is no backdrop blur for a client to use).
-    pub fn fromPrefs(p: theme.Prefs) Theme {
-        const o = theme.Opaque.of(theme.of(p));
-        return .{ .panel = o.panel, .fg = o.fg, .muted = o.muted, .field = o.field, .line = o.line, .hover = o.hover, .accent = o.accent };
-    }
-
-    pub const dark: Theme = .{ .panel = 0xFF242426, .fg = 0xFFF5F5F7, .muted = 0xFF9E9EA6, .field = 0xFF323235, .line = 0xFF3A3A3D, .hover = 0xFF2F2F33 };
-    pub const light: Theme = .{ .panel = 0xFFFAFAFC, .fg = 0xFF1D1D1F, .muted = 0xFF6E6E73, .field = 0xFFEDEDF0, .line = 0xFFDCDCE0, .hover = 0xFFF0F0F3 };
-};
-
 pub fn clipRect(r: Rect, w: u32, h: u32) ?Rect {
     return effects.clip(r, w, h);
 }
@@ -143,62 +103,11 @@ pub fn blitOver(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32
     }
 }
 
-/// An opaque card (content in `card`) with rounded corners and a soft
-/// shadow, onto a straight-alpha buffer.
-/// TODO(wave 2): remove; use place (theme shadows).
-pub fn placeCard(dst: []u32, dw: u32, dh: u32, card_px: []const u32, cw: u32, ch: u32, x: i32, y: i32, radius: u32, shadow_px: u32) void {
-    if (shadow_px > 0) {
-        effects.dropShadow(dst, dw, dh, .{ .x = x, .y = y, .w = @intCast(cw), .h = @intCast(ch) }, shadow_px, @intCast(shadow_px / 3), shadow);
-    }
-    effects.blitRounded(dst, dw, dh, card_px, cw, ch, x, y, radius);
-}
-
-/// Draw `src` scaled to cover (or, for very different shapes, to fit in)
-/// the whole of `dst`, over a dark backdrop.
-/// TODO(wave 2): remove; use drawImage or FitCache with .auto.
-pub fn drawImageFill(gpa: std.mem.Allocator, dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32) void {
-    drawImage(gpa, .{ .px = dst, .w = dw, .h = dh }, .{ .px = src, .w = sw, .h = sh }, .auto, card_bg);
-}
-
-/// TODO(wave 2): remove; use icons.Icon with icons.drawAt (or roundButton).
-pub const Icon = enum { close, pencil, pin, search, trash, copy, save, check };
-
-/// A line icon (the editor's set, ui/icons.zig, a little heavier) in a
-/// `size` box centred on cx, cy.
-pub fn icon(c: *Canvas, kind: Icon, cx: f64, cy: f64, size: f64, color: u32) void {
-    const ic: icons.Icon = switch (kind) {
-        .close => .close,
-        .pencil => .pen,
-        .pin => .pin,
-        .search => .search,
-        .trash => .trash,
-        .copy => .copy,
-        .save => .save,
-        .check => .check,
-    };
-    const stroke: f64 = if (kind == .close or kind == .check) 2.4 else 2;
-    icons.drawAt(c, ic, cx, cy, size, .{ .stroke = stroke }, color);
-}
-
 /// Text centred in `r` (vertically by line height).
 pub fn textCentered(c: *Canvas, r: @import("shapes.zig").Rect, size: f64, color: u32, style: text.Style, s: []const u8) void {
     const tw = text.widthStyled(size, style, s);
     const th = text.heightStyled(size, style);
     text.drawStyled(c, r.x + @divTrunc(r.w - tw, 2), r.y + @divTrunc(r.h - th, 2), size, color, style, s);
-}
-
-/// `s` cut with "..." to fit `max_w` pixels.
-/// TODO(wave 2): remove; use text.ellipsize, measuring in the style drawn.
-pub fn ellipsize(buf: []u8, size: f64, s: []const u8, max_w: i32) []const u8 {
-    if (text.width(size, s) <= max_w) return s;
-    var n = s.len;
-    while (n > 0) {
-        n -= 1;
-        while (n > 0 and (s[n] & 0xC0) == 0x80) n -= 1;
-        const out = std.fmt.bufPrint(buf, "{s}...", .{s[0..n]}) catch return s;
-        if (text.width(size, out) <= max_w) return out;
-    }
-    return "...";
 }
 
 test "premultiply and fades keep opaque pixels and clear transparent ones" {
