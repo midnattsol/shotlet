@@ -8,24 +8,6 @@ const env_mod = @import("../app/env.zig");
 
 pub const Settings = config.Record;
 
-// TODO(wave 3): inline. Callers: record/cli.zig:98,140,145,
-// record/files.zig:55, ui/recui/settings_rec.zig:52,91 (record/run.zig and
-// record/cli.zig already load a Config: use cfg.record).
-pub fn load(gpa: std.mem.Allocator, home: []const u8) Settings {
-    return config.load(gpa, home).record;
-}
-
-/// Store one `record_*` setting (the others in the file stay as they
-/// are); a failure is logged.
-// TODO(wave 3): inline (load, set the cfg.record fields, one config.save).
-// Callers: record/cli.zig:180-184 (saveChoices), ui/recui/settings_rec.zig:110.
-pub fn save(gpa: std.mem.Allocator, home: []const u8, key: []const u8, value: []const u8) void {
-    var cfg = config.load(gpa, home);
-    cfg.record.apply(key, value);
-    config.save(gpa, home, &cfg) catch |err|
-        std.log.warn("could not save {s}: {t}", .{ key, err });
-}
-
 /// Where recordings go: record_dir, else the Videos folder
 /// (env.userDir: $XDG_VIDEOS_DIR, user-dirs.dirs, else ~/Videos; a value
 /// equal to $HOME means none).

@@ -28,29 +28,6 @@ pub fn delivery(after: After, cfg: *const config.Config) Delivery {
     };
 }
 
-// TODO(wave 3): inline. Callers: ui/settings_modes.zig:52,
-// app/modes/cli.zig:23, app/modes/flow.zig:88,109,115,171 (flow already
-// holds a Config: use c.cfg.modes).
-pub fn load(gpa: std.mem.Allocator, home: []const u8) Settings {
-    return config.load(gpa, home).modes;
-}
-
-// TODO(wave 3): inline (load, set cfg.modes.after, config.save). Caller:
-// ui/settings_modes.zig:124.
-pub fn setAfter(gpa: std.mem.Allocator, home: []const u8, a: After) !void {
-    var cfg = config.load(gpa, home);
-    cfg.modes.after = a;
-    try config.save(gpa, home, &cfg);
-}
-
-// TODO(wave 3): inline (load, set cfg.modes.timer_s, config.save). Caller:
-// ui/settings_modes.zig:129.
-pub fn setTimer(gpa: std.mem.Allocator, home: []const u8, s: u8) !void {
-    var cfg = config.load(gpa, home);
-    cfg.modes.timer_s = s;
-    try config.save(gpa, home, &cfg);
-}
-
 test "a capture without the editor is always copied or saved" {
     var cfg: config.Config = .{};
     cfg.thumbnail = .never;

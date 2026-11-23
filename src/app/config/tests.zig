@@ -6,8 +6,6 @@ const std = @import("std");
 const config = @import("../config.zig");
 const model = @import("model.zig");
 const parse = @import("parse.zig");
-const mode_settings = @import("../modes/settings.zig");
-const record_settings = @import("../../record/settings.zig");
 const Config = model.Config;
 const testing = std.testing;
 const TmpDir = @import("../../testutil.zig").TmpDir;
@@ -46,8 +44,7 @@ test "defaults: no file reads as every field's default and writes nothing" {
     var cfg = config.load(testing.allocator, h.path);
     try expectSame(&cfg, &Config{});
     try testing.expectEqual(config.Modes{}, cfg.modes);
-    try testing.expectEqual(mode_settings.Settings{}, mode_settings.load(testing.allocator, h.path));
-    const r = record_settings.load(testing.allocator, h.path);
+    const r = cfg.record;
     try testing.expectEqual(@as(u32, 30), r.fps);
     try testing.expect(r.dir() == null and !r.mic);
     try config.save(testing.allocator, h.path, &cfg);
@@ -111,34 +108,38 @@ test "every key round-trips through the file" {
     try testing.expectEqual(config.After.save, back.modes.after);
 }
 
-test "the section setters write their key alone, through the one save" {
+/// Load, change one field, save: what Settings does for one control.
+fn setOne(home: []const u8, comptime field: []const u8, comptime section: []const u8, value: anytype) !void {
+    var cfg = config.load(testing.allocator, home);
+    @field(@field(cfg, section), field) = value;
+    try config.save(testing.allocator, home, &cfg);
+}
+
+test "a changed field writes its key alone, through the one save" {
     var h = try TmpDir.home();
     defer h.deinit();
     try h.write(".config/shotlet/config", "# mine\nnotify=false\nfuture_option=1\n");
-    try mode_settings.setAfter(testing.allocator, h.path, .copy);
-    try mode_settings.setTimer(testing.allocator, h.path, 10);
-    record_settings.save(testing.allocator, h.path, "record_mic", "true");
-    record_settings.save(testing.allocator, h.path, "record_fps", "24");
+    try setOne(h.path, "after", "modes", config.After.copy);
+    try setOne(h.path, "timer_s", "modes", @as(u8, 10));
+    try setOne(h.path, "mic", "record", true);
+    try setOne(h.path, "fps", "record", @as(u32, 24));
     try expectFile(&h, "# mine\nnotify=false\nfuture_option=1\nafter_fullscreen=copy\ntimer_seconds=10\nrecord_mic=true\nrecord_fps=24\n");
-    try testing.expectEqual(config.After.copy, mode_settings.load(testing.allocator, h.path).after);
-    try testing.expect(record_settings.load(testing.allocator, h.path).mic);
+    try testing.expectEqual(config.After.copy, config.load(testing.allocator, h.path).modes.after);
+    try testing.expect(config.load(testing.allocator, h.path).record.mic);
     // setting a value back to the default writes it too
-    try mode_settings.setTimer(testing.allocator, h.path, 5);
-    try testing.expectEqual(@as(u8, 5), mode_settings.load(testing.allocator, h.path).timer_s);
+    try setOne(h.path, "timer_s", "modes", @as(u8, 5));
+    try testing.expectEqual(@as(u8, 5), config.load(testing.allocator, h.path).modes.timer_s);
 }
 
-test "every loader carries a cliptux configuration over" {
-    for (0..3) |which| {
-        var h = try TmpDir.home();
-        defer h.deinit();
-        try h.write(".config/cliptux/config", "timer_seconds=3\nrecord_fps=60\nnotify=false\n");
-        switch (which) {
-            0 => try testing.expect(!config.load(testing.allocator, h.path).notify),
-            1 => try testing.expectEqual(@as(u8, 3), mode_settings.load(testing.allocator, h.path).timer_s),
-            else => try testing.expectEqual(@as(u32, 60), record_settings.load(testing.allocator, h.path).fps),
-        }
-        try expectFile(&h, "timer_seconds=3\nrecord_fps=60\nnotify=false\n");
-    }
+test "loading carries a cliptux configuration over, every section" {
+    var h = try TmpDir.home();
+    defer h.deinit();
+    try h.write(".config/cliptux/config", "timer_seconds=3\nrecord_fps=60\nnotify=false\n");
+    const cfg = config.load(testing.allocator, h.path);
+    try testing.expect(!cfg.notify);
+    try testing.expectEqual(@as(u8, 3), cfg.modes.timer_s);
+    try testing.expectEqual(@as(u32, 60), cfg.record.fps);
+    try expectFile(&h, "timer_seconds=3\nrecord_fps=60\nnotify=false\n");
 }
 
 test "older files: the bools Shotlet wrote, for every bool key" {
