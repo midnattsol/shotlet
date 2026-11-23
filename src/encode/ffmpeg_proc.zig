@@ -330,6 +330,10 @@ test "a long path fits; a failed exit is an error" {
     var s: Args = .{};
     const long: [4000]u8 = @splat('x');
     _ = try cutArgs(&s, "ffmpeg", &long, "/o.mp4", 0, 1000);
+    // the failures below log a warning on purpose
+    const saved_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_level;
     try std.testing.expectError(error.FfmpegFailed, check("test", 1));
     try std.testing.expectError(error.FfmpegFailed, check("test", null));
     try check("test", 0);
