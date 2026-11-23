@@ -53,32 +53,7 @@ pub fn drawRange(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, styl
             const gx = @as(i32, @intFromFloat(@round(pen))) + g.bearing_x;
             const gy = @as(i32, @intFromFloat(@round(baseline + item.gy))) + g.bearing_y;
             var k: i32 = 0;
-            while (k <= smear) : (k += 1) blitAlpha(canvas, gx + k, gy, g, color);
-        }
-    }
-}
-
-/// Blend glyph coverage onto the canvas, clipped to the canvas once up
-/// front instead of per pixel.
-fn blitAlpha(canvas: *Canvas, x0: i32, y0: i32, g: *const ttf.Glyph, color: u32) void {
-    const base_a: u32 = color >> 24;
-    const gx0 = @max(0, 0 -| x0);
-    const gy0 = @max(0, 0 -| y0);
-    const gx1 = @min(g.w, canvas.w -| x0);
-    const gy1 = @min(g.h, canvas.h -| y0);
-    if (gx0 >= gx1 or gy0 >= gy1) return;
-    const rgb = color & 0x00FFFFFF;
-    var gy = gy0;
-    while (gy < gy1) : (gy += 1) {
-        const src = g.alpha[@intCast(gy * g.w)..][0..@intCast(g.w)];
-        const row: usize = @intCast((y0 + gy) * canvas.w + x0);
-        var gx = gx0;
-        while (gx < gx1) : (gx += 1) {
-            const cov: u32 = src[@intCast(gx)];
-            if (cov == 0) continue;
-            const a = (base_a * cov + 127) / 255;
-            const di = row + @as(usize, @intCast(gx));
-            canvas.px[di] = Canvas.blendPixel(canvas.px[di], rgb | (a << 24));
+            while (k <= smear) : (k += 1) canvas.blendMask(g.alpha, @intCast(g.w), @intCast(g.h), gx + k, gy, color);
         }
     }
 }

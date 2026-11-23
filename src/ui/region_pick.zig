@@ -1,40 +1,33 @@
-//! A picker over a frozen capture, on one fullscreen surface per monitor:
-//!
-//! - `.region`: drag out a region, then Start (or Enter) confirms it, for
-//!   the scrolling capture;
-//! - `.window`: the given rectangles (windows) are outlined, the one under
-//!   the pointer lights up, a click picks it.
-//!
-//! Esc, a right click or closing the surfaces cancels. Everything is in
-//! the capture's image pixels.
+//! The scrolling capture's region picker, over a frozen capture on one
+//! fullscreen surface per monitor: drag out a region, then Start (or
+//! Enter) confirms it. Esc, a right click or closing the surfaces
+//! cancels. Everything is in the capture's image pixels. Light or dark
+//! with the desktop, in its accent (ui/theme.zig).
 
 const std = @import("std");
 const capture = @import("../app/capture.zig");
-const geom = @import("../app/modes/geom.zig");
 const render = @import("../gfx/render.zig");
-const text = @import("../gfx/text.zig");
 const view_mod = @import("view.zig");
 const window = @import("../platform/api.zig").window;
 const dim = @import("dim.zig");
 const selchrome = @import("selchrome.zig");
+const barkit = @import("barkit.zig");
+const press = @import("press.zig");
+const scale = @import("scale.zig");
 const theme = @import("theme.zig");
-const Rect = geom.Rect;
+const Rect = @import("shapes.zig").Rect;
 const View = view_mod.View;
-
-pub const Kind = union(enum) {
-    region: struct { label: []const u8 = "Start" },
-    window: []const Rect,
-};
 
 pub const Result = union(enum) {
     cancelled,
     region: Rect,
-    /// the index of the rectangle picked
-    window: usize,
 };
 
-const accent: u32 = 0xFF0A84FF;
-const pill_bg: u32 = 0xE01C1C1E;
+/// the Start button, logical px
+const start_h = 34;
+const start_gap = 10;
+/// a smaller drag is no region (image px)
+const min_side = 8;
 
 const Pane = struct {
     view: View = .{},
@@ -48,29 +41,33 @@ const Pane = struct {
         gpa.free(self.dimmed);
         self.* = .{};
     }
+
+    fn bounds(self: *const Pane) Rect {
+        return .{ .x = 0, .y = 0, .w = @intCast(self.w), .h = @intCast(self.h) };
+    }
 };
+
+/// The Start button: buffer pixels of the surface it is on.
+const Start = struct { surface: u8, r: Rect };
 
 pub const Picker = struct {
     gpa: std.mem.Allocator,
     win: *window.Window,
     cap: *const capture.Capture,
-    kind: Kind,
+    th: theme.Theme,
+    label: []const u8,
     /// of 256, what the dim outside the selection keeps (ui/dim.zig)
     keep: u32 = 256,
     panes: [window.max_surfaces]Pane = @splat(.{}),
     sel: ?Rect = null,
     anchor: ?[2]i32 = null,
-    hovered: ?usize = null,
-    /// the Start pill, buffer pixels of the surface it is on
-    start_btn: ?struct { surface: u8, r: Rect } = null,
+    start_btn: ?Start = null,
+    /// Start activates on a press and release over it (ui/press.zig)
+    pressed: press.Press(Start) = .{},
     dirty: bool = true,
 
     pub fn deinit(self: *Picker) void {
         for (&self.panes) |*p| p.deinit(self.gpa);
-    }
-
-    fn scale(self: *const Picker, i: usize) f64 {
-        return @as(f64, @floatFromInt(self.win.surfaceList()[i].scale120)) / 120.0;
     }
 
     /// The view of surface i: its monitor's part of the image.
@@ -94,7 +91,7 @@ pub const Picker = struct {
         p.bright = try self.gpa.alloc(u32, @as(usize, w) * h);
         p.dimmed = try self.gpa.alloc(u32, p.bright.len);
         const img = &self.cap.image;
-        view_mod.resample(img.pixels, img.width, img.height, p.view, p.bright, w, h, .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) });
+        view_mod.resample(img.pixels, img.width, img.height, p.view, p.bright, w, h, p.bounds());
         dim.dimRow(p.bright, p.dimmed, self.keep);
     }
 
@@ -104,74 +101,37 @@ pub const Picker = struct {
         const px = try self.win.backBufferOf(@intCast(i));
         @memcpy(px, p.dimmed);
         var cv = render.Canvas.init(px, p.w, p.h);
-        const k = self.scale(i);
-        switch (self.kind) {
-            .region => |r| self.paintRegion(i, &cv, k, r.label),
-            .window => |rects| self.paintWindows(i, &cv, k, rects),
+        const k = scale.of(self.win.surfaceList()[i].scale120);
+        if (self.sel) |s| {
+            const b = p.view.rectToBuf(s);
+            // the selection shows the screen as it is
+            if (Rect.intersect(b, p.bounds())) |c| for (@intCast(c.y)..@intCast(c.bottom())) |y| {
+                const row = y * @as(usize, p.w) + @as(usize, @intCast(c.x));
+                @memcpy(cv.px[row..][0..@intCast(c.w)], p.bright[row..][0..@intCast(c.w)]);
+            };
+            selchrome.edge(&cv, b, self.th);
+            if (self.anchor == null) self.drawStart(i, &cv, k, b);
+        } else {
+            const msg = "Drag over what to scroll \u{00b7} Esc to cancel";
+            const sz = selchrome.hintPillSize(msg, k);
+            _ = selchrome.hintPill(&cv, .{ .x = @divTrunc(cv.w - sz[0], 2), .y = scale.px(28, k) }, msg, k, self.th);
         }
         try self.win.presentSurface(@intCast(i));
     }
 
-    fn toBuf(p: *const Pane, r: Rect) Rect {
-        const b = p.view.rectToBuf(.{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
-        return .{ .x = b.x, .y = b.y, .w = b.w, .h = b.h };
-    }
-
-    fn paintRegion(self: *Picker, i: usize, cv: *render.Canvas, k: f64, label: []const u8) void {
-        const p = &self.panes[i];
-        if (self.sel) |s| {
-            const b = toBuf(p, s);
-            // the selection shows the screen as it is
-            if (Rect.intersect(b, .{ .x = 0, .y = 0, .w = @intCast(p.w), .h = @intCast(p.h) })) |c| for (@intCast(c.y)..@intCast(c.y + c.h)) |y| {
-                const row = y * @as(usize, p.w) + @as(usize, @intCast(c.x));
-                @memcpy(cv.px[row..][0..@intCast(c.w)], p.bright[row..][0..@intCast(c.w)]);
-            };
-            selchrome.edge(cv, .{ .x = b.x, .y = b.y, .w = b.w, .h = b.h }, theme.of(.{}));
-            if (self.anchor == null) self.drawStart(i, cv, k, b, label);
-        }
-        if (self.sel == null) self.drawHint(cv, k, "Drag over what to scroll \u{00b7} Esc to cancel");
-    }
-
-    fn drawStart(self: *Picker, i: usize, cv: *render.Canvas, k: f64, b: Rect, label: []const u8) void {
-        const p = &self.panes[i];
-        const fs = 14 * k;
-        const w = text.widthStyled(fs, .bold, label) + @as(i32, @intFromFloat(36 * k));
-        const h: i32 = @intFromFloat(34 * k);
-        var y = b.y + b.h + @as(i32, @intFromFloat(10 * k));
-        if (y + h > @as(i32, @intCast(p.h))) y = b.y + b.h - h - @as(i32, @intFromFloat(10 * k));
-        const x = std.math.clamp(b.x + @divTrunc(b.w - w, 2), 0, @max(0, @as(i32, @intCast(p.w)) - w));
-        cv.fillRoundRectAA(x, y, w, h, @floatFromInt(@divTrunc(h, 2)), accent);
-        const ty = y + @divTrunc(h - text.heightStyled(fs, .bold), 2);
-        text.drawStyled(cv, x + @divTrunc(w - text.widthStyled(fs, .bold, label), 2), ty, fs, 0xFFFFFFFF, .bold, label);
-        self.start_btn = .{ .surface = @intCast(i), .r = .{ .x = x, .y = y, .w = w, .h = h } };
-    }
-
-    fn drawHint(self: *Picker, cv: *render.Canvas, k: f64, msg: []const u8) void {
-        _ = self;
-        const fs = 13 * k;
-        const w = text.width(fs, msg) + @as(i32, @intFromFloat(32 * k));
-        const h: i32 = @intFromFloat(32 * k);
-        const x = @divTrunc(cv.w - w, 2);
-        const y: i32 = @intFromFloat(28 * k);
-        cv.fillRoundRectAA(x, y, w, h, @floatFromInt(@divTrunc(h, 2)), pill_bg);
-        text.draw(cv, x + @as(i32, @intFromFloat(16 * k)), y + @divTrunc(h - text.height(fs), 2), fs, 0xFFF5F5F7, msg);
-    }
-
-    fn paintWindows(self: *Picker, i: usize, cv: *render.Canvas, k: f64, rects: []const Rect) void {
-        const p = &self.panes[i];
-        for (rects) |r| {
-            const b = toBuf(p, r);
-            cv.rectOutline(b.x, b.y, b.w, b.h, 1, 0x99FFFFFF);
-        }
-        if (self.hovered) |h| {
-            const b = toBuf(p, rects[h]);
-            if (Rect.intersect(b, .{ .x = 0, .y = 0, .w = @intCast(p.w), .h = @intCast(p.h) })) |c| for (@intCast(c.y)..@intCast(c.y + c.h)) |y| {
-                const row = y * @as(usize, p.w) + @as(usize, @intCast(c.x));
-                @memcpy(cv.px[row..][0..@intCast(c.w)], p.bright[row..][0..@intCast(c.w)]);
-            };
-            cv.rectOutline(b.x, b.y, b.w, b.h, @max(3, @as(i32, @intFromFloat(3 * k))), accent);
-        }
-        self.drawHint(cv, k, "Click a window to capture it \u{00b7} Esc to cancel");
+    /// Start, centred under the selection (over its bottom edge when
+    /// there is no room below); lit while held.
+    fn drawStart(self: *Picker, i: usize, cv: *render.Canvas, k: f64, b: Rect) void {
+        const w = barkit.textButtonWidth(k, self.label);
+        const h = scale.px(start_h, k);
+        const gap = scale.px(start_gap, k);
+        var y = b.bottom() + gap;
+        if (y + h > cv.h) y = b.bottom() - h - gap;
+        const x = std.math.clamp(b.x + @divTrunc(b.w - w, 2), 0, @max(0, cv.w - w));
+        const r: Rect = .{ .x = x, .y = y, .w = w, .h = h };
+        const held: f64 = if (self.pressed.held() != null) 1 else 0;
+        barkit.textButton(cv, r, k, self.th, .primary, held, self.label);
+        self.start_btn = .{ .surface = @intCast(i), .r = r };
     }
 
     fn imgAt(self: *const Picker, surface: u8, x: f64, y: f64) [2]i32 {
@@ -183,52 +143,43 @@ pub const Picker = struct {
     }
 
     fn onMotion(self: *Picker, surface: u8, x: f64, y: f64) void {
+        const a = self.anchor orelse return;
         const pt = self.imgAt(surface, x, y);
-        switch (self.kind) {
-            .region => if (self.anchor) |a| {
-                self.sel = .{ .x = @min(a[0], pt[0]), .y = @min(a[1], pt[1]), .w = @intCast(@abs(pt[0] - a[0])), .h = @intCast(@abs(pt[1] - a[1])) };
-                self.dirty = true;
-            },
-            .window => |rects| {
-                var hit: ?usize = null;
-                for (rects, 0..) |r, i| if (r.contains(pt[0], pt[1])) {
-                    hit = i;
-                    break;
-                };
-                if (hit != self.hovered) self.dirty = true;
-                self.hovered = hit;
-            },
-        }
+        self.sel = .{ .x = @min(a[0], pt[0]), .y = @min(a[1], pt[1]), .w = @intCast(@abs(pt[0] - a[0])), .h = @intCast(@abs(pt[1] - a[1])) };
+        self.dirty = true;
     }
 
-    fn onStart(self: *const Picker, surface: u8, x: f64, y: f64) bool {
-        const b = self.start_btn orelse return false;
-        return b.surface == surface and b.r.contains(@intFromFloat(x), @intFromFloat(y));
+    /// The Start button under a pointer on `surface`, if it shows.
+    fn startAt(self: *const Picker, surface: u8, x: f64, y: f64) ?Start {
+        if (self.sel == null) return null;
+        const b = self.start_btn orelse return null;
+        if (b.surface != surface or !b.r.contains(@intFromFloat(x), @intFromFloat(y))) return null;
+        return b;
     }
 
-    /// A press or release: the result once the picker is done.
+    /// A press or release: the result once the picker is done. Start is
+    /// a press and a release over it; a press anywhere else drags anew.
     fn onButton(self: *Picker, b: anytype) ?Result {
         if (b.button == .right) return if (b.pressed) .cancelled else null;
         if (b.button != .left) return null;
-        switch (self.kind) {
-            .window => if (b.pressed) {
-                self.onMotion(b.surface, b.x, b.y);
-                if (self.hovered) |h| return .{ .window = h };
-            },
-            .region => if (b.pressed) {
-                if (self.sel != null and self.onStart(b.surface, b.x, b.y)) return .{ .region = self.sel.? };
-                self.anchor = self.imgAt(b.surface, b.x, b.y);
+        self.dirty = true;
+        const on_start = self.startAt(b.surface, b.x, b.y);
+        if (b.pressed) {
+            if (on_start != null) {
+                self.pressed.down(on_start, b.x, b.y);
+                return null;
+            }
+            self.anchor = self.imgAt(b.surface, b.x, b.y);
+            self.sel = null;
+            self.start_btn = null;
+        } else if (self.pressed.held() != null) {
+            if (self.pressed.up(on_start) != null) return .{ .region = self.sel.? };
+        } else if (self.anchor != null) {
+            self.onMotion(b.surface, b.x, b.y);
+            self.anchor = null;
+            if (self.sel) |s| if (s.w < min_side or s.h < min_side) {
                 self.sel = null;
-                self.start_btn = null;
-                self.dirty = true;
-            } else if (self.anchor != null) {
-                self.onMotion(b.surface, b.x, b.y);
-                self.anchor = null;
-                if (self.sel) |s| if (s.w < 8 or s.h < 8) {
-                    self.sel = null;
-                };
-                self.dirty = true;
-            },
+            };
         }
         return null;
     }
@@ -236,7 +187,7 @@ pub const Picker = struct {
     fn onKey(self: *const Picker, k: window.Key) ?Result {
         if (!k.pressed) return null;
         if (k.code == .escape) return .cancelled;
-        if (k.code == .enter or k.code == .kp_enter) if (self.sel) |s| if (self.kind == .region) return .{ .region = s };
+        if (k.code == .enter or k.code == .kp_enter) if (self.sel) |s| return .{ .region = s };
         return null;
     }
 
@@ -264,12 +215,12 @@ pub const Picker = struct {
         for (surfs, 0..) |s, i| if (s.alive) try self.paint(i);
     }
 
-    /// Open the surfaces and run until something is picked or cancelled;
+    /// Open the surfaces and run until a region is picked or cancelled;
     /// the surfaces are closed again before returning.
     pub fn run(self: *Picker, title: []const u8) !Result {
         try self.win.openOutputs(title);
         defer self.win.closeWindow();
-        self.win.setCursor(if (self.kind == .region) .crosshair else .arrow) catch {};
+        self.win.setCursor(.crosshair) catch {};
         for (self.win.surfaceList(), 0..) |s, i| if (s.alive) try self.prepare(i, s.width, s.height);
         while (true) {
             try self.paintAll();
@@ -279,8 +230,23 @@ pub const Picker = struct {
     }
 };
 
-pub fn pick(gpa: std.mem.Allocator, win: *window.Window, cap: *const capture.Capture, kind: Kind) !Result {
-    var p: Picker = .{ .gpa = gpa, .win = win, .cap = cap, .kind = kind, .keep = dim.keepFor(cap.image.pixels, cap.image.width, cap.image.height) };
+/// Pick a region of `cap`; `label` names the Start button.
+pub fn pick(gpa: std.mem.Allocator, win: *window.Window, cap: *const capture.Capture, label: []const u8, th: theme.Theme) !Result {
+    var p: Picker = .{ .gpa = gpa, .win = win, .cap = cap, .th = th, .label = label, .keep = dim.keepFor(cap.image.pixels, cap.image.width, cap.image.height) };
     defer p.deinit();
     return p.run("Shotlet");
+}
+
+test "Start is a press and a release over it; releasing elsewhere cancels" {
+    const B = struct { button: window.Button, pressed: bool, x: f64, y: f64, surface: u8 = 0 };
+    const sel: Rect = .{ .x = 10, .y = 10, .w = 100, .h = 80 };
+    var p: Picker = .{ .gpa = std.testing.allocator, .win = undefined, .cap = undefined, .th = theme.of(.{}), .label = "Start" };
+    p.sel = sel;
+    p.start_btn = .{ .surface = 0, .r = .{ .x = 40, .y = 100, .w = 60, .h = 30 } };
+    try std.testing.expectEqual(@as(?Result, null), p.onButton(B{ .button = .left, .pressed = true, .x = 50, .y = 110 }));
+    try std.testing.expectEqual(@as(?Result, null), p.onButton(B{ .button = .left, .pressed = false, .x = 5, .y = 5 }));
+    try std.testing.expectEqual(sel, p.sel.?);
+    _ = p.onButton(B{ .button = .left, .pressed = true, .x = 50, .y = 110 });
+    try std.testing.expectEqual(@as(?Result, .{ .region = sel }), p.onButton(B{ .button = .left, .pressed = false, .x = 60, .y = 120 }));
+    try std.testing.expectEqual(@as(?Result, .cancelled), p.onButton(B{ .button = .right, .pressed = true, .x = 0, .y = 0 }));
 }

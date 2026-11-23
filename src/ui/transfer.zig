@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const sys = @import("../platform/api.zig").sys;
+const utf8 = @import("../gfx/utf8.zig");
 
 /// Read `fd` until EOF, `max_bytes` or the deadline, whichever comes
 /// first (sys.readBounded); a cut never splits a UTF-8 sequence. Caller
@@ -11,16 +12,12 @@ pub fn readBounded(alloc: std.mem.Allocator, fd: sys.fd_t, max_bytes: usize, dea
     const out = try sys.readBounded(alloc, fd, max_bytes, deadline_ms);
     if (out.len < max_bytes) return out;
     // drop a trailing partial character
-    var i = out.len;
-    while (i > 0 and (out[i - 1] & 0xC0) == 0x80) i -= 1;
-    if (i > 0 and out[i - 1] >= 0xC0) {
-        const need = std.unicode.utf8ByteSequenceLength(out[i - 1]) catch 1;
-        if (out.len - (i - 1) < need) {
-            defer alloc.free(out);
-            return alloc.dupe(u8, out[0 .. i - 1]);
-        }
-    }
-    return out;
+    const last = utf8.prevBoundary(out, out.len);
+    if (last == out.len or out[last] < 0xC0) return out;
+    const need = std.unicode.utf8ByteSequenceLength(out[last]) catch 1;
+    if (out.len - last >= need) return out;
+    defer alloc.free(out);
+    return alloc.dupe(u8, out[0..last]);
 }
 
 test "bounded reads stop at EOF, the size limit and the deadline" {

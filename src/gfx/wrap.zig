@@ -25,18 +25,8 @@ fn decode(s: []const u8, i: usize) struct { u21, usize } {
     return .{ cp, it.i };
 }
 
-/// Start of the character that ends at byte `i`.
-fn prevStart(s: []const u8, i: usize) usize {
-    var j = i;
-    while (j > 0) {
-        j -= 1;
-        if (s[j] & 0xC0 != 0x80) break;
-    }
-    return j;
-}
-
 fn decodeBefore(s: []const u8, i: usize) u21 {
-    return decode(s, prevStart(s, i))[0];
+    return decode(s, utf8.prevBoundary(s, i))[0];
 }
 
 pub fn isSpace(cp: u21) bool {
@@ -87,7 +77,7 @@ fn canBreakAt(s: []const u8, i: usize) bool {
     if (hyphen(before)) {
         // "well-known" breaks after the hyphen; "-5" and " -x" do not
         if (isDigit(after)) return false;
-        const ib = prevStart(s, i);
+        const ib = utf8.prevBoundary(s, i);
         if (ib == 0) return false;
         const b2 = decodeBefore(s, ib);
         return !isSpace(b2);
@@ -114,7 +104,7 @@ fn trimSpaces(s: []const u8, start: usize, end: usize) usize {
     while (e > start) {
         const cp = decodeBefore(s, e);
         if (!isSpace(cp)) break;
-        e = prevStart(s, e);
+        e = utf8.prevBoundary(s, e);
     }
     return e;
 }

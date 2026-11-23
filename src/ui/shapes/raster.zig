@@ -3,6 +3,8 @@
 
 const std = @import("std");
 const render = @import("../../gfx/render.zig");
+const sdf = @import("../../gfx/render/sdf.zig");
+const color_mod = @import("../../gfx/color.zig");
 const Rect = @import("geometry.zig").Rect;
 
 const Canvas = render.Canvas;
@@ -17,6 +19,8 @@ pub fn roundRectRing(canvas: *Canvas, r: Rect, radius: f64, width: f64, color: u
     const fy1: f64 = @floatFromInt(r.bottom());
     const ro = @min(radius, @min(@as(f64, @floatFromInt(r.w)), @as(f64, @floatFromInt(r.h))) / 2.0);
     const ri = @max(0.0, ro - width);
+    // the inside edge, when the ring does not fill the rect
+    const hole = fx1 - fx0 > 2 * width and fy1 - fy0 > 2 * width;
     const band: i32 = @as(i32, @intFromFloat(@ceil(@max(ro, width)))) + 2;
     var y: i32 = @max(r.y - 1, 0);
     const y_end = @min(r.bottom() + 1, canvas.h);
@@ -31,22 +35,11 @@ pub fn roundRectRing(canvas: *Canvas, r: Rect, radius: f64, width: f64, color: u
             }
             const px = @as(f64, @floatFromInt(x)) + 0.5;
             const py = @as(f64, @floatFromInt(y)) + 0.5;
-            const d_o = rrDist(px, py, fx0, fy0, fx1, fy1, ro);
-            const d_i = rrDist(px, py, fx0 + width, fy0 + width, fx1 - width, fy1 - width, ri);
-            const cov = std.math.clamp(0.5 - d_o, 0.0, 1.0) - std.math.clamp(0.5 - d_i, 0.0, 1.0);
+            const cov = sdf.cov(sdf.roundRectDist(px, py, fx0, fy0, fx1, fy1, ro)) -
+                if (hole) sdf.cov(sdf.roundRectDist(px, py, fx0 + width, fy0 + width, fx1 - width, fy1 - width, ri)) else 0;
             canvas.blendCov(x, y, color, cov);
         }
     }
-}
-
-fn rrDist(px: f64, py: f64, x0: f64, y0: f64, x1: f64, y1: f64, r: f64) f64 {
-    if (x1 <= x0 or y1 <= y0) return 1e9;
-    const rr = @min(r, @min(x1 - x0, y1 - y0) / 2.0);
-    const qx = @max(x0 + rr - px, px - (x1 - rr));
-    const qy = @max(y0 + rr - py, py - (y1 - rr));
-    const ox = @max(qx, 0.0);
-    const oy = @max(qy, 0.0);
-    return @sqrt(ox * ox + oy * oy) + @min(@max(qx, qy), 0.0) - rr;
 }
 
 pub fn fillEllipseAA(canvas: *Canvas, r: Rect, color: u32) void {
@@ -65,7 +58,7 @@ pub fn fillEllipseAA(canvas: *Canvas, r: Rect, color: u32) void {
             const gx = 2.0 * dx / (rx * rx);
             const gy = 2.0 * dy / (ry * ry);
             const g = @max(1e-9, @sqrt(gx * gx + gy * gy));
-            canvas.blendCov(x, y, color, std.math.clamp(0.5 - f / g, 0.0, 1.0));
+            canvas.blendCov(x, y, color, sdf.cov(f / g));
         }
     }
 }
@@ -98,12 +91,16 @@ pub fn pixelateAligned(canvas: *Canvas, r: Rect, blk: i32) void {
     }
 }
 
+/// Whether `c` reads as a light colour: dark text goes on it. Mid grey
+/// (0x8C) and the palette's red, blue, purple and pink are dark.
+pub fn isLight(c: u32) bool {
+    return color_mod.luminance(c) > 0.265;
+}
+
+/// A label colour that reads on `c`: near-black on light colours, white
+/// on dark ones.
 pub fn contrastColor(c: u32) u32 {
-    const r = (c >> 16) & 0xFF;
-    const g = (c >> 8) & 0xFF;
-    const b = c & 0xFF;
-    const lum = (r * 299 + g * 587 + b * 114) / 1000;
-    return if (lum > 140) 0xFF1A1A1A else 0xFFFFFFFF;
+    return if (isLight(c)) 0xFF1A1A1A else 0xFFFFFFFF;
 }
 
 test "pixelate cells stay aligned when clipped" {
@@ -120,4 +117,26 @@ test "pixelate cells stay aligned when clipped" {
     for (0..8) |y| {
         for (2..14) |x| try std.testing.expectEqual(full[y * 32 + 16 + x], part[y * 16 + x]);
     }
+}
+
+test "the label colour flips at mid grey, as the palette needs" {
+    try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), contrastColor(0xFF8C8C8C));
+    try std.testing.expectEqual(@as(u32, 0xFF1A1A1A), contrastColor(0xFF8D8D8D));
+    const white = [_]u32{ 0xFFFF453A, 0xFF0A84FF, 0xFFBF5AF2, 0xFF1C1C1E, 0xFFFF375F };
+    for (white) |c| try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), contrastColor(c));
+    const dark = [_]u32{ 0xFFFF9F0A, 0xFFFFD60A, 0xFF30D158, 0xFFFFFFFF, 0xFF64D2FF, 0xFF8E8E93 };
+    for (dark) |c| try std.testing.expectEqual(@as(u32, 0xFF1A1A1A), contrastColor(c));
+}
+
+test "a ring is the band between its outer and inner edges" {
+    var px: [20 * 20]u32 = @splat(0xFF000000);
+    var cv = Canvas.init(&px, 20, 20);
+    roundRectRing(&cv, .{ .x = 2, .y = 2, .w = 16, .h = 16 }, 4, 2, 0xFFFFFFFF);
+    try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[10 * 20 + 2]);
+    try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[10 * 20 + 3]);
+    try std.testing.expectEqual(@as(u32, 0xFF000000), px[10 * 20 + 4]);
+    try std.testing.expectEqual(@as(u32, 0xFF000000), px[10 * 20 + 1]);
+    // thicker than half the rect: filled
+    roundRectRing(&cv, .{ .x = 0, .y = 0, .w = 4, .h = 4 }, 0, 3, 0xFFFF0000);
+    try std.testing.expectEqual(@as(u32, 0xFFFF0000), px[1 * 20 + 1]);
 }

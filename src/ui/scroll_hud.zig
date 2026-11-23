@@ -19,11 +19,15 @@ const std = @import("std");
 const sys = @import("../platform/api.zig").sys;
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
-const effects = @import("../gfx/effects.zig");
-const fui = @import("floatui.zig");
 const theme = @import("theme.zig");
+const scale = @import("scale.zig");
+const press = @import("press.zig");
+const barkit = @import("barkit.zig");
+const floatui = @import("floatui.zig");
+const floatwin = @import("floatwin.zig");
+const material = @import("material.zig");
 const window = @import("../platform/api.zig").window;
-const Rect = @import("../app/modes/geom.zig").Rect;
+const Rect = @import("shapes.zig").Rect;
 
 pub const title = "shotlet:scroll";
 /// logical size
@@ -60,31 +64,11 @@ pub const Source = struct {
 
 const Button = struct { r: Rect, action: Action, label: []const u8, primary: bool };
 
-/// The colours of the card, made opaque (no backdrop blur for a client).
-const Look = struct {
-    th: theme.Theme,
-    card: u32,
-    edge: u32,
-    well: u32,
-    muted: u32,
-    secondary: u32,
-
-    fn of(th: theme.Theme) Look {
-        const card = effects.over(th.window_bg, th.panel);
-        return .{
-            .th = th,
-            .card = card,
-            .edge = effects.over(card, th.hairline),
-            .well = effects.over(card, th.field),
-            .muted = effects.over(card, th.muted),
-            .secondary = effects.over(card, th.pressed),
-        };
-    }
-};
-
 pub const Hud = struct {
     win: *window.Window,
-    look: Look,
+    th: theme.Theme,
+    /// the card's colours (theme.Opaque: no backdrop blur for a client)
+    look: theme.Opaque,
     phase: Phase = .running,
     headline_buf: [96]u8 = undefined,
     headline: []const u8 = "Starting\u{2026}",
@@ -95,19 +79,20 @@ pub const Hud = struct {
     buttons_buf: [3]Button = undefined,
     buttons: []const Button = &.{},
     hover: ?Action = null,
+    /// a click is a press and a release on the same button (ui/press.zig)
+    pressed: press.Press(Action) = .{},
     dirty: bool = true,
 
     pub fn open(win: *window.Window, th: theme.Theme) !Hud {
-        try win.open(title, .{ .fullscreen = false, .transparent = true, .width = width, .height = height, .layer = .{
+        _ = try floatwin.open(win, .{
+            .title = title,
+            .namespace = "shotlet-scroll",
+            .size = .{ width, height },
             .anchor = .{ .top = true, .right = true },
-            .width = width,
-            .height = height,
             .margin = .{ 24, 24, 0, 0 },
             .keyboard = .on_demand,
-            .namespace = "shotlet-scroll",
-        } });
-        win.setCursor(.arrow) catch {};
-        return .{ .win = win, .look = Look.of(th) };
+        });
+        return .{ .win = win, .th = th, .look = theme.Opaque.of(th) };
     }
 
     /// What the card says: `headline`, an optional `hint` under it, and
@@ -132,49 +117,56 @@ pub const Hud = struct {
     }
 
     fn k(self: *const Hud) f64 {
-        return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
+        return scale.of(self.win.scale120);
     }
 
-    fn sc(self: *const Hud, v: f64) i32 {
-        return @intFromFloat(@round(v * self.k()));
+    fn sc(self: *const Hud, v: anytype) i32 {
+        return scale.px(v, self.k());
     }
 
     pub fn draw(self: *Hud, src: ?Source) !void {
-        if (!self.dirty or self.win.frame_pending or self.win.width == 0) return;
+        if (!self.dirty or !floatwin.canDraw(self.win)) return;
         self.dirty = false;
         const bw = self.win.width;
         const bh = self.win.height;
-        const card = try self.win.alloc.alloc(u32, @as(usize, bw) * bh);
-        defer self.win.alloc.free(card);
+        const gpa = self.win.alloc;
+        const card = try gpa.alloc(u32, @as(usize, bw) * bh);
+        defer gpa.free(card);
         var cv = render.Canvas.init(card, bw, bh);
         self.drawCard(&cv, src);
         const px = try self.win.backBuffer();
         @memset(px, 0);
-        fui.placeCard(px, bw, bh, card, bw, bh, 0, 0, @intCast(self.sc(radius)), 0);
-        fui.premultiply(px, bw, bh, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) });
-        try self.win.present();
+        floatui.place(gpa, .{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, self.radiusPx(), null, self.k());
+        try floatwin.presentStraight(self.win, px);
+    }
+
+    fn radiusPx(self: *const Hud) f64 {
+        return @floatFromInt(self.sc(radius));
     }
 
     /// Everything on the card, on an opaque canvas of the window's size.
     fn drawCard(self: *Hud, cv: *render.Canvas, src: ?Source) void {
         const lk = self.look;
-        @memset(cv.px, lk.edge);
-        const one = @max(1, self.sc(1));
-        cv.fillRoundRectAA(one, one, cv.w - 2 * one, cv.h - 2 * one, @floatFromInt(self.sc(radius) - one), lk.card);
+        @memset(cv.px, lk.panel);
+        material.hairline(cv, .{ .x = 0, .y = 0, .w = cv.w, .h = cv.h }, self.radiusPx(), lk.line);
         const x0 = self.sc(pad);
         const inner = cv.w - 2 * x0;
         const fs = theme.font_small * self.k();
-        text.drawStyled(cv, x0, self.sc(pad), theme.font_label * self.k(), lk.th.fg, .semibold, "Scrolling capture");
+        text.drawStyled(cv, x0, self.sc(pad), theme.font_label * self.k(), lk.fg, .semibold, "Scrolling capture");
         const loud = self.phase != .running;
+        const head_style: text.Style = if (loud) .semibold else .regular;
         var ebuf: [128]u8 = undefined;
-        text.drawStyled(cv, x0, self.sc(pad + 22), fs, if (loud) lk.th.fg else lk.muted, if (loud) .semibold else .regular, fui.ellipsize(&ebuf, fs, self.headline, inner));
-        text.draw(cv, x0, self.sc(pad + 38), fs, lk.muted, fui.ellipsize(&ebuf, fs, self.hint, inner));
+        text.drawStyled(cv, x0, self.sc(pad + 22), fs, if (loud) lk.fg else lk.muted, head_style, text.ellipsize(&ebuf, fs, head_style, self.headline, inner, .end));
+        text.draw(cv, x0, self.sc(pad + 38), fs, lk.muted, text.ellipsize(&ebuf, fs, .regular, self.hint, inner, .end));
         const pv: Rect = .{ .x = x0, .y = self.sc(preview_y), .w = inner, .h = self.sc(preview_h) };
-        cv.fillRect(pv.x, pv.y, pv.w, pv.h, lk.well);
+        cv.fillRect(pv.x, pv.y, pv.w, pv.h, lk.field);
         if (src) |s| drawPreview(cv, pv, s);
         if (self.phase != .failed) text.drawStyled(cv, x0, pv.y + pv.h + self.sc(8), fs, lk.muted, text.Style.regular.num(), self.detail);
         self.layoutButtons(cv.w, cv.h);
-        for (self.buttons) |b| self.drawButton(cv, b);
+        for (self.buttons) |b| {
+            const hot: f64 = if (self.hover == b.action) 1 else 0;
+            barkit.textButton(cv, b.r, self.k(), self.th, if (b.primary) .primary else .secondary, hot, b.label);
+        }
     }
 
     /// The bottom row for this phase: one wide button, or three.
@@ -205,31 +197,20 @@ pub const Hud = struct {
         self.buttons = b[0..3];
     }
 
-    fn drawButton(self: *const Hud, cv: *render.Canvas, b: Button) void {
-        const th = self.look.th;
-        const hot = self.hover == b.action;
-        const bg = if (b.primary)
-            (if (hot) th.accent_fill_hover else th.accent_fill)
-        else if (hot) effects.over(self.look.secondary, th.hover) else self.look.secondary;
-        const r = b.r;
-        cv.fillRoundRectAA(r.x, r.y, r.w, r.h, theme.button_radius * self.k(), bg);
-        fui.textCentered(cv, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, theme.font_label * self.k(), if (b.primary) th.on_accent else th.fg, .semibold, b.label);
-    }
-
     /// The bottom of the image, as wide as the preview.
     fn drawPreview(cv: *render.Canvas, pv: Rect, s: Source) void {
         if (s.width == 0 or s.height == 0) return;
-        const scale = @as(f64, @floatFromInt(pv.w)) / @as(f64, @floatFromInt(s.width));
-        const shown: u32 = @min(s.height, @as(u32, @intFromFloat(@as(f64, @floatFromInt(pv.h)) / scale)));
+        const ratio = @as(f64, @floatFromInt(pv.w)) / @as(f64, @floatFromInt(s.width));
+        const shown: u32 = @min(s.height, @as(u32, @intFromFloat(@as(f64, @floatFromInt(pv.h)) / ratio)));
         const first = s.height - shown;
-        const dh: i32 = @intFromFloat(@as(f64, @floatFromInt(shown)) * scale);
+        const dh: i32 = @intFromFloat(@as(f64, @floatFromInt(shown)) * ratio);
         const top = pv.y + pv.h - dh;
         var y: i32 = 0;
         while (y < dh) : (y += 1) {
-            const sy = first + @min(shown - 1, @as(u32, @intFromFloat(@as(f64, @floatFromInt(y)) / scale)));
+            const sy = first + @min(shown - 1, @as(u32, @intFromFloat(@as(f64, @floatFromInt(y)) / ratio)));
             const row = s.row(s.ctx, sy);
             const out = cv.px[@as(usize, @intCast((top + y) * cv.w + pv.x))..][0..@intCast(pv.w)];
-            for (out, 0..) |*o, x| o.* = row[@min(s.width - 1, @as(u32, @intFromFloat(@as(f64, @floatFromInt(x)) / scale)))] | 0xFF000000;
+            for (out, 0..) |*o, x| o.* = row[@min(s.width - 1, @as(u32, @intFromFloat(@as(f64, @floatFromInt(x)) / ratio)))] | 0xFF000000;
         }
     }
 
@@ -254,7 +235,10 @@ pub const Hud = struct {
                 if (over != self.hover) self.dirty = true;
                 self.hover = over;
             },
-            .pointer_button => |b| if (b.pressed and b.button == .left) return self.buttonAt(b.x, b.y),
+            .pointer_button => |b| if (b.button == .left) {
+                const hit = self.buttonAt(b.x, b.y);
+                if (b.pressed) self.pressed.down(hit, b.x, b.y) else return self.pressed.up(hit);
+            },
             else => {},
         }
         return null;
@@ -331,4 +315,10 @@ test "the labels fit their buttons" {
         try std.testing.expect(text.widthStyled(theme.font_label, .semibold, l) + 12 <= bw);
     var buf: [24]u8 = undefined;
     try std.testing.expectEqualStrings("20\u{2009}000", grouped(&buf, 20_000));
+}
+
+// the scrolling capture's region picker is tested from here (main.zig
+// does not list it; wave 3 registers the tests there)
+test {
+    _ = @import("region_pick.zig");
 }

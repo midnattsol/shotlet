@@ -45,7 +45,7 @@ pub fn fillCircleAA(c: *Canvas, cx: f64, cy: f64, r: f64, color: u32) void {
             }
             const dx = @as(f64, @floatFromInt(x)) + 0.5 - cx;
             const d = @sqrt(dx * dx + dy * dy);
-            c.blendCov(x, y, color, @max(0.0, @min(1.0, r - d + 0.5)));
+            c.blendCov(x, y, color, sdf.cov(d - r));
         }
     }
 }
@@ -76,7 +76,7 @@ pub fn ringAA(c: *Canvas, cx: f64, cy: f64, r: f64, ring_w: f64, color: u32) voi
             while (x <= xs[1]) : (x += 1) {
                 const dx = @as(f64, @floatFromInt(x)) + 0.5 - cx;
                 const d = @abs(@sqrt(dx * dx + dy * dy) - r);
-                c.blendCov(x, y, color, @max(0.0, @min(1.0, half - d + 0.5)));
+                c.blendCov(x, y, color, sdf.cov(d - half));
             }
         }
     }
@@ -205,7 +205,7 @@ const EllipseBand = struct {
         const gx = 2.0 * px * e.irx2;
         const gy = 2.0 * py * e.iry2;
         const g = @sqrt(gx * gx + gy * gy);
-        return if (g < 1e-9) 0 else @max(0.0, @min(1.0, e.half - @abs(f) / g + 0.5));
+        return if (g < 1e-9) 0 else sdf.cov(@abs(f) / g - e.half);
     }
 };
 
