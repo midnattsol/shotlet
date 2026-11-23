@@ -3,27 +3,43 @@
 # PipeWire + WirePlumber, one headless compositor and its portal backend,
 # then one scenario against the real shotlet binary.
 #
-# usage: inner.sh COMPOSITOR SCENARIO      (sway | labwc | kwin)
-# Logs and screenshots go to /out. Prints PASS/FAIL/SKIP lines.
+# usage: inner.sh COMPOSITOR SCENARIO
+# COMPOSITOR: sway | labwc | kwin; SCENARIO: a row of table.sh, which
+# says what outputs it wants and what it needs. The helpers come from
+# /opt/shotlet/common (tools/e2e-common) and lib.sh. Logs and screenshots
+# go to /out. Prints PASS/FAIL/SKIP lines.
 set -u
 COMP=$1 SCEN=$2
 CTR=/opt/shotlet/ctr
+COMMON=/opt/shotlet/common
 BINDIR=/opt/shotlet/bin
 OUT=/out
+E2E_TAG="$COMP $SCEN"
+. "$COMMON/report.sh"
+. "$COMMON/session.sh"
+. "$CTR/table.sh"
+
+case " $COMPOSITORS " in *" $COMP "*) ;; *) echo "inner.sh: unknown compositor $COMP" >&2; exit 2 ;; esac
+scenario_row "$SCEN" || { fail "no such scenario"; exit 2; }
+# what this container cannot run
+if [ -z "${CTR_RENDER_NODE:-}" ]; then
+    if [ "$COMP" = kwin ]; then
+        skip "KWin without a GPU render node composites with QPainter: no screenshots, no screencasts"
+        exit 0
+    elif scenario_flag gpu; then
+        skip "the portal's screencast needs a GPU render node (/dev/dri/renderD*)"
+        exit 0
+    fi
+fi
 
 if [ -z "${CTR_INNER:-}" ]; then
-    [ -n "${SHOTLET_CONTAINER:-}" ] || { echo "inner.sh: only inside the container" >&2; exit 2; }
+    [ "${SHOTLET_E2E_SANDBOX:-}" = container ] || { echo "inner.sh: only inside the container" >&2; exit 2; }
     export HOME=${HOME:-/tmp/home}
     mkdir -p "$HOME"
-    export XDG_RUNTIME_DIR=$HOME/run
-    mkdir -m 700 -p "$XDG_RUNTIME_DIR"
-    export XDG_CONFIG_HOME=$HOME/.config XDG_STATE_HOME=$HOME/.local/state \
-        XDG_DATA_HOME=$HOME/.local/share XDG_CACHE_HOME=$HOME/.cache
-    mkdir -p "$XDG_CONFIG_HOME" "$XDG_STATE_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$HOME/Pictures"
-    export LANG=C.UTF-8 XDG_SESSION_TYPE=wayland
-    unset WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS
-    # the e2e helpers (droptarget) refuse to run outside a private session
-    export HL_INNER=1 CTR_INNER=1
+    sandbox_env container
+    # TODO(wave 2): remove HL_INNER and SHOTLET_CONTAINER once the drivers
+    # (droptarget, wldrive) check SHOTLET_E2E_SANDBOX
+    export HL_INNER=1 SHOTLET_CONTAINER=1 CTR_INNER=1
     exec dbus-run-session -- "$0" "$@" 2> >(grep --line-buffered -v '^dbus-daemon\[' >&2)
 fi
 
@@ -47,27 +63,16 @@ trap 'echo "inner.sh: SIGTERM at $(date +%T)" >&2; ps -eo pid,ppid,stat,etime,co
   timeout 5 ps -eo pid,args >>"$OUT/stuck-ps.txt" 2>&1 ) &
 pids+=($!)
 
-failed=0
-pass() { echo "PASS $COMP $SCEN: $*"; }
-fail() { echo "FAIL $COMP $SCEN: $*"; failed=1; }
-skip() { echo "SKIP $COMP $SCEN: $*"; }
-check() { # check DESCRIPTION COMMAND...
-    local what=$1; shift
-    if "$@"; then pass "$what"; else fail "$what"; fi
-}
-
-pipewire >"$OUT/pipewire.log" 2>&1 & pids+=($!)
-for i in $(seq 1 50); do [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break; sleep 0.1; done
-wireplumber >"$OUT/wireplumber.log" 2>&1 & pids+=($!)
+start_pipewire "$OUT"
 
 # as a Plasma session does: KService (which KWin asks which .desktop file
 # an executable belongs to) only lists applications found through a menu
 [ "$COMP" = kwin ] && export XDG_MENU_PREFIX=plasma-
 
 # Shotlet installed as a person would (install.sh into ~/.local), so KWin
-# finds its .desktop file; the KWin `portal` scenario leaves it out to see
-# the portal take over when KWin refuses direct capture
-if [ "$COMP:$SCEN" = kwin:portal ]; then
+# finds its .desktop file; on KWin a `portal` scenario leaves it out to
+# see the portal take over when KWin refuses direct capture
+if [ "$COMP" = kwin ] && scenario_flag portal; then
     export SHOTLET_BIN=$BINDIR/shotlet
 else
     PREFIX=$HOME/.local /opt/shotlet/pkg/install.sh --no-gnome-extension >"$OUT/install.log" 2>&1 ||
@@ -86,13 +91,9 @@ X-KDE-Wayland-Interfaces=org_kde_kwin_fake_input
 EOF
 command -v kbuildsycoca6 >/dev/null && kbuildsycoca6 >/dev/null 2>&1
 
-# MONITORS="WxH[@SCALE] ...": the outputs a scenario wants (default one)
-MONITORS=${MONITORS:-1600x900}
-case $SCEN in
-    multimon) MONITORS="1600x900 1280x720@2" ;;
-    rotated) MONITORS=${CTR_ROTATED:-"1600x900/90 1280x720/flipped-180"} ;;
-    portal | record) [ "$COMP" = kwin ] || export SHOTLET_NO_DIRECT=1 ;;
-esac
+# the outputs the scenario wants (its row in table.sh, or E2E_MONITORS)
+MONITORS=${E2E_MONITORS:-$S_MONS}
+[ "$COMP" != kwin ] && scenario_flag portal && export SHOTLET_NO_DIRECT=1
 set -- $MONITORS
 NMON=$#
 
@@ -118,15 +119,13 @@ layout_wlr() {
     done
 }
 
-wait_socket() {
-    local i
-    for i in $(seq 1 100); do
-        WAYLAND_DISPLAY=$(cd "$XDG_RUNTIME_DIR" && ls wayland-* 2>/dev/null | grep -v lock | head -1)
-        [ -n "$WAYLAND_DISPLAY" ] && return 0
-        sleep 0.1
-    done
-    return 1
+# wlroots_up NAME: the compositor's socket (whatever it named it) is in
+# WAYLAND_DISPLAY, and all the outputs exist
+wlroots_up() {
+    wait_socket "$XDG_RUNTIME_DIR/wayland-*" 10 || { fail "$1 did not start"; exit 1; }
+    export WAYLAND_DISPLAY=${SOCKET##*/}
 }
+outputs_up() { [ "$(wlr-randr 2>/dev/null | grep -c '^HEADLESS-')" -ge "$NMON" ]; }
 
 # wlroots: headless outputs, GLES2 on the render node when there is one
 # (xdg-desktop-portal-wlr needs dmabuf-capable screencopy), else pixman
@@ -149,10 +148,11 @@ focus_follows_mouse no
 seat * hide_cursor 0
 EOF
         sway -c "$HOME/sway.conf" >"$OUT/compositor.log" 2>&1 & pids+=($!)
-        wait_socket || { fail "sway did not start"; exit 1; }
-        export WAYLAND_DISPLAY SWAYSOCK=$(ls "$XDG_RUNTIME_DIR"/sway-ipc.* 2>/dev/null | head -1)
+        wlroots_up sway
+        wait_socket "$XDG_RUNTIME_DIR/sway-ipc.*" 5
+        export SWAYSOCK=$SOCKET
         for i in $(seq 2 "$NMON"); do swaymsg create_output >/dev/null; done
-        sleep 0.5
+        wait_until 5 outputs_up
         layout_wlr || { fail "could not lay out the outputs"; exit 1; }
         ;;
     labwc)
@@ -170,9 +170,8 @@ EOF
 </labwc_config>
 EOF
         labwc >"$OUT/compositor.log" 2>&1 & pids+=($!)
-        wait_socket || { fail "labwc did not start"; exit 1; }
-        export WAYLAND_DISPLAY
-        sleep 0.5
+        wlroots_up labwc
+        wait_until 5 outputs_up
         layout_wlr || { fail "could not lay out the outputs"; exit 1; }
         ;;
     kwin)
@@ -187,17 +186,17 @@ EOF
         mode=${1%@*}
         QT_LOGGING_RULES="${CTR_KWIN_LOG:-}" kwin_wayland --virtual --no-lockscreen --socket wayland-kw --output-count "$NMON" \
             --width "${mode%x*}" --height "${mode#*x}" >"$OUT/compositor.log" 2>&1 & pids+=($!)
-        for i in $(seq 1 100); do [ -S "$XDG_RUNTIME_DIR/wayland-kw" ] && break; sleep 0.1; done
-        [ -S "$XDG_RUNTIME_DIR/wayland-kw" ] || { fail "kwin did not start"; tail "$OUT/compositor.log" >&2; exit 1; }
+        wait_socket "$XDG_RUNTIME_DIR/wayland-kw" 10 || { fail "kwin did not start"; tail "$OUT/compositor.log" >&2; exit 1; }
         export WAYLAND_DISPLAY=wayland-kw
-        sleep 1
         # kwin wakes xdg-desktop-portal while it starts, before its socket
         # is in the activation environment: the KDE backend dies then and
-        # the portal never retries. Stop both; the bus restarts them later.
+        # the portal never retries. Stop both once kwin has woken them (a
+        # moment after its socket: nothing tells when); the bus restarts
+        # them later.
+        sleep 1
         pkill -f /usr/libexec/xdg-desktop-portal 2>/dev/null
-        sleep 0.3
+        wait_until 3 eval '! pgrep -f /usr/libexec/xdg-desktop-portal >/dev/null'
         ;;
-    *) echo "inner.sh: unknown compositor $COMP" >&2; exit 2 ;;
 esac
 
 # xdg-desktop-portal-wlr: the "chooser" is a script that logs each call

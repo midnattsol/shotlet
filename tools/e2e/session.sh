@@ -13,27 +13,28 @@
 #      HL_EXTENSIONS="dir..."           GNOME Shell extensions to install
 #                                       and enable before the shell starts
 #      HL_KEEP=1                        keep the temp HOME (prints it)
+#      HL_WLDEBUG=1                     gnome-shell's WAYLAND_DEBUG
+# Any command, e.g. one shotlet run:
+#   HL_MONITORS="1600x900 1280x720" tools/e2e/session.sh zig-out/bin/shotlet shot --from IMG.png
 # Inside CMD: WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, HOME,
 # XDG_RUNTIME_DIR point at the private session; HL_SHELL_LOG is the
 # compositor log.
 set -u
+. "$(dirname "$0")/../e2e-common/session.sh"
 if [ -z "${HL_INNER:-}" ]; then
     command -v gnome-shell >/dev/null && command -v dbus-run-session >/dev/null || {
         echo "session.sh: gnome-shell or dbus-run-session missing" >&2; exit 77; }
     HOME=$(mktemp -d -t shotlet-e2e.XXXXXX) || exit 1
     export HOME
-    export XDG_RUNTIME_DIR="$HOME/run"; mkdir -m 700 "$XDG_RUNTIME_DIR"
-    export XDG_CONFIG_HOME="$HOME/.config" XDG_STATE_HOME="$HOME/.local/state"
-    export XDG_DATA_HOME="$HOME/.local/share" XDG_CACHE_HOME="$HOME/.cache"
-    mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$HOME/Pictures"
-    export XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_TYPE=wayland XDG_SESSION_DESKTOP=gnome
+    sandbox_env gnome
+    export XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_DESKTOP=gnome
     # no FUSE mounts (gvfs) to outlive the session or block cleaning up
     export GSETTINGS_BACKEND=dconf GTK_A11Y=none NO_AT_BRIDGE=1 GVFS_DISABLE_FUSE=1 GIO_USE_VFS=local
     # predictable dialog labels and messages
-    export LANG=C.UTF-8 LANGUAGE=C; unset LC_ALL LC_MESSAGES LC_CTYPE LC_TIME LC_NUMERIC LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION
-    unset WAYLAND_DISPLAY DISPLAY DBUS_SESSION_BUS_ADDRESS PIPEWIRE_REMOTE \
-        PULSE_SERVER XDG_PICTURES_DIR SSH_AUTH_SOCK GNOME_KEYRING_CONTROL \
-        SESSION_MANAGER XAUTHORITY GTK_IM_MODULE QT_IM_MODULE XMODIFIERS
+    export LANGUAGE=C; unset LC_ALL LC_MESSAGES LC_CTYPE LC_TIME LC_NUMERIC LC_MONETARY LC_PAPER LC_NAME LC_ADDRESS LC_TELEPHONE LC_MEASUREMENT LC_IDENTIFICATION
+    unset SSH_AUTH_SOCK GNOME_KEYRING_CONTROL SESSION_MANAGER XAUTHORITY GTK_IM_MODULE QT_IM_MODULE XMODIFIERS
+    # TODO(wave 2): remove HL_INNER once the drivers check SHOTLET_E2E_SANDBOX
+    # (session.sh itself can test that instead)
     export HL_INNER=1
     # the private bus daemon's activation chatter is noise here
     dbus-run-session -- "$0" "$@" 2> >(grep -v '^dbus-daemon\[' >&2); rc=$?
@@ -56,9 +57,7 @@ cleanup() {
     done
 }
 trap cleanup EXIT
-pipewire >"$HOME/pipewire.log" 2>&1 & pids+=($!)
-for i in $(seq 1 50); do [ -S "$XDG_RUNTIME_DIR/pipewire-0" ] && break; sleep 0.1; done
-wireplumber >"$HOME/wireplumber.log" 2>&1 & pids+=($!)
+start_pipewire "$HOME"
 # HL_APPS="a.desktop ...": installed before gnome-shell starts, so the
 # shell maps windows to those apps from the beginning
 if [ -n "${HL_APPS:-}" ]; then
@@ -84,7 +83,7 @@ if [ -n "${HL_IBUS:-}" ] && command -v ibus-daemon >/dev/null; then
     export IBUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/ibus"
     DISPLAY=:4242 ibus-daemon --panel disable --address="$IBUS_ADDRESS" \
         >"$HOME/ibus.log" 2>&1 & pids+=($!)
-    for i in $(seq 1 50); do ibus engine >/dev/null 2>&1 && break; sleep 0.1; done
+    wait_until 5 eval 'ibus engine >/dev/null 2>&1'
     gsettings set org.gnome.desktop.input-sources sources "[('ibus','$HL_IBUS')]"
 fi
 # HL_EXTENSIONS="path/uuid ...": user extensions, enabled before gnome-shell
@@ -99,16 +98,10 @@ if [ -n "${HL_EXTENSIONS:-}" ]; then
     gsettings set org.gnome.shell disable-user-extensions false
     gsettings set org.gnome.shell enabled-extensions "[$uuids]"
 fi
-MONS=()
-for m in ${HL_MONITORS:-1600x900}; do MONS+=(--virtual-monitor "$m"); done
-WAYLAND_DEBUG=${HL_WLDEBUG:-0} gnome-shell --headless --no-x11 "${MONS[@]}" \
-    --wayland-display wayland-hl >"$HL_SHELL_LOG" 2>&1 & pids+=($!)
-for i in $(seq 1 100); do
-    [ -S "$XDG_RUNTIME_DIR/wayland-hl" ] && gdbus introspect --session \
-        --dest org.gnome.Mutter.RemoteDesktop --object-path /org/gnome/Mutter/RemoteDesktop \
-        >/dev/null 2>&1 && break
-    sleep 0.2
-done
-[ -S "$XDG_RUNTIME_DIR/wayland-hl" ] || { echo "session.sh: gnome-shell did not start" >&2; tail "$HL_SHELL_LOG" >&2; exit 77; }
+: >"$HL_SHELL_LOG"
+start_gnome_shell ${HL_MONITORS:-1600x900} ||
+    { echo "session.sh: gnome-shell did not start" >&2; tail "$HL_SHELL_LOG" >&2; exit 77; }
+pids+=("$SHELL_PID")
+# (its first frames and the portals' startup: nothing marks them done)
 sleep 1
 "$@"

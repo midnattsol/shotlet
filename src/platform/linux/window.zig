@@ -309,7 +309,7 @@ test "window decls compile" {
 }
 
 // Live check against a real compositor, skipped unless
-// SHOTLET_LIVE_WINDOW_TEST=1 (run it inside tools/headless.sh, never on a
+// SHOTLET_LIVE_WINDOW_TEST=1 (run it inside tools/e2e/session.sh, never on a
 // real desktop): opens one surface per output, paints each a distinct
 // color with its index bar, presents and waits for the frames.
 test "live: one surface per output" {

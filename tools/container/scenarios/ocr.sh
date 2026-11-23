@@ -3,24 +3,29 @@
 # the editor's text tools.
 #   ocr  ocr-tools
 
+EN_TEXT="Quarterly invoice from Midnattsol"
+
 # search WORDS...: type a search into the history panel; Esc clears the
 # previous one first (with an empty one it would close the panel)
-search() { [ -n "$searched" ] && keys esc; searched=1; drv type "$*"; sleep 0.6; }
+search() { [ -n "$searched" ] && keys esc; searched=1; drv type "$*"; }
+# _cards_shown N: the thumbnail showed N captures in all
+_cards_shown() { [ "$(cat "$OUT"/shotlet-*.log 2>/dev/null | grep -cE "quick access: (showing|added)")" -ge "$1" ]; }
 
 scenario_ocr() {
+    local f n=0
+    require lib:libtesseract || return
     quick_cfg
-    start_droptarget
-    if ! ldconfig -p | grep -q libtesseract; then skip "no libtesseract in the image"; return; fi
-    drv textpng "$OUT/en.png" 40 "Quarterly invoice from Midnattsol" || { fail "text picture"; return; }
+    start_app droptarget
+    drv textpng "$OUT/en.png" 40 "$EN_TEXT" || { fail "text picture"; return; }
     drv textpng "$OUT/es.png" 40 "Canción del año en España" || { fail "text picture"; return; }
     for f in en es; do
         drv png "$OUT/$f.png"
         run_shotlet "shotlet-$f" shot --from "$OUT/$f.png" --sel "0,0,${VAL%x*},${VAL#*x}"
         wait_editor 10 && keys enter
-        any_log 10 "quick access: (showing|added)"
-        sleep 0.5
+        n=$((n + 1))
+        wait_until 10 _cards_shown "$n"
     done
-    pkill -f "shotlet quick" 2>/dev/null
+    stop_kept quick
     LANG=es_ES.UTF-8 run_shotlet shotlet-panel history
     check "the panel has a search field (Tesseract found)" wait_log 5 "text search on"
     check "  ... and reads both captures" wait_log 60 "history: read the text of 2 captures"
@@ -43,9 +48,9 @@ scenario_ocr() {
 
 # the editor's text tools: shotlet text, Copy text, Redact
 scenario_ocr_tools() {
-    no_quick_cfg
-    if ! ldconfig -p | grep -q libtesseract; then skip "no libtesseract in the image"; return; fi
-    drv textpng "$OUT/en.png" 40 "Quarterly invoice from Midnattsol" || { fail "text picture"; return; }
+    require lib:libtesseract || return
+    cfg_set thumbnail=never
+    drv textpng "$OUT/en.png" 40 "$EN_TEXT" || { fail "text picture"; return; }
     drv png "$OUT/en.png"
     W=${VAL%x*} H=${VAL#*x}
     ocr_text_command
@@ -55,16 +60,16 @@ scenario_ocr_tools() {
 
 # `shotlet text` on the picture
 ocr_text_command() {
+    local x0 y0
     run_shotlet shotlet-text text --from "$OUT/en.png"
     wait_editor 10
     # the picture is centred on the monitor, at 1:1
-    mon_size
-    X0=$(((MW - W) / 2)) Y0=$(((MH - H) / 2))
-    select_on 0 $((X0 + 2)) $((Y0 + 2)) $((X0 + W - 2)) $((Y0 + H - 2))
+    x0=$(((MW - W) / 2)) y0=$(((MH - H) / 2))
+    select_area 0 $((x0 + 2)) $((y0 + 2)) $((x0 + W - 2)) $((y0 + H - 2))
     check "shotlet text reads the region selected" wait_log 60 "copy text: [0-9]+ bytes"
-    check "  ... puts its text on the clipboard" eq "$(timeout 5 wl-paste -n -t 'text/plain;charset=utf-8')" "Quarterly invoice from Midnattsol"
+    check "  ... puts its text on the clipboard" eq "$(timeout 5 wl-paste -n -t 'text/plain;charset=utf-8')" "$EN_TEXT"
     check "  ... shows a toast with the first line" any_log 10 "toast: Copied: Quarterly invoice"
-    timeout 5 wl-copy -- "something else"
+    clip_set "something else"
     wait_exit 5
 }
 
@@ -74,11 +79,11 @@ ocr_copy_text() {
     wait_editor 10
     keys ctrl+shift+c
     check "Copy text in the editor" wait_log 60 "copy text: [0-9]+ bytes"
-    check "  ... copies the selection's text" eq "$(timeout 5 wl-paste -n)" "Quarterly invoice from Midnattsol"
+    check "  ... copies the selection's text" eq "$(timeout 5 wl-paste -n)" "$EN_TEXT"
     check "  ... and the editor stays open" alive
     keys esc esc
     wait_exit 5
-    timeout 5 wl-copy -- "something else"
+    clip_set "something else"
 }
 
 # Redact sensitive data finds an e-mail address and a token
@@ -94,11 +99,10 @@ ocr_redact() {
     grep "redact:" "$SHOT_LOG" | sed 's/^/  /' >&2
     shot 0 redacted
     keys enter
-    sleep 1
-    check "  ... the redacted capture copies" clip_png "$OUT/redacted-clip.png"
+    check "  ... the redacted capture copies" wait_until 5 clip_png "$OUT/redacted-clip.png"
     # the redaction covers the address: no black text pixels left where it was
-    drv findpng "$OUT/redacted-clip.png" 1c1c1e 6 40 && echo "  redaction box: $VAL" >&2
-    check "  ... with a solid box over it" drv findpng "$OUT/redacted-clip.png" 1c1c1e 6 40
-    timeout 5 wl-copy -- "something else"
+    drv findpng "$OUT/redacted-clip.png" "$REDACT_BOX" 6 40 && echo "  redaction box: $VAL" >&2
+    check "  ... with a solid box over it" drv findpng "$OUT/redacted-clip.png" "$REDACT_BOX" 6 40
+    clip_set "something else"
     wait_exit 5
 }

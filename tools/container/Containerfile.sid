@@ -1,6 +1,7 @@
 # Debian sid with sway on a newer wlroots (0.19+), which offers
 # ext-image-copy-capture-v1: for the direct capture scenarios on that
 # protocol. `CTR_IMAGE=shotlet-e2e:sid tools/container/run.sh sway:capture`
+# (run.sh builds it from this file when the image is missing).
 FROM debian:sid
 
 ARG DEBIAN_FRONTEND=noninteractive
