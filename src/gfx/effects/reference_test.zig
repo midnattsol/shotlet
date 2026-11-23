@@ -7,7 +7,11 @@ const clip = @import("rect.zig").clip;
 const boxBlur = @import("blur.zig").boxBlur;
 const composite = @import("composite.zig");
 const over = composite.over;
-const mix = composite.mix;
+const color_mod = @import("../color.zig");
+
+fn mix(a: u32, b: u32, t: f32) u32 {
+    return color_mod.mix(a, b, t);
+}
 const gradient = composite.gradient;
 const dropShadow = composite.dropShadow;
 const blitRounded = composite.blitRounded;

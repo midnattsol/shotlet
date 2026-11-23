@@ -19,6 +19,22 @@ pub fn fillRect(c: *Canvas, x0: i32, y0: i32, w: i32, h: i32, color: u32) void {
     }
 }
 
+/// Blend `color` through an 8-bit coverage mask (`mw` x `mh`, row-major)
+/// whose top-left corner is at (x, y): icons, glyphs, shapes.
+pub fn blendMask(c: *Canvas, mask: []const u8, mw: usize, mh: usize, x: i32, y: i32, color: u32) void {
+    const ca: u32 = color >> 24;
+    const rgb = color & 0x00FFFFFF;
+    for (0..mh) |row| {
+        const py = y +| @as(i32, @intCast(row));
+        if (py < 0) continue;
+        if (py >= c.h) break;
+        for (mask[row * mw ..][0..mw], 0..) |m, col| {
+            if (m == 0) continue;
+            c.blend(x +| @as(i32, @intCast(col)), py, rgb | (((ca * m + 127) / 255) << 24));
+        }
+    }
+}
+
 pub fn rectOutline(c: *Canvas, x0: i32, y0: i32, w: i32, h: i32, thickness: i32, color: u32) void {
     if (w <= 0 or h <= 0) return;
     // thicker than half the rect: it is a filled rect

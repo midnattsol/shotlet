@@ -1,6 +1,10 @@
 //! Lossy UTF-8 decoding: invalid or truncated sequences decode to U+FFFD
 //! (one per maximal invalid subpart, as WHATWG/Unicode recommend) instead
 //! of hitting `unreachable`. Use it for any text that is measured or drawn.
+//!
+//! Stable API:
+//!   Iterator, count(s), truncate(s, max)
+//!   prevBoundary(s, i), nextBoundary(s, i)   step one character back / on
 
 const std = @import("std");
 
@@ -85,6 +89,40 @@ pub fn truncate(s: []const u8, max: usize) []const u8 {
     var back: usize = 0;
     while (end > 0 and back < 3 and s[end] & 0xC0 == 0x80) : (back += 1) end -= 1;
     return s[0..end];
+}
+
+/// Start of the character before byte `i` (stepping back over UTF-8
+/// continuation bytes); 0 at the start.
+pub fn prevBoundary(s: []const u8, i: usize) usize {
+    if (i == 0) return 0;
+    var j = @min(i, s.len) - 1;
+    while (j > 0 and (s[j] & 0xC0) == 0x80) j -= 1;
+    return j;
+}
+
+/// Start of the character after the one at byte `i`; `s.len` at the end.
+pub fn nextBoundary(s: []const u8, i: usize) usize {
+    if (i >= s.len) return s.len;
+    var j = i + 1;
+    while (j < s.len and (s[j] & 0xC0) == 0x80) j += 1;
+    return j;
+}
+
+test "character boundaries step over whole UTF-8 sequences" {
+    const s = "a\xC3\xA9\xF0\x9F\x98\x80b"; // a é 😀 b
+    try std.testing.expectEqual(@as(usize, 1), nextBoundary(s, 0));
+    try std.testing.expectEqual(@as(usize, 3), nextBoundary(s, 1));
+    try std.testing.expectEqual(@as(usize, 7), nextBoundary(s, 3));
+    try std.testing.expectEqual(@as(usize, 8), nextBoundary(s, 7));
+    try std.testing.expectEqual(@as(usize, 8), nextBoundary(s, 8));
+    try std.testing.expectEqual(@as(usize, 7), prevBoundary(s, 8));
+    try std.testing.expectEqual(@as(usize, 3), prevBoundary(s, 7));
+    try std.testing.expectEqual(@as(usize, 1), prevBoundary(s, 3));
+    try std.testing.expectEqual(@as(usize, 0), prevBoundary(s, 1));
+    try std.testing.expectEqual(@as(usize, 0), prevBoundary(s, 0));
+    // past the end counts from the end; stray continuation bytes stop at 0
+    try std.testing.expectEqual(@as(usize, 7), prevBoundary(s, 99));
+    try std.testing.expectEqual(@as(usize, 0), prevBoundary("\x80\x80", 2));
 }
 
 test "lossy decoding" {

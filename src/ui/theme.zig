@@ -17,12 +17,20 @@
 //!                         portal); never fails: missing values keep
 //!                         the defaults
 //!   watch(session)        follow changes (api.desktop.pump folds them)
-//!   withAlpha(c, a), mix(a, b, t)  colour helpers
-//!   contrast(a, b), legible(c, bg, min)  WCAG contrast; `c` darkened or
-//!                         lightened until it reads on `bg`
+//!   load(gpa, env, timeout_ms)   read the desktop's appearance (one
+//!                         default when it cannot be read: Prefs{}), set
+//!                         motion.enabled from it, and return its Theme;
+//!                         loadPrefs: the same, the Prefs themselves
+//!   Opaque, Opaque.of(th) the panel colours made opaque, for surfaces
+//!                         with no backdrop blur (floating client windows)
+//!   Scrim, Theme.scrim(level)  the dark veils and pills over pictures
+//!   withAlpha, fade, mix, over, luminance, contrast, legible
+//!                         colour helpers (gfx/color.zig)
 
 const std = @import("std");
 const desktop = @import("../platform/api.zig").desktop;
+const color = @import("../gfx/color.zig");
+const motion_mod = @import("motion.zig");
 
 // --- metrics (logical px) ---
 
@@ -62,6 +70,9 @@ pub const font_small: f64 = 12;
 pub const motion_fast: i64 = 120;
 pub const motion: i64 = 150;
 pub const motion_slow: i64 = 180;
+/// motion: a floating window or card fading in, and out (motion.Life)
+pub const motion_enter: i64 = 150;
+pub const motion_exit: i64 = 250;
 /// what is left of a disabled control's ink
 pub const disabled_alpha: f64 = 0.3;
 /// tooltips wait this long under a still pointer
@@ -121,6 +132,9 @@ pub const Theme = struct {
     popover_shadow: Shadow,
     /// the magnifier's lens: tighter than a bar's, it sits by the pointer
     loupe_shadow: Shadow,
+    /// floating cards (thumbnails, toasts, the recorder's control, pins'
+    /// menus): opaque, so the shadow may show all round
+    card_shadow: Shadow,
 
     // --- the capture overlay ---
     /// the selection's two-tone edge: a light line inside a dark one, so
@@ -137,6 +151,28 @@ pub const Theme = struct {
     pill_fg: u32 = 0xFFF5F5F7,
     /// secondary text on a pill (a tooltip's shortcut)
     pill_muted: u32 = 0xB3EBEBF5,
+
+    // --- controls over a picture (thumbnails, pins): the same in both
+    // appearances, they sit on the capture, not on the theme ---
+    /// the dark veils and pills, by `Scrim` level (Theme.scrim)
+    scrim_soft: u32 = 0x40000000,
+    scrim_veil: u32 = 0x6B000000,
+    scrim_pill: u32 = 0xB8000000,
+    scrim_strong: u32 = 0xCC000000,
+    scrim_notice: u32 = 0xE6000000,
+    /// round buttons: dark discs, so their white icons read on any
+    /// capture (7:1 over white under the veil; 9.9:1 hovered)
+    round_btn: u32 = 0x66000000,
+    round_btn_hover: u32 = 0x8C000000,
+    /// ink of the controls over a picture, and dimmed (unavailable)
+    on_scrim: u32 = 0xFFFFFFFF,
+    on_scrim_dim: u32 = 0x80FFFFFF,
+    /// light pill buttons over a picture (Copy, Save as)
+    light_pill: u32 = 0xEBFFFFFF,
+    light_pill_hover: u32 = 0xFFFFFFFF,
+    light_pill_fg: u32 = 0xFF1D1D1F,
+    /// the edge ring of a colour swatch, so white and black swatches show
+    swatch_ring: u32 = 0x59808080,
 
     // --- windows (Settings, history): GNOME-like boxed lists ---
     window_bg: u32,
@@ -163,6 +199,62 @@ pub const Theme = struct {
         t.accent_text = legible(accent, t.window_bg, aa_text);
         return t;
     }
+
+    /// The veil or pill colour of `level`.
+    pub fn scrim(t: Theme, level: Scrim) u32 {
+        return switch (level) {
+            .soft => t.scrim_soft,
+            .veil => t.scrim_veil,
+            .pill => t.scrim_pill,
+            .strong => t.scrim_strong,
+            .notice => t.scrim_notice,
+        };
+    }
+};
+
+/// How dark a veil or pill over a picture is: `soft` and `veil` darken
+/// the whole picture under controls; `pill` and `strong` carry status
+/// text; `notice` carries a message that must read at once.
+pub const Scrim = enum { soft, veil, pill, strong, notice };
+
+/// The panel colours of a theme made opaque, for windows a client
+/// cannot blur behind (thumbnails' toasts, the history panel, the
+/// scrolling-capture HUD): the Glass panel over the window background,
+/// and each tint over that.
+pub const Opaque = struct {
+    panel: u32,
+    fg: u32,
+    muted: u32,
+    /// input fields and wells
+    field: u32,
+    /// the hairline edge and separators
+    line: u32,
+    hover: u32,
+    /// secondary buttons
+    secondary: u32,
+    accent: u32,
+    accent_fill: u32,
+    accent_fill_hover: u32,
+    on_accent: u32,
+    destructive: u32,
+
+    pub fn of(t: Theme) Opaque {
+        const panel = color.over(t.window_bg, t.panel);
+        return .{
+            .panel = panel,
+            .fg = t.fg,
+            .muted = color.over(panel, t.muted),
+            .field = color.over(panel, t.field),
+            .line = color.over(panel, t.hairline),
+            .hover = color.over(panel, t.hover),
+            .secondary = color.over(panel, t.pressed),
+            .accent = t.accent,
+            .accent_fill = t.accent_fill,
+            .accent_fill_hover = t.accent_fill_hover,
+            .on_accent = t.on_accent,
+            .destructive = t.destructive,
+        };
+    }
 };
 
 /// The two appearances before the accent is applied (Theme.get sets
@@ -186,6 +278,7 @@ const dark_base: Theme = .{
     .bar_shadow = .{ .color = 0x47000000, .blur = 40, .dy = 12 },
     .popover_shadow = .{ .color = 0x52000000, .blur = 50, .dy = 18 },
     .loupe_shadow = .{ .color = 0x59000000, .blur = 22, .dy = 8 },
+    .card_shadow = .{ .color = 0x52000000, .blur = 24, .dy = 8 },
     .window_bg = 0xFF242424,
     .header_bg = 0xFF2E2E32,
     .card = 0xFF363636,
@@ -219,6 +312,7 @@ const light_base: Theme = .{
     .bar_shadow = .{ .color = 0x38000000, .blur = 40, .dy = 12 },
     .popover_shadow = .{ .color = 0x42000000, .blur = 50, .dy = 18 },
     .loupe_shadow = .{ .color = 0x47000000, .blur = 22, .dy = 8 },
+    .card_shadow = .{ .color = 0x42000000, .blur = 24, .dy = 8 },
     .window_bg = 0xFFFAFAFB,
     .header_bg = 0xFFFFFFFF,
     .card = 0xFFFFFFFF,
@@ -246,65 +340,37 @@ pub fn readPrefs(session: *desktop.Session, timeout_ms: i64) Prefs {
     return desktop.readAppearance(session, timeout_ms);
 }
 
+/// The desktop's appearance, asked over a session of its own (waiting at
+/// most `timeout_ms`); `Prefs{}` when the desktop cannot be reached. Sets
+/// motion.enabled from it, so every process honours reduced motion.
+/// `env` is the app's Env (app/env.zig), as desktop.connect takes it.
+pub fn loadPrefs(gpa: std.mem.Allocator, env: anytype, timeout_ms: i64) Prefs {
+    const p: Prefs = blk: {
+        var conn = desktop.connect(gpa, env) catch break :blk .{};
+        defer conn.deinit();
+        break :blk readPrefs(&conn, timeout_ms);
+    };
+    motion_mod.enabled = p.animations;
+    return p;
+}
+
+/// The Theme for the desktop's appearance (see loadPrefs).
+pub fn load(gpa: std.mem.Allocator, env: anytype, timeout_ms: i64) Theme {
+    return of(loadPrefs(gpa, env, timeout_ms));
+}
+
 /// Follow appearance changes (desktop.pump folds them into a Prefs).
 pub fn watch(session: *desktop.Session) !void {
     return desktop.watchAppearance(session);
 }
 
-/// `c` with its alpha replaced by `a`.
-pub fn withAlpha(c: u32, a: u8) u32 {
-    return (c & 0x00FFFFFF) | (@as(u32, a) << 24);
-}
-
-/// `c` with its alpha multiplied by `k` (0..1).
-pub fn fade(c: u32, k: f64) u32 {
-    const a: f64 = @floatFromInt(c >> 24);
-    return withAlpha(c, @intFromFloat(@round(std.math.clamp(a * k, 0, 255))));
-}
-
-/// Channel-wise blend of two colours, alpha included.
-pub fn mix(a: u32, b: u32, t: f64) u32 {
-    const k = std.math.clamp(t, 0, 1);
-    var out: u32 = 0;
-    inline for (.{ 0, 8, 16, 24 }) |sh| {
-        const ca: f64 = @floatFromInt((a >> sh) & 0xFF);
-        const cb: f64 = @floatFromInt((b >> sh) & 0xFF);
-        out |= @as(u32, @intFromFloat(@round(ca + (cb - ca) * k))) << sh;
-    }
-    return out;
-}
-
-/// WCAG relative luminance of an opaque colour (alpha ignored).
-pub fn luminance(c: u32) f64 {
-    var l: f64 = 0;
-    inline for (.{ 16, 8, 0 }, .{ 0.2126, 0.7152, 0.0722 }) |sh, w| {
-        const v = @as(f64, @floatFromInt((c >> sh) & 0xFF)) / 255;
-        l += w * (if (v <= 0.03928) v / 12.92 else std.math.pow(f64, (v + 0.055) / 1.055, 2.4));
-    }
-    return l;
-}
-
-/// WCAG contrast ratio of two opaque colours, 1..21.
-pub fn contrast(a: u32, b: u32) f64 {
-    const la = luminance(a);
-    const lb = luminance(b);
-    return (@max(la, lb) + 0.05) / (@min(la, lb) + 0.05);
-}
-
-/// `c`, darkened (on a light `bg`) or lightened (on a dark one) in small
-/// steps until it reaches `min` contrast with `bg`; `c` itself when it
-/// already does.
-pub fn legible(c: u32, bg: u32, min: f64) u32 {
-    // themes are also built at compile time (default field values)
-    @setEvalBranchQuota(200_000);
-    const toward: u32 = if (luminance(bg) > 0.18) 0xFF000000 else 0xFFFFFFFF;
-    var k: f64 = 0;
-    while (k <= 1) : (k += 1.0 / 64.0) {
-        const out = mix(c | 0xFF000000, toward, k);
-        if (contrast(out, bg) >= min) return out;
-    }
-    return toward;
-}
+pub const withAlpha = color.withAlpha;
+pub const fade = color.fade;
+pub const mix = color.mix;
+pub const over = color.over;
+pub const luminance = color.luminance;
+pub const contrast = color.contrast;
+pub const legible = color.legible;
 
 /// The accent as a fill white text reads on (AA).
 pub fn accentFill(accent: u32) u32 {
@@ -329,7 +395,7 @@ test "fills and text reach AA contrast, any accent" {
             try std.testing.expect(contrast(t.on_accent, t.accent_fill) >= aa_text);
             try std.testing.expect(contrast(t.on_accent, t.accent_fill_hover) >= aa_text);
             try std.testing.expect(contrast(t.accent_text, t.window_bg) >= aa_text);
-            try std.testing.expect(contrast(over(t.text_muted, t.window_bg), t.window_bg) >= aa_text);
+            try std.testing.expect(contrast(over(t.window_bg, t.text_muted), t.window_bg) >= aa_text);
         }
     }
     try std.testing.expect(contrast(0xFFFFFFFF, destructive_fill) >= aa_text);
@@ -338,7 +404,25 @@ test "fills and text reach AA contrast, any accent" {
     try std.testing.expectEqual(@as(u32, 0xFF1D1D1F), legible(0xFF1D1D1F, 0xFFFFFFFF, aa_text));
 }
 
-/// `top` composited over the opaque `bottom`.
-fn over(top: u32, bottom: u32) u32 {
-    return mix(bottom, top | 0xFF000000, @as(f64, @floatFromInt(top >> 24)) / 255);
+test "the opaque panel is the panel over the window, tints over that" {
+    for ([_]bool{ false, true }) |dark| {
+        const t = Theme.get(dark, null);
+        const o = Opaque.of(t);
+        try std.testing.expectEqual(@as(u32, 0xFF), o.panel >> 24);
+        try std.testing.expectEqual(@as(u32, 0xFF), o.muted >> 24);
+        try std.testing.expectEqual(@as(u32, 0xFF), o.line >> 24);
+        try std.testing.expect(o.line != o.panel);
+        try std.testing.expect(contrast(o.muted, o.panel) >= aa_text);
+        try std.testing.expectEqual(t.accent_fill, o.accent_fill);
+    }
+}
+
+test "scrim levels darken in order" {
+    const t = Theme.get(true, null);
+    var last: u32 = 0;
+    inline for (@typeInfo(Scrim).@"enum".field_names) |n| {
+        const a = t.scrim(@field(Scrim, n)) >> 24;
+        try std.testing.expect(a > last);
+        last = a;
+    }
 }
