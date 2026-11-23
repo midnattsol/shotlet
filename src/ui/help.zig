@@ -1,10 +1,10 @@
 //! The keyboard shortcuts overlay (? or F1 in the editor).
 
-const std = @import("std");
 const render = @import("../gfx/render.zig");
 const text_mod = @import("../gfx/text.zig");
 const theme = @import("theme.zig");
 const icons = @import("icons.zig");
+const menukit = @import("menukit.zig");
 const ui = @import("editor_ui.zig");
 const Editor = @import("editor.zig").Editor;
 const Canvas = render.Canvas;
@@ -46,8 +46,8 @@ const help_lines = [_][2][]const u8{
 fn meaningX(self: *const Editor) i32 {
     const ks = theme.font_small * self.uf();
     var widest: i32 = 0;
-    for (help_lines) |l| widest = @max(widest, text_mod.width(ks, l[0]));
-    return widest + self.sc(12 + 20);
+    for (help_lines) |l| widest = @max(widest, menukit.keycapWidth(ks, l[0], self.uf()));
+    return widest + self.sc(20);
 }
 
 /// Wide enough for the longest key and meaning, within the screen.
@@ -84,9 +84,8 @@ pub fn draw(self: *Editor, canvas: *Canvas) void {
     const mx = r.x + pad + meaningX(self);
     for (help_lines) |l| {
         // the keys as a cap, the meaning beside it
-        const kw = text_mod.width(ks, l[0]) + self.sc(12);
-        canvas.fillRoundRectAA(r.x + pad, y + @divTrunc(lh - self.sc(20), 2) - self.sc(1), kw, self.sc(20), 5 * f, th.track);
-        text_mod.draw(canvas, r.x + pad + self.sc(6), y + @divTrunc(lh - text_mod.height(ks), 2) - self.sc(1), ks, th.fg, l[0]);
+        const cap: Rect = .{ .x = r.x + pad, .y = y + @divTrunc(lh - self.sc(20), 2) - self.sc(1), .w = menukit.keycapWidth(ks, l[0], f), .h = self.sc(20) };
+        menukit.keycap(canvas, cap, l[0], ks, .material, f, th);
         text_mod.draw(canvas, mx, y + @divTrunc(lh - text_mod.height(fs), 2) - self.sc(1), fs, th.muted, l[1]);
         y += lh;
     }

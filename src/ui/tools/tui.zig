@@ -202,6 +202,6 @@ pub fn drawPopoverButton(ed: *Editor, canvas: *render.Canvas, b: ui.Button, bi: 
     const hv = ui.hoverAmount(ed, bi);
     if (hv > 0) shapes.roundRectRing(canvas, r.expand(ed.sc(3)), 8 * f, 1.5 * f, theme.fade(th.hairline, 2 * hv));
     canvas.fillRoundRectAA(r.x, r.y, r.w, r.h, 6 * f, ed.tools.history.items[i]);
-    shapes.roundRectRing(canvas, r, 6 * f, 1, 0x59808080);
-    if (ed.focus == bi) ui.focusRing(ed, canvas, r, 6 * f);
+    shapes.roundRectRing(canvas, r, 6 * f, 1, th.swatch_ring);
+    if (ed.focus == bi) barkit.focusRing(canvas, r, 6 * f, f, th.accent);
 }

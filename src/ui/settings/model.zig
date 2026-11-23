@@ -11,6 +11,8 @@ const settings_modes = @import("../settings_modes.zig");
 const focus = @import("focus.zig");
 
 const Theme = theme_mod.Theme;
+const Rect = @import("../shapes.zig").Rect;
+const scale = @import("../scale.zig");
 
 pub const View = enum { general, editor, shortcuts, recording };
 
@@ -58,8 +60,12 @@ pub const Region = struct {
     /// corner radius of the control, for its focus ring
     radius: f64 = 8,
 
+    pub fn rect(self: Region) Rect {
+        return .{ .x = self.x, .y = self.y, .w = self.w, .h = self.h };
+    }
+
     pub fn contains(self: Region, px: i32, py: i32) bool {
-        return px >= self.x and py >= self.y and px < self.x + self.w and py < self.y + self.h;
+        return self.rect().contains(px, py);
     }
 };
 
@@ -68,7 +74,7 @@ pub const Region = struct {
 pub const Viewport = struct { h: i32, f: f64 };
 
 pub fn headerHeight(f: f64) i32 {
-    return @intFromFloat(@round(52.0 * f));
+    return scale.px(52, f);
 }
 
 /// Mutable UI state of the settings window.
@@ -123,7 +129,7 @@ pub const State = struct {
         const hit = self.focus orelse return;
         const r = focus.findRegion(regions, hit) orelse return;
         if (focus.isHeader(hit)) return;
-        const pad: i32 = @intFromFloat(@round(12.0 * vp.f));
+        const pad = scale.px(12, vp.f);
         const top = headerHeight(vp.f) + pad;
         const bottom = vp.h - pad;
         if (r.y < top) {

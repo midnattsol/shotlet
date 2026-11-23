@@ -10,12 +10,15 @@ const text = @import("../../gfx/text.zig");
 const theme_mod = @import("../theme.zig");
 const icons = @import("../icons.zig");
 const shapes = @import("../shapes.zig");
+const scale = @import("../scale.zig");
+const menukit = @import("../menukit.zig");
 const model = @import("model.zig");
 
 const Canvas = render.Canvas;
 const Window = window.Window;
 const Theme = theme_mod.Theme;
 const Hit = model.Hit;
+const ff = scale.ff;
 const Region = model.Region;
 
 pub const Ui = struct {
@@ -29,7 +32,7 @@ pub const Ui = struct {
     my: i32,
 
     pub fn sc(self: *const Ui, v: f64) i32 {
-        return @intFromFloat(@round(v * self.f));
+        return scale.px(v, self.f);
     }
     pub fn fs(self: *const Ui, v: f64) f64 {
         return v * self.f; // font size in px
@@ -62,7 +65,7 @@ pub const Card = struct {
 pub const Row = struct { x: i32, y: i32, w: i32, h: i32 };
 
 /// Fill of a chip-like button, lighter while hovered.
-fn chipFill(th: Theme, hov: bool) u32 {
+pub fn chipFill(th: Theme, hov: bool) u32 {
     return if (hov) theme_mod.mix(th.chip, th.switch_off, 0.8) else th.chip;
 }
 
@@ -121,27 +124,12 @@ pub fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8,
     const sy = r.y + @divTrunc(r.h - sh, 2);
     const hov = ui.hovered(r.x, r.y, r.w, r.h);
     const off = if (hov) theme_mod.mix(th.switch_off, th.text, 0.08) else th.switch_off;
-    ui.c.fillRoundRectAA(sx, sy, sw, sh, @as(f64, @floatFromInt(sh)) / 2.0, if (on) (if (hov) th.accent_hover else th.accent) else off);
+    ui.c.fillRoundRectAA(sx, sy, sw, sh, ff(sh) / 2.0, if (on) (if (hov) th.accent_hover else th.accent) else off);
     const kr = 10.0 * ui.f;
-    const kx: f64 = if (on) @as(f64, @floatFromInt(sx + sw)) - 3.0 * ui.f - kr else @as(f64, @floatFromInt(sx)) + 3.0 * ui.f + kr;
-    const ky = @as(f64, @floatFromInt(sy)) + @as(f64, @floatFromInt(sh)) / 2.0;
-    ui.c.fillCircleAA(kx, ky + 1.0 * ui.f, kr + 0.5 * ui.f, 0x40000000);
-    ui.c.fillCircleAA(kx, ky, kr, 0xFFFFFFFF);
+    const kx: f64 = if (on) ff(sx + sw) - 3.0 * ui.f - kr else ff(sx) + 3.0 * ui.f + kr;
+    menukit.knob(&ui.c, kx, ff(sy) + ff(sh) / 2.0, kr, ui.f);
     // the whole row toggles
     try ui.add(.{ .x = r.x, .y = r.y, .w = r.w, .h = r.h, .hit = hit, .radius = 0 });
-}
-
-/// `s` shortened from the left with an ellipsis until it fits `max_w`
-/// (long paths keep their tail).
-fn elideLeft(ui: *const Ui, style: text.Style, s: []const u8, max_w: i32, buf: []u8) []const u8 {
-    var shown = s;
-    while (ui.width(14, style, shown) > max_w and shown.len > 4) {
-        var cut: usize = 1;
-        while (cut < shown.len and (shown[cut] & 0xC0) == 0x80) cut += 1;
-        const rest = shown[cut..];
-        shown = std.fmt.bufPrint(buf, "\u{2026}{s}", .{if (std.mem.startsWith(u8, rest, "\u{2026}")) rest[3..] else rest}) catch rest;
-    }
-    return shown;
 }
 
 /// A chip button on the right of row `r`.
@@ -150,7 +138,8 @@ pub fn chipButton(ui: *Ui, r: Row, hit: Hit, icon: ?icons.Icon, label_s: []const
     const style: text.Style = if (bold) .semibold else .regular;
     const is = ui.sc(16);
     var buf: [300]u8 = undefined;
-    const shown = elideLeft(ui, style, label_s, @divTrunc(r.w, 2), &buf);
+    // long paths keep their tail
+    const shown = text.ellipsize(&buf, ui.fs(14), style, label_s, @divTrunc(r.w, 2), .start);
     const bw = ui.sc(12) + (if (icon != null) is + ui.sc(8) else 0) + ui.width(14, style, shown) + ui.sc(if (icon != null) 12 else 14) + (if (icon == null) ui.sc(2) else 0);
     const bh = ui.sc(34);
     const bx = r.x + r.w - ui.sc(16) - bw;
@@ -184,17 +173,11 @@ pub fn swatchRow(ui: *Ui, r: Row, selected: u3) !void {
     const d = ui.sc(24);
     const gap = ui.sc(8);
     var x = r.x + r.w - ui.sc(16) - 8 * d - 7 * gap;
-    const cy = @as(f64, @floatFromInt(r.y)) + @as(f64, @floatFromInt(r.h)) / 2.0;
+    const cy = ff(r.y) + ff(r.h) / 2.0;
     for (0..8) |i| {
-        const col = shapes.palette[i];
-        const rad = @as(f64, @floatFromInt(d)) / 2.0;
-        const cxf = @as(f64, @floatFromInt(x)) + rad;
+        const rad = ff(d) / 2.0;
         const hov = ui.hovered(x - @divTrunc(gap, 2), r.y, d + gap, r.h);
-        if (i == selected) {
-            ui.c.ringAA(cxf, cy, rad + 3.0 * ui.f, 2.0 * ui.f, th.accent);
-        } else if (hov) ui.c.ringAA(cxf, cy, rad + 2.5 * ui.f, 1.5 * ui.f, th.switch_off);
-        ui.c.fillCircleAA(cxf, cy, rad, col);
-        ui.c.ringAA(cxf, cy, rad - 0.5 * ui.f, 1.0 * ui.f, 0x66808080);
+        menukit.swatch(&ui.c, ff(x) + rad, cy, rad, shapes.palette[i], ui.f, th, i == selected, if (hov) 1 else 0);
         try ui.add(.{ .x = x, .y = @intFromFloat(cy - rad), .w = d, .h = d, .hit = .{ .color = @intCast(i) }, .radius = rad });
         x += d + gap;
     }
@@ -225,10 +208,10 @@ pub fn sizeStepper(ui: *Ui, r: Row, value: i32, color: u32) !void {
     try stepButtons(ui, x, by, bs, val_w, .th_minus, .th_plus);
     x += bs;
     // a dot as thick as the stroke, and the number
-    const cy = @as(f64, @floatFromInt(by)) + @as(f64, @floatFromInt(bs)) / 2.0;
-    const dot = @min(9.0 * ui.f, @max(1.5, @as(f64, @floatFromInt(value)) * ui.f / 2.0));
-    ui.c.fillCircleAA(@as(f64, @floatFromInt(x + ui.sc(16))), cy, dot, color);
-    if ((color & 0xFFFFFF) == 0xFFFFFF or (color & 0xFFFFFF) == 0x1C1C1E) ui.c.ringAA(@as(f64, @floatFromInt(x + ui.sc(16))), cy, dot, 1.0, 0x66808080);
+    const cy = ff(by) + ff(bs) / 2.0;
+    const dot = @min(9.0 * ui.f, @max(1.5, ff(value) * ui.f / 2.0));
+    ui.c.fillCircleAA(ff(x + ui.sc(16)), cy, dot, color);
+    if ((color & 0xFFFFFF) == 0xFFFFFF or (color & 0xFFFFFF) == 0x1C1C1E) ui.c.ringAA(ff(x + ui.sc(16)), cy, dot, 1.0, ui.th.swatch_ring);
     var buf: [8]u8 = undefined;
     const label = std.fmt.bufPrint(&buf, "{d}", .{value}) catch "?";
     ui.label(x + ui.sc(32), by, bs, 15, ui.th.text, text.Style.regular.num(), label);
@@ -245,30 +228,20 @@ pub fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !
     ui.label(x + bs + @divTrunc(val_w - tw, 2), by, bs, 15, ui.th.text, text.Style.regular.num(), value);
 }
 
-fn capWidth(ui: *const Ui, k: []const u8) i32 {
-    return @max(ui.sc(22), ui.width(13, .semibold, k) + ui.sc(16));
-}
-
-/// Key caps right-aligned in row `r`; returns their left edge.
-pub fn keyCaps(ui: *Ui, r: Row, caps: []const []const u8, accent: ?u32) i32 {
-    const th = ui.th;
+/// Key caps right-aligned in row `r` (on the accent while a binding is
+/// being set); returns their left edge.
+pub fn keyCaps(ui: *Ui, r: Row, caps: []const []const u8, look: menukit.CapLook) i32 {
     const ch = ui.sc(26);
     const gap = ui.sc(4);
+    const fs = ui.fs(13);
     var total: i32 = -gap;
-    for (caps) |k| total += capWidth(ui, k) + gap;
+    for (caps) |k| total += menukit.keycapWidth(fs, k, ui.f) + gap;
     var x = r.x + r.w - ui.sc(16) - total;
     const left = x;
     const y = r.y + @divTrunc(r.h - ch, 2);
     for (caps) |k| {
-        const cw = capWidth(ui, k);
-        if (accent) |a| {
-            ui.c.fillRoundRectAA(x, y, cw, ch, 6 * ui.f, a);
-        } else {
-            ui.c.fillRoundRectAA(x, y, cw, ch, 6 * ui.f, th.line);
-            ui.c.fillRoundRectAA(x, y, cw, ch - @max(1, ui.sc(1)), 6 * ui.f, th.chip);
-        }
-        const tw = ui.width(13, .semibold, k);
-        ui.label(x + @divTrunc(cw - tw, 2), y, ch, 13, if (accent != null) th.on_accent else th.text, .semibold, k);
+        const cw = menukit.keycapWidth(fs, k, ui.f);
+        menukit.keycap(&ui.c, .{ .x = x, .y = y, .w = cw, .h = ch }, k, fs, look, ui.f, ui.th);
         x += cw + gap;
     }
     return left;
@@ -298,7 +271,7 @@ pub fn shortcutRow(ui: *Ui, card: *Card, title: []const u8, win: *Window, bind: 
     }
     rowTitle(ui, r, title, null);
     if (recording) {
-        _ = keyCaps(ui, r, &.{"Press keys\u{2026}"}, th.accent_fill);
+        _ = keyCaps(ui, r, &.{"Press keys\u{2026}"}, .accent);
     } else if (bind.code == .none) {
         const s = "Not set";
         ui.label(r.x + r.w - ui.sc(16) - ui.width(13, .regular, s), r.y, r.h, 13, th.text_muted, .regular, s);
@@ -306,7 +279,7 @@ pub fn shortcutRow(ui: *Ui, card: *Card, title: []const u8, win: *Window, bind: 
         var kbuf: [32]u8 = undefined;
         const key = win.keyName(bind.code, &kbuf);
         var caps: [3][]const u8 = undefined;
-        _ = keyCaps(ui, r, bindCaps(bind, key, &caps), null);
+        _ = keyCaps(ui, r, bindCaps(bind, key, &caps), .window);
     }
     try ui.add(.{ .x = r.x, .y = r.y, .w = r.w, .h = r.h, .hit = hit, .radius = 0 });
 }

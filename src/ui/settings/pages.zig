@@ -69,7 +69,7 @@ fn afterCapture(p: Page, y0: i32) !i32 {
     const r = w.rowBegin(ui, &card, p.rowH());
     w.rowTitle(ui, r, "Save to", if (p.choosing) "Choosing a folder\u{2026}" else null);
     var buf: [300]u8 = undefined;
-    const shown = folderLabel(cfg.saveDir(), &buf);
+    const shown = folderLabel(p.st.env.home, cfg.saveDir(), &buf);
     try w.chipButton(ui, r, .choose_folder, .folder, shown, false);
     return w.endCard(&card) + ui.sc(26);
 }
@@ -240,28 +240,29 @@ fn fixedKeys(p: Page, y0: i32) !i32 {
     for (fixed) |row| {
         const r = w.rowBegin(ui, &card, ui.sc(48));
         w.rowTitle(ui, r, row[0], null);
-        _ = w.keyCaps(ui, r, row[1], null);
+        _ = w.keyCaps(ui, r, row[1], .window);
     }
     y = w.endCard(&card) + ui.sc(14);
     ui.label(p.cx + ui.sc(4), y, ui.sc(20), 13, ui.th.text_muted, .regular, "Click a shortcut (or focus it and press Enter), then press the new keys; Esc cancels.");
     return y + ui.sc(20) + ui.sc(26);
 }
 
-/// "~/Pictures/Screenshots" style label for the save folder.
-fn folderLabel(dir: ?[]const u8, buf: []u8) []const u8 {
+/// "~/Pictures/Screenshots" style label for the save folder, relative to
+/// the home folder `home`.
+fn folderLabel(home: []const u8, dir: ?[]const u8, buf: []u8) []const u8 {
     const d = dir orelse return "Pictures";
-    if (std.c.getenv("HOME")) |hp| {
-        const home = std.mem.span(hp);
-        if (home.len > 1 and std.mem.startsWith(u8, d, home) and (d.len == home.len or d[home.len] == '/')) {
-            const rest = std.mem.trimStart(u8, d[home.len..], "/");
-            return std.fmt.bufPrint(buf, "{s}", .{if (rest.len == 0) "Home" else rest}) catch d;
-        }
+    if (home.len > 1 and std.mem.startsWith(u8, d, home) and (d.len == home.len or d[home.len] == '/')) {
+        const rest = std.mem.trimStart(u8, d[home.len..], "/");
+        return std.fmt.bufPrint(buf, "{s}", .{if (rest.len == 0) "Home" else rest}) catch d;
     }
     return d;
 }
 
 test "the save folder shows relative to home" {
     var buf: [300]u8 = undefined;
-    try std.testing.expectEqualStrings("Pictures", folderLabel(null, &buf));
-    try std.testing.expectEqualStrings("/srv/shots", folderLabel("/srv/shots", &buf));
+    try std.testing.expectEqualStrings("Pictures", folderLabel("/home/me", null, &buf));
+    try std.testing.expectEqualStrings("/srv/shots", folderLabel("/home/me", "/srv/shots", &buf));
+    try std.testing.expectEqualStrings("Pictures/Shots", folderLabel("/home/me", "/home/me/Pictures/Shots", &buf));
+    try std.testing.expectEqualStrings("Home", folderLabel("/home/me", "/home/me", &buf));
+    try std.testing.expectEqualStrings("/home/meg", folderLabel("/home/me", "/home/meg", &buf));
 }

@@ -3,24 +3,18 @@
 
 const std = @import("std");
 const window = @import("../../platform/api.zig").window;
+const ui_focus = @import("../focus.zig");
 const model = @import("model.zig");
 
 const Hit = model.Hit;
 const Region = model.Region;
 
-pub const KeyCommand = enum { none, close, next, prev, activate };
-
-/// Keyboard map of the settings window: Tab/Shift+Tab and arrows move
-/// focus, Space/Enter activate, Esc (or Q) closes.
-pub fn keyCommand(k: window.Key) KeyCommand {
-    return switch (k.code) {
-        .escape => .close,
-        .tab => if (k.shift) .prev else .next,
-        .down, .right => .next,
-        .up, .left => .prev,
-        .space, .enter, .kp_enter => .activate,
-        else => if (!k.ctrl and (k.char == 'q' or k.char == 'Q')) .close else .none,
-    };
+/// Keyboard map of the settings window: ui/focus's, with every arrow
+/// moving focus (a form), and Q closing as Esc does.
+pub fn keyCommand(k: window.Key) ?ui_focus.Action {
+    if (ui_focus.action(k, .all)) |a| return a;
+    if (k.pressed and !k.ctrl and (k.char == 'q' or k.char == 'Q')) return .close;
+    return null;
 }
 
 /// Controls in the fixed header bar (not scrolled with the content).
@@ -43,21 +37,18 @@ pub fn nextFocus(regions: []const Region, current: ?Hit, forward: bool) ?Hit {
     // the header's view switcher first, then the content in reading order
     var list: [64]Hit = undefined;
     var n: usize = 0;
+    var cur: ?usize = null;
     for ([_]bool{ true, false }) |header| {
         for (regions) |r| {
             if (!isFocusable(r.hit) or isHeader(r.hit) != header or n == list.len) continue;
+            if (current) |c| if (std.meta.eql(r.hit, c)) {
+                cur = n;
+            };
             list[n] = r.hit;
             n += 1;
         }
     }
-    if (n == 0) return null;
-    const cur = current orelse return if (forward) list[0] else list[n - 1];
-    for (list[0..n], 0..) |h, i| {
-        if (std.meta.eql(h, cur)) {
-            return if (forward) list[(i + 1) % n] else list[(i + n - 1) % n];
-        }
-    }
-    return if (forward) list[0] else list[n - 1];
+    return list[ui_focus.cycle(n, cur, if (forward) .next else .prev) orelse return null];
 }
 
 test "tab order wraps and skips the close button" {
@@ -86,13 +77,16 @@ test "settings key commands" {
             return .{ .code = code, .pressed = true, .ctrl = false, .shift = shift, .char = char };
         }
     };
-    try t.expectEqual(KeyCommand.next, keyCommand(K.k(.tab, false, 0)));
-    try t.expectEqual(KeyCommand.prev, keyCommand(K.k(.tab, true, 0)));
-    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(.space, false, ' ')));
-    try t.expectEqual(KeyCommand.activate, keyCommand(K.k(.enter, false, 0)));
-    try t.expectEqual(KeyCommand.close, keyCommand(K.k(.escape, false, 0)));
+    const A = ?ui_focus.Action;
+    try t.expectEqual(@as(A, .next), keyCommand(K.k(.tab, false, 0)));
+    try t.expectEqual(@as(A, .prev), keyCommand(K.k(.tab, true, 0)));
+    try t.expectEqual(@as(A, .next), keyCommand(K.k(.down, false, 0)));
+    try t.expectEqual(@as(A, .prev), keyCommand(K.k(.left, false, 0)));
+    try t.expectEqual(@as(A, .activate), keyCommand(K.k(.space, false, ' ')));
+    try t.expectEqual(@as(A, .activate), keyCommand(K.k(.enter, false, 0)));
+    try t.expectEqual(@as(A, .close), keyCommand(K.k(.escape, false, 0)));
     // Q closes by the layout's character, wherever it puts it (AZERTY:
     // the key US layouts have A on)
-    try t.expectEqual(KeyCommand.close, keyCommand(K.k(.a, false, 'q')));
-    try t.expectEqual(KeyCommand.none, keyCommand(K.k(.q, false, 'a')));
+    try t.expectEqual(@as(A, .close), keyCommand(K.k(.a, false, 'q')));
+    try t.expectEqual(@as(A, null), keyCommand(K.k(.q, false, 'a')));
 }

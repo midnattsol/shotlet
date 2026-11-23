@@ -17,6 +17,7 @@ const editor_mod = @import("../editor.zig");
 const config = @import("../../app/config.zig");
 const theme = @import("../theme.zig");
 const motion = @import("../motion.zig");
+const scale = @import("../scale.zig");
 const lens_mod = @import("../lens.zig");
 const material = @import("material.zig");
 const selection = @import("selection.zig");
@@ -265,8 +266,8 @@ pub fn draw(ed: *Editor, canvas: *Canvas) void {
     lens_mod.draw(canvas, lensFor(ed, lr, pl.lens.w, radius), pixels(ed));
     if (!pl.label.isEmpty()) {
         var lab = pl.label;
-        lab.x = pl.anchor.x + scaled(pl.label.x - pl.anchor.x, k);
-        lab.y = pl.anchor.y + scaled(pl.label.y - pl.anchor.y, k);
+        lab.x = pl.anchor.x + scale.px(pl.label.x - pl.anchor.x, k);
+        lab.y = pl.anchor.y + scale.px(pl.label.y - pl.anchor.y, k);
         const ip = ed.loupe.look.at;
         label.draw(ed, canvas, lab, .{ .color = pixels(ed).at(ip.x, ip.y), .copied = ed.loupe.copied_until_ms != 0 });
     }
@@ -306,15 +307,11 @@ fn pixels(ed: *const Editor) lens_mod.Pixels {
 
 /// `r` scaled by `k` toward its point `anchor`.
 fn grown(r: Rect, anchor: Point, k: f64) Rect {
-    const x0 = anchor.x + scaled(r.x - anchor.x, k);
-    const y0 = anchor.y + scaled(r.y - anchor.y, k);
-    const x1 = anchor.x + scaled(r.right() - anchor.x, k);
-    const y1 = anchor.y + scaled(r.bottom() - anchor.y, k);
+    const x0 = anchor.x + scale.px(r.x - anchor.x, k);
+    const y0 = anchor.y + scale.px(r.y - anchor.y, k);
+    const x1 = anchor.x + scale.px(r.right() - anchor.x, k);
+    const y1 = anchor.y + scale.px(r.bottom() - anchor.y, k);
     return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
-}
-
-fn scaled(v: i32, k: f64) i32 {
-    return @intFromFloat(@round(@as(f64, @floatFromInt(v)) * k));
 }
 
 /// `p` on the picture's pixel corners (where a selection's edge can be).

@@ -25,6 +25,7 @@ const doc_mod = @import("doc.zig");
 const ui = @import("editor_ui.zig");
 const theme_mod = @import("theme.zig");
 const motion = @import("motion.zig");
+const scale = @import("scale.zig");
 const tools = @import("tools/mod.zig");
 const types = @import("editor/types.zig");
 
@@ -266,12 +267,12 @@ pub const Editor = struct {
 
     /// UI scale factor from the window's fractional scale (1.0 at 100%).
     pub fn uf(self: *const Editor) f64 {
-        return @as(f64, @floatFromInt(self.pn().scale120)) / 120.0;
+        return scale.of(self.pn().scale120);
     }
 
     /// Scale a logical UI length to physical pixels.
     pub fn sc(self: *const Editor, v: f64) i32 {
-        return @intFromFloat(@round(v * self.uf()));
+        return scale.px(v, self.uf());
     }
 
     pub fn screenRect(self: *const Editor) Rect {
@@ -280,7 +281,7 @@ pub const Editor = struct {
 
     /// Stroke width in image pixels for the current thickness.
     pub fn imgThickness(self: *const Editor) i32 {
-        const t = @as(f64, @floatFromInt(self.thickness)) * self.uf() / self.pn().view.scale;
+        const t = scale.ff(self.thickness) * self.uf() / self.pn().view.scale;
         return @max(1, @as(i32, @intFromFloat(@round(t))));
     }
 

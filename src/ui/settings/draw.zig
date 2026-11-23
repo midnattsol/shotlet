@@ -5,18 +5,18 @@
 
 const std = @import("std");
 const window = @import("../../platform/api.zig").window;
-const render = @import("../../gfx/render.zig");
 const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");
 const icons = @import("../icons.zig");
-const shapes = @import("../shapes.zig");
+const scale = @import("../scale.zig");
+const ff = scale.ff;
+const barkit = @import("../barkit.zig");
 const model = @import("model.zig");
 const focus = @import("focus.zig");
 const w = @import("widgets.zig");
 const pages = @import("pages.zig");
 const frame = @import("../frame.zig");
 
-const Canvas = render.Canvas;
 const Window = window.Window;
 const Ui = w.Ui;
 const Region = model.Region;
@@ -27,7 +27,7 @@ pub fn draw(win: *Window, fr: *frame.Frame, cfg: *const config.Config, regions: 
     var ui = Ui{
         .win = win,
         .c = try fr.begin(alloc, win),
-        .f = @as(f64, @floatFromInt(win.scale120)) / 120.0,
+        .f = scale.of(win.scale120),
         .th = st.theme,
         .regions = regions,
         .alloc = alloc,
@@ -57,7 +57,7 @@ pub fn draw(win: *Window, fr: *frame.Frame, cfg: *const config.Config, regions: 
 fn drawFocus(ui: *Ui, st: *const State, header: bool) void {
     const hit = st.focus orelse return;
     if (focus.isHeader(hit) != header) return;
-    if (focus.findRegion(ui.regions.items, hit)) |r| focusRing(ui, r);
+    if (focus.findRegion(ui.regions.items, hit)) |r| barkit.focusRing(&ui.c, r.rect(), r.radius, ui.f, ui.th.accent);
 }
 
 /// The scrollbar's knob, when the content overflows the window.
@@ -67,13 +67,13 @@ fn drawScrollbar(ui: *Ui, content_h: i32, scroll_y: i32) void {
     const hh = model.headerHeight(ui.f);
     const track_w = ui.sc(6);
     const tx = ui.c.w - track_w - ui.sc(4);
-    const frac = @as(f64, @floatFromInt(vh)) / @as(f64, @floatFromInt(content_h));
-    const knob_h = @max(ui.sc(36), @as(i32, @intFromFloat(@as(f64, @floatFromInt(vh)) * frac)));
+    const frac = ff(vh) / ff(content_h);
+    const knob_h = @max(ui.sc(36), @as(i32, @intFromFloat(ff(vh) * frac)));
     const max_scroll = content_h - vh;
-    const pos_frac = @as(f64, @floatFromInt(scroll_y)) / @as(f64, @floatFromInt(max_scroll));
+    const pos_frac = ff(scroll_y) / ff(max_scroll);
     const avail = vh - hh - knob_h - ui.sc(8);
-    const ky: i32 = hh + ui.sc(4) + @as(i32, @intFromFloat(@as(f64, @floatFromInt(@max(0, avail))) * pos_frac));
-    ui.c.fillRoundRectAA(tx, ky, track_w, knob_h, @as(f64, @floatFromInt(track_w)) / 2.0, ui.th.switch_off);
+    const ky: i32 = hh + ui.sc(4) + @as(i32, @intFromFloat(ff(@max(0, avail)) * pos_frac));
+    ui.c.fillRoundRectAA(tx, ky, track_w, knob_h, ff(track_w) / 2.0, ui.th.switch_off);
 }
 
 const Tab = struct { model.View, []const u8, icons.Icon };
@@ -130,16 +130,9 @@ fn drawCloseButton(ui: *Ui, width: i32, hh: i32) !void {
     const bx = width - ui.sc(12) - bs;
     const by = @divTrunc(hh - bs, 2);
     const hov = ui.hovered(bx, by, bs, bs);
-    const r = @as(f64, @floatFromInt(bs)) / 2.0;
-    ui.c.fillCircleAA(@as(f64, @floatFromInt(bx)) + r, @as(f64, @floatFromInt(by)) + r, r, if (hov) theme_mod.mix(th.chip, th.switch_off, 0.8) else th.chip);
+    const r = ff(bs) / 2.0;
+    ui.c.fillCircleAA(ff(bx) + r, ff(by) + r, r, w.chipFill(th, hov));
     const is = ui.sc(14);
     icons.drawStroke(&ui.c, .close, bx + @divTrunc(bs - is, 2), by + @divTrunc(bs - is, 2), is, 2.5, th.text);
     try ui.add(.{ .x = bx, .y = by, .w = bs, .h = bs, .hit = .win_close, .radius = r });
-}
-
-fn focusRing(ui: *Ui, r: Region) void {
-    const g = ui.sc(theme_mod.focus_gap);
-    const fw = theme_mod.focus_w * ui.f;
-    const e = g + @as(i32, @intFromFloat(@ceil(fw / 2)));
-    shapes.roundRectRing(&ui.c, .{ .x = r.x - e, .y = r.y - e, .w = r.w + 2 * e, .h = r.h + 2 * e }, r.radius + @as(f64, @floatFromInt(g)) + fw / 2, fw, ui.th.accent);
 }

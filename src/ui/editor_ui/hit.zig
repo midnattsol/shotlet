@@ -6,7 +6,8 @@ const std = @import("std");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const motion = @import("../motion.zig");
-const ff = @import("common.zig").ff;
+const focus = @import("../focus.zig");
+const ff = @import("../scale.zig").ff;
 const pop_fade = @import("pop_fade.zig");
 const strip = @import("strip.zig");
 const loupe = @import("loupe.zig");
@@ -20,19 +21,16 @@ pub fn moveFocus(self: *Editor, dir: i32) void {
     const top = self.popover != .none;
     var list: [64]usize = undefined;
     var n: usize = 0;
+    var cur: ?usize = null;
     for (self.buttons.items, 0..) |b, i| {
         const on_top = b.layer == .popover or b.layer == .menu;
         if (on_top != top or n == list.len) continue;
+        if (self.focus == i) cur = n;
         list[n] = i;
         n += 1;
     }
-    if (n == 0) return;
-    var cur: i32 = if (dir > 0) -1 else @intCast(n);
-    if (self.focus) |f| for (list[0..n], 0..) |li, k| {
-        if (li == f) cur = @intCast(k);
-    };
-    const ni: usize = @intCast(@mod(cur + dir, @as(i32, @intCast(n))));
-    self.focus = list[ni];
+    const next = focus.cycle(n, cur, if (dir > 0) .next else .prev) orelse return;
+    self.focus = list[next];
 }
 
 /// The control under buffer point `m` (pointer pane must be the toolbar's).

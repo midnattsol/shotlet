@@ -10,7 +10,6 @@ const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
 const selchrome = @import("../selchrome.zig");
 const loupe_hint = @import("loupe_hint.zig");
-const ff = @import("common.zig").ff;
 
 const Canvas = render.Canvas;
 const Editor = editor_mod.Editor;
@@ -37,16 +36,16 @@ fn hintText() []const u8 {
 }
 
 pub fn hintRect(self: *const Editor) Rect {
-    const fs = theme.font_label * self.uf();
-    const tw = text_mod.width(fs, hintText());
-    const ph = text_mod.height(fs) + self.sc(14);
+    const pw, const ph = selchrome.hintPillSize(hintText(), self.uf());
+    // centred on its text (the pill is wider than the strip under it)
+    const tw = pw - self.sc(32);
     const w: i32 = @intCast(self.pn().width);
     const h: i32 = @intCast(self.pn().height);
     // above the mode strip, where that shows
     const strip = self.capmode.rect;
     if (self.isTbPane() and !strip.isEmpty())
-        return .{ .x = strip.x + @divTrunc(strip.w - tw, 2) - self.sc(16), .y = strip.y - ph - self.sc(12), .w = tw + self.sc(32), .h = ph };
-    return .{ .x = @divTrunc(w - tw, 2) - self.sc(16), .y = h - ph - self.sc(48), .w = tw + self.sc(32), .h = ph };
+        return .{ .x = strip.x + @divTrunc(strip.w - tw, 2) - self.sc(16), .y = strip.y - ph - self.sc(12), .w = pw, .h = ph };
+    return .{ .x = @divTrunc(w - tw, 2) - self.sc(16), .y = h - ph - self.sc(48), .w = pw, .h = ph };
 }
 
 /// The pointer, on the pane it is over (null elsewhere).
@@ -83,7 +82,6 @@ pub fn drawSelectionChrome(self: *Editor, canvas: *Canvas) void {
         // first run only: a quiet pill, gone at the first click or key
         self.hint_seen = true;
         const r = hintRect(self);
-        selchrome.pill(canvas, r, ff(r.h) / 2.0, th);
-        text_mod.draw(canvas, r.x + self.sc(16), r.y + self.sc(7), theme.font_label * f, th.pill_fg, hintText());
+        _ = selchrome.hintPill(canvas, .{ .x = r.x, .y = r.y }, hintText(), f, th);
     }
 }

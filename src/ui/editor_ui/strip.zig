@@ -12,6 +12,7 @@ const editor_mod = @import("../editor.zig");
 const theme = @import("../theme.zig");
 const motion = @import("../motion.zig");
 const barkit = @import("../barkit.zig");
+const ff = @import("../scale.zig").ff;
 const capmode = @import("../editor/capmode.zig");
 const buttons = @import("buttons.zig");
 const material = @import("material.zig");
@@ -97,7 +98,7 @@ pub fn layout(self: *Editor) !void {
     }
     const wh = size(self);
     const mon = monitorBuf(self);
-    const rise: i32 = @intFromFloat(@round((1 - a) * @as(f64, @floatFromInt(self.sc(6)))));
+    const rise: i32 = @intFromFloat(@round((1 - a) * ff(self.sc(6))));
     const y = @max(mon.y, mon.bottom() - wh[1] - self.sc(bottom_gap)) + rise;
     st.rect = .{ .x = mon.x + @divTrunc(mon.w - wh[0], 2), .y = y, .w = wh[0], .h = wh[1] };
     slideChosen(self, now);
@@ -164,8 +165,8 @@ fn drawItem(self: *const Editor, canvas: *Canvas, m: Mode, r: Rect) void {
     const ink = if (off) theme.fade(barkit.ink(th, look, false), theme.disabled_alpha) else barkit.ink(th, look, false);
     draw_toolbar.drawIconIn(self, canvas, m.icon(), r, theme.icon, ink);
     // Record's dot, filled
-    if (m == .record) canvas.fillCircleAA(@as(f64, @floatFromInt(r.x)) + @as(f64, @floatFromInt(r.w)) / 2, @as(f64, @floatFromInt(r.y)) + @as(f64, @floatFromInt(r.h)) / 2, 3.6 * self.uf(), ink);
-    if (bi) |i| if (self.focus == i) draw_toolbar.focusRing(self, canvas, r, theme.button_radius * self.uf());
+    if (m == .record) canvas.fillCircleAA(ff(r.x) + ff(r.w) / 2, ff(r.y) + ff(r.h) / 2, 3.6 * self.uf(), ink);
+    if (bi) |i| if (self.focus == i) barkit.focusRing(canvas, r, theme.button_radius * self.uf(), self.uf(), self.theme.accent);
 }
 
 /// Mode `m`'s entry in the editor's buttons (none while fading out).
