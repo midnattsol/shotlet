@@ -3,7 +3,7 @@
 
 # --- the GNOME integration's captures: the shell starts shotlet, whose
 # output lands in the compositor log
-shell_count() { grep -c "$1" "$HL_SHELL_LOG" 2>/dev/null; }
+shell_count() { grep -c "$1" "$SHOTLET_E2E_SHELL_LOG" 2>/dev/null; }
 _shell_count_ge() { [ "$(shell_count "$1")" -ge "$2" ]; }
 shell_wait() { wait_until "$1" _shell_count_ge "$2" "$3"; } # shell_wait SECS PATTERN COUNT: until PATTERN shows COUNT times
 # shell_editor N [SECS]: the Nth editor the shell started is up (as
@@ -43,7 +43,7 @@ new_pngs() {
 }
 no_dialog() { # the portal's consent dialogs never came up
     eq "$(perm_apps screencast)$(perm_apps screenshot)" "" &&
-        ! grep -qiE "screencast|screenshot portal" "$HL_SHELL_LOG" "$OUT"/*.log 2>/dev/null
+        ! grep -qiE "screencast|screenshot portal" "$SHOTLET_E2E_SHELL_LOG" "$OUT"/*.log 2>/dev/null
 }
 capture_dir_empty() { [ -z "$(ls -A "$XDG_RUNTIME_DIR/shotlet" 2>/dev/null)" ]; }
 # a plain blue desktop: known content to find in the capture

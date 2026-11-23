@@ -29,7 +29,7 @@ screen_monitors() {
     check "Ctrl+Print captures the monitor under the pointer" wait_until 10 clip_png "$OUT/screen.png"
     check "  ... all of it, and only it (1280x720)" eq "$(png_size "$OUT/screen.png")" 1280x720
     check "  ... the desktop's pixels" pixel_near "$OUT/screen.png" 640 400 "$DESKTOP_BG"
-    check "  ... with no editor" no_log "startup: capture=" "$HL_SHELL_LOG"
+    check "  ... with no editor" no_log "startup: capture=" "$SHOTLET_E2E_SHELL_LOG"
     check "  ... and no consent dialog" no_dialog
     check "  ... the capture files gone" capture_dir_empty
     new_pngs | grep -v "/shotlet/history/" >"$OUT/new-pngs.txt"
@@ -132,14 +132,14 @@ scenario_modes_window() {
     click 0 800 450
     check "a click captures that window" wait_until 10 clip_png "$OUT/window.png"
     local ww wh
-    read -r ww wh <<<"$(grep -o "captured a [0-9]*x[0-9]* window" "$HL_SHELL_LOG" | tail -1 | grep -o "[0-9]*x[0-9]*" | tr x ' ')"
+    read -r ww wh <<<"$(grep -o "captured a [0-9]*x[0-9]* window" "$SHOTLET_E2E_SHELL_LOG" | tail -1 | grep -o "[0-9]*x[0-9]*" | tr x ' ')"
     check "  ... exactly the window (${ww}x${wh})" eq "$(png_size "$OUT/window.png")" "${ww}x${wh}"
     check "  ... the size it asked for, give or take its frame" test "${ww:-0}" -ge 640 -a "${ww:-0}" -le 700
     drv pixel "$OUT/window.png" 0 0
     check "  ... its rounded corner see-through" test $((16#${VAL:0:2})) -lt 64
     drv pixel "$OUT/window.png" $((ww / 2)) $((wh / 2))
     check "  ... and its inside opaque" test "${VAL:0:2}" = ff
-    check "  ... with no editor and no dialog" eval 'no_log "startup: capture=" "$HL_SHELL_LOG" && no_dialog'
+    check "  ... with no editor and no dialog" eval 'no_log "startup: capture=" "$SHOTLET_E2E_SHELL_LOG" && no_dialog'
     check "  ... and no PNG left behind" capture_dir_empty
     clip_set nothing
     ext_gap
@@ -192,7 +192,7 @@ keys_cli() {
     ext_gap
     drv key ctrl+shift+print
     sleep 2 # (nothing would log a capture that never happens)
-    check "  ... and its old key does nothing" no_log "capture mode: 2880" "$HL_SHELL_LOG"
+    check "  ... and its old key does nothing" no_log "capture mode: 2880" "$SHOTLET_E2E_SHELL_LOG"
 }
 
 # Settings: the after-capture choice, and recording a mode's key

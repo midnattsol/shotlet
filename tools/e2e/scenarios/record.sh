@@ -3,7 +3,8 @@
 #   rec-shell     MP4 of an area through the GNOME extension: no dialog,
 #                 the size, codec and rate, pictures that change, the
 #                 click ripples recorded, sound, StartRecording from
-#                 another program refused, the thumbnail and the history
+#                 another program refused, the thumbnail and the history,
+#                 a second recording refused while one is under way
 #   rec-pick      the picker and the floating control
 #   rec-gif       the same as a GIF (decoded and checked), and pause
 #   rec-trim      the trim window makes a shorter file
@@ -50,7 +51,7 @@ scenario_rec_shell() {
     check "  ... at 30 fps" eq "$(probe "$f" stream=avg_frame_rate)" "30/1"
     d=$(duration_ms "$f")
     check "  ... about 3 s long ($d ms)" test "$d" -ge 2800 -a "$d" -le 3300
-    check "  ... index at the front (faststart)" eval '[ "$(head -c 64 "$f" | grep -c moov)" = 1 ] || python3 -c "import sys; d=open(sys.argv[1],\"rb\").read(); sys.exit(0 if d.find(b\"moov\") < d.find(b\"mdat\") else 1)" "$f"'
+    check "  ... index at the front (faststart)" eval '[ "$(head -c 64 "$f" | grep -c moov)" = 1 ] || "$E2E_PYTHON" -I -c "import sys; d=open(sys.argv[1],\"rb\").read(); sys.exit(0 if d.find(b\"moov\") < d.find(b\"mdat\") else 1)" "$f"'
     frame "$f" 0.2 "$OUT/f0.png"; frame "$f" 2.5 "$OUT/f1.png"
     check "  ... and the pictures change (the pointer moves)" test "$(md5sum <"$OUT/f0.png")" != "$(md5sum <"$OUT/f1.png")"
     check "  ... showing the desktop" pixel_near "$OUT/f0.png" 20 300 "$DESKTOP_BG"
@@ -58,6 +59,7 @@ scenario_rec_shell() {
     rec_clicks
     rec_sound
     rec_others
+    rec_busy
 }
 
 # the recording's thumbnail and its Copy (FILE: the recording)
@@ -131,6 +133,23 @@ rec_others() {
     check "  ... and keeps it" grep -q "recording: saved" "$SHOT_LOG"
 }
 
+# a second recording while the first one counts down (without its
+# control, it answers no command until it records): refused, saying
+# why on stderr and on the screen (owner decision 4); the first goes on
+rec_busy() {
+    cfg_set record_countdown=10
+    run_shotlet busy record --region "200,150,480,320" --seconds 1 --no-control
+    wait_until 5 eval 'ls "$XDG_RUNTIME_DIR"/shotlet-record-*.sock >/dev/null 2>&1'
+    local rc=0
+    "$BIN" record --region "100,100,320,240" --no-countdown >"$OUT/busy-again.log" 2>&1 || rc=$?
+    check "shotlet record while another one is under way exits 1" eq "$rc" 1
+    problem_reported busy-again record "Another recording is under way" "Stop it first: shotlet record --stop"
+    check "  ... and the first one goes on" alive
+    check "  ... and the card goes by itself" card_gone
+    wait_exit 30
+    cfg_unset record_countdown
+}
+
 # the picker and the floating control, through the extension (the
 # record bar d70015, the Record button and the control's dot PEN_RED)
 scenario_rec_pick() {
@@ -156,7 +175,7 @@ scenario_rec_pick() {
     sleep 1
     "$BIN" record --stop >"$OUT/stop.log" 2>&1
     check "shotlet record --stop ends it" shell_wait 15 "recording: saved" 1
-    f=$(grep -o "recording: saved [^ ]*" "$HL_SHELL_LOG" | tail -1 | cut -d' ' -f3)
+    f=$(grep -o "recording: saved [^ ]*" "$SHOTLET_E2E_SHELL_LOG" | tail -1 | cut -d' ' -f3)
     check "  ... at the picked size" eq "$(probe "$f" stream=width,height)" "400,300"
 }
 

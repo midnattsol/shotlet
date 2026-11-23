@@ -6,18 +6,18 @@
 # (xdg-desktop-portal + -gnome) are D-Bus activated on the private bus.
 # Nothing here can reach the caller's desktop: WAYLAND_DISPLAY, DISPLAY and
 # the session bus address are replaced before anything starts.
-# Env: HL_MONITORS="1600x900 1280x720"  virtual monitors
-#      HL_LAYOUT=es                     XKB layout (gsettings input-sources)
-#      HL_IBUS=hangul                   IBus engine as the input source
-#      HL_APPS="x.desktop"              desktop files to install
-#      HL_EXTENSIONS="dir..."           GNOME Shell extensions to install
-#                                       and enable before the shell starts
-#      HL_KEEP=1                        keep the temp HOME (prints it)
-#      HL_WLDEBUG=1                     gnome-shell's WAYLAND_DEBUG
+# Env: SHOTLET_E2E_MONITORS="1600x900 1280x720"  virtual monitors
+#      SHOTLET_E2E_LAYOUT=es              XKB layout (gsettings input-sources)
+#      SHOTLET_E2E_IBUS=hangul            IBus engine as the input source
+#      SHOTLET_E2E_APPS="x.desktop"       desktop files to install
+#      SHOTLET_E2E_EXTENSIONS="dir..."    GNOME Shell extensions to install
+#                                         and enable before the shell starts
+#      SHOTLET_E2E_KEEP=1                 keep the temp HOME (prints it)
+#      SHOTLET_E2E_WLDEBUG=1              gnome-shell's WAYLAND_DEBUG
 # Any command, e.g. one shotlet run:
-#   HL_MONITORS="1600x900 1280x720" tools/e2e/session.sh zig-out/bin/shotlet shot --from IMG.png
+#   SHOTLET_E2E_MONITORS="1600x900 1280x720" tools/e2e/session.sh zig-out/bin/shotlet shot --from IMG.png
 # Inside CMD: WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS, HOME,
-# XDG_RUNTIME_DIR point at the private session; HL_SHELL_LOG is the
+# XDG_RUNTIME_DIR point at the private session; SHOTLET_E2E_SHELL_LOG is the
 # compositor log.
 set -u
 . "$(dirname "$0")/../e2e-common/session.sh"
@@ -38,13 +38,13 @@ if [ "${SHOTLET_E2E_SANDBOX:-}" != gnome ]; then
     dbus-run-session -- "$0" "$@" 2> >(grep -v '^dbus-daemon\[' >&2); rc=$?
     # processes the private bus started (portals, ...) may linger a moment
     pkill -u "$(id -u)" -f "$HOME" 2>/dev/null; sleep 0.2
-    if [ -n "${HL_KEEP:-}" ]; then echo "HOME=$HOME" >&2; else rm -rf "$HOME"; fi
+    if [ -n "${SHOTLET_E2E_KEEP:-}" ]; then echo "HOME=$HOME" >&2; else rm -rf "$HOME"; fi
     exit $rc
 fi
 
 # --- inside the private bus
 export WAYLAND_DISPLAY=wayland-hl
-export HL_SHELL_LOG="$HOME/shell.log"
+export SHOTLET_E2E_SHELL_LOG="$HOME/shell.log"
 pids=()
 cleanup() {
     for p in "${pids[@]}"; do kill "$p" 2>/dev/null; done
@@ -56,11 +56,11 @@ cleanup() {
 }
 trap cleanup EXIT
 start_pipewire "$HOME"
-# HL_APPS="a.desktop ...": installed before gnome-shell starts, so the
+# SHOTLET_E2E_APPS="a.desktop ...": installed before gnome-shell starts, so the
 # shell maps windows to those apps from the beginning
-if [ -n "${HL_APPS:-}" ]; then
+if [ -n "${SHOTLET_E2E_APPS:-}" ]; then
     mkdir -p "$XDG_DATA_HOME/applications"
-    cp $HL_APPS "$XDG_DATA_HOME/applications/"
+    cp $SHOTLET_E2E_APPS "$XDG_DATA_HOME/applications/"
 fi
 dbus-update-activation-environment HOME XDG_RUNTIME_DIR XDG_CONFIG_HOME \
     XDG_STATE_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_CURRENT_DESKTOP \
@@ -70,25 +70,25 @@ dbus-update-activation-environment HOME XDG_RUNTIME_DIR XDG_CONFIG_HOME \
 # no welcome tour, no animations (screenshots and timings stay stable)
 gsettings set org.gnome.shell welcome-dialog-last-shown-version '999'
 gsettings set org.gnome.desktop.interface enable-animations false
-if [ -n "${HL_LAYOUT:-}" ]; then
-    gsettings set org.gnome.desktop.input-sources sources "[('xkb','$HL_LAYOUT')]"
+if [ -n "${SHOTLET_E2E_LAYOUT:-}" ]; then
+    gsettings set org.gnome.desktop.input-sources sources "[('xkb','$SHOTLET_E2E_LAYOUT')]"
 fi
-# HL_IBUS=engine: an IBus input method as the only input source (gnome-shell
+# SHOTLET_E2E_IBUS=engine: an IBus input method as the only input source (gnome-shell
 # then offers text-input-v3 backed by it)
-if [ -n "${HL_IBUS:-}" ] && command -v ibus-daemon >/dev/null; then
+if [ -n "${SHOTLET_E2E_IBUS:-}" ] && command -v ibus-daemon >/dev/null; then
     # a fixed address: ibus derives its address file from DISPLAY and
     # crashes without one (ibus_write_address); DISPLAY points nowhere
     export IBUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/ibus"
     DISPLAY=:4242 ibus-daemon --panel disable --address="$IBUS_ADDRESS" \
         >"$HOME/ibus.log" 2>&1 & pids+=($!)
     wait_until 5 eval 'ibus engine >/dev/null 2>&1'
-    gsettings set org.gnome.desktop.input-sources sources "[('ibus','$HL_IBUS')]"
+    gsettings set org.gnome.desktop.input-sources sources "[('ibus','$SHOTLET_E2E_IBUS')]"
 fi
-# HL_EXTENSIONS="path/uuid ...": user extensions, enabled before gnome-shell
+# SHOTLET_E2E_EXTENSIONS="path/uuid ...": user extensions, enabled before gnome-shell
 # starts (a running shell on Wayland never discovers new ones)
-if [ -n "${HL_EXTENSIONS:-}" ]; then
+if [ -n "${SHOTLET_E2E_EXTENSIONS:-}" ]; then
     uuids=
-    for e in $HL_EXTENSIONS; do
+    for e in $SHOTLET_E2E_EXTENSIONS; do
         mkdir -p "$XDG_DATA_HOME/gnome-shell/extensions"
         cp -r "$e" "$XDG_DATA_HOME/gnome-shell/extensions/"
         uuids="$uuids${uuids:+, }'$(basename "$e")'"
@@ -96,9 +96,9 @@ if [ -n "${HL_EXTENSIONS:-}" ]; then
     gsettings set org.gnome.shell disable-user-extensions false
     gsettings set org.gnome.shell enabled-extensions "[$uuids]"
 fi
-: >"$HL_SHELL_LOG"
-start_gnome_shell ${HL_MONITORS:-1600x900} ||
-    { echo "session.sh: gnome-shell did not start" >&2; tail "$HL_SHELL_LOG" >&2; exit 77; }
+: >"$SHOTLET_E2E_SHELL_LOG"
+start_gnome_shell ${SHOTLET_E2E_MONITORS:-1600x900} ||
+    { echo "session.sh: gnome-shell did not start" >&2; tail "$SHOTLET_E2E_SHELL_LOG" >&2; exit 77; }
 pids+=("$SHELL_PID")
 # (its first frames and the portals' startup: nothing marks them done)
 sleep 1

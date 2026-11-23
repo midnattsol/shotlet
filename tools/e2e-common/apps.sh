@@ -2,7 +2,7 @@
 # clicks, drops) one line at a time on its log:
 #   droptarget  tools/e2e/droptarget.zig ($E2E_DROPTARGET), $OUT/drop.log
 #   target      tools/e2e/target.py, GTK 4 ($PYGTK), $OUT/target.log;
-#               TGT_DEBUG=1 logs its Wayland traffic
+#               SHOTLET_E2E_TARGET_DEBUG=1 logs its Wayland traffic
 # Their pids: DROP_PID, TGT_PID.
 
 DROP_PID= TGT_PID= APP_LOG=
@@ -20,7 +20,7 @@ start_app() { # start_app droptarget|target [ARGS...]: until it is up
     target)
         APP_LOG=$OUT/target.log
         : >"$APP_LOG"
-        env ${TGT_DEBUG:+WAYLAND_DEBUG=client} "$PYGTK" "${E2E_TARGET_PY:-$ROOT/tools/e2e/target.py}" "$@" \
+        env ${SHOTLET_E2E_TARGET_DEBUG:+WAYLAND_DEBUG=client} "$PYGTK" "${E2E_TARGET_PY:-$ROOT/tools/e2e/target.py}" "$@" \
             >>"$APP_LOG" 2>>"$OUT/target.err" &
         TGT_PID=$!
         wait_log 10 "^active True" "$APP_LOG"

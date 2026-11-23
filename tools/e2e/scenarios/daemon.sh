@@ -44,6 +44,25 @@ scenario_daemon() {
 _permission_window() { PERM_WIN=; alive || return 0; find_on 0 1d2125 0 300 && PERM_WIN=1; }
 wait_permission_window() { wait_until 15 _permission_window && [ -n "$PERM_WIN" ]; }
 
+# Deny in GNOME's consent dialog: our window stays up to retry (the
+# request's denied outcome); Esc then ends quietly. GNOME stores the
+# refusal: it is forgotten again for the grant that follows.
+fallback_denied() {
+    run_shotlet fallback-deny
+    wait_permission_window
+    sleep 0.5
+    keys enter
+    sleep 1.5 # (GNOME's access dialog: Deny has the focus)
+    shot 0 deny-dialog
+    keys enter
+    check "denying GNOME's consent keeps our window up, to try again" wait_log 10 "portal denied the request"
+    sleep 0.5
+    check "  ... still there" eval '_permission_window && [ -n "$PERM_WIN" ]'
+    keys esc
+    check "  ... until Esc ends quietly" eval 'wait_exit 5 && eq "$RC" 0'
+    perm DeletePermission screenshot screenshot "$APP_ID" >/dev/null
+}
+
 scenario_fallback() {
     # no ScreenCast portal backend: shotlet falls back to the Screenshot
     # portal. GNOME asks consent only from the focused app (its app id,
@@ -63,6 +82,7 @@ scenario_fallback() {
     keys esc
     check "  ... where Esc ends quietly" wait_exit 5
     check "  ... with status 0" eq "$RC" 0
+    fallback_denied
 
     run_shotlet fallback
     wait_permission_window

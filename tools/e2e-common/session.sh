@@ -35,14 +35,14 @@ start_pipewire() {
 }
 
 # start_gnome_shell MONITOR...: a headless gnome-shell on wayland-hl with
-# those virtual monitors (WxH), output appended to $HL_SHELL_LOG; its pid
+# those virtual monitors (WxH), output appended to $SHOTLET_E2E_SHELL_LOG; its pid
 # in SHELL_PID. True once its socket is up; it waits (up to 20 s) for
 # Mutter's RemoteDesktop too, which the input driver needs.
 start_gnome_shell() {
     local mons=() m
     for m in "$@"; do mons+=(--virtual-monitor "$m"); done
-    WAYLAND_DEBUG=${HL_WLDEBUG:-0} gnome-shell --headless --no-x11 "${mons[@]}" \
-        --wayland-display wayland-hl >>"$HL_SHELL_LOG" 2>&1 &
+    WAYLAND_DEBUG=${SHOTLET_E2E_WLDEBUG:-0} gnome-shell --headless --no-x11 "${mons[@]}" \
+        --wayland-display wayland-hl >>"$SHOTLET_E2E_SHELL_LOG" 2>&1 &
     SHELL_PID=$!
     wait_until 20 _shell_up
     [ -S "$XDG_RUNTIME_DIR/wayland-hl" ]

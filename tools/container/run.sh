@@ -11,22 +11,25 @@
 # Prints PASS/FAIL/SKIP per check (all of them also in results.txt) and a
 # summary line; exits 1 when anything failed, 0 with a SKIP when neither
 # docker nor podman is usable, 2 for an unknown target.
-# Env: CTR_ENGINE=docker|podman   pick the engine (default: whichever works)
-#      CTR_GPU=0                  never pass a GPU render node (capture and
-#                                 KWin then skip)
-#      CTR_PROBE='shell code'     run it in the `probe` scenario (debugging;
-#                                 CTR_PROBE0 runs before the driver starts)
-#      CTR_KWIN_LOG=rules         KWin's QT_LOGGING_RULES
-#      CTR_IMAGE=name:TAG         image (default shotlet-e2e:trixie; built
-#                                 when missing from tools/container/
-#                                 Containerfile, or Containerfile.TAG, e.g.
-#                                 shotlet-e2e:sid from Containerfile.sid)
-#      E2E_MONITORS="WxH ..."     outputs for every scenario run (else each
-#                                 scenario's own, from table.sh)
-#      E2E_OUT=dir                keep logs and screenshots there
+# Env: SHOTLET_E2E_ENGINE=docker|podman  pick the engine (default: whichever
+#                                        works)
+#      SHOTLET_E2E_GPU=0                 never pass a GPU render node (capture
+#                                        and KWin then skip)
+#      SHOTLET_E2E_PROBE='shell code'    run it in the `probe` scenario
+#                                        (debugging; SHOTLET_E2E_PROBE0 runs
+#                                        before the driver starts)
+#      SHOTLET_E2E_KWIN_LOG=rules        KWin's QT_LOGGING_RULES
+#      SHOTLET_E2E_IMAGE=name:TAG        image (default shotlet-e2e:trixie;
+#                                        built when missing from
+#                                        tools/container/Containerfile, or
+#                                        Containerfile.TAG, e.g.
+#                                        shotlet-e2e:sid from Containerfile.sid)
+#      E2E_MONITORS="WxH ..."            outputs for every scenario run (else
+#                                        each scenario's own, from table.sh)
+#      E2E_OUT=dir                       keep logs and screenshots there
 set -u
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-IMAGE=${CTR_IMAGE:-shotlet-e2e:trixie}
+IMAGE=${SHOTLET_E2E_IMAGE:-shotlet-e2e:trixie}
 . "$ROOT/tools/e2e-common/table.sh"
 . "$ROOT/tools/container/table.sh"
 . "$ROOT/tools/e2e-common/summary.sh"
@@ -66,7 +69,7 @@ for t in "${targets[@]}"; do
     esac
 done
 
-engine=${CTR_ENGINE:-}
+engine=${SHOTLET_E2E_ENGINE:-}
 if [ -z "$engine" ]; then
     for e in docker podman; do
         command -v "$e" >/dev/null && "$e" info >/dev/null 2>&1 && { engine=$e; break; }
@@ -105,12 +108,12 @@ user_args=(--user "$(id -u):$(id -g)")
 # when the host has one: xdg-desktop-portal-wlr wants dmabuf formats from
 # screencopy, which wlroots' pixman renderer cannot offer, and KWin only
 # offers its screenshot and screencast interfaces when compositing with
-# OpenGL. CTR_GPU=0 never passes one.
+# OpenGL. SHOTLET_E2E_GPU=0 never passes one.
 gpu_args=()
-if [ "${CTR_GPU:-1}" != 0 ]; then
+if [ "${SHOTLET_E2E_GPU:-1}" != 0 ]; then
     for node in /dev/dri/renderD*; do
         [ -c "$node" ] || continue
-        gpu_args=(--device "$node" --group-add "$(stat -c %g "$node")" -e CTR_RENDER_NODE="$node")
+        gpu_args=(--device "$node" --group-add "$(stat -c %g "$node")" -e SHOTLET_E2E_RENDER_NODE="$node")
         break
     done
 fi
@@ -133,7 +136,7 @@ for r in "${runs[@]}"; do
     "$engine" run --rm --name "$name" --network none --init --shm-size 256m \
         "${user_args[@]}" "${gpu_args[@]}" \
         -e SHOTLET_E2E_SANDBOX=container -e HOME=/tmp/home \
-        ${CTR_PROBE:+-e CTR_PROBE} ${CTR_PROBE0:+-e CTR_PROBE0} ${CTR_KWIN_LOG:+-e CTR_KWIN_LOG} ${E2E_MONITORS:+-e E2E_MONITORS} \
+        ${SHOTLET_E2E_PROBE:+-e SHOTLET_E2E_PROBE} ${SHOTLET_E2E_PROBE0:+-e SHOTLET_E2E_PROBE0} ${SHOTLET_E2E_KWIN_LOG:+-e SHOTLET_E2E_KWIN_LOG} ${E2E_MONITORS:+-e E2E_MONITORS} \
         -v "$(realpath "$BIN")":/opt/shotlet/bin/shotlet:ro \
         -v "$(realpath "$WLDRIVE")":/opt/shotlet/bin/shotlet-wldrive:ro \
         -v "$(realpath "$DROP")":/opt/shotlet/bin/shotlet-droptarget:ro \
