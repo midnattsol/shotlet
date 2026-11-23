@@ -35,7 +35,6 @@ comptime {
     _ = @import("textbox.zig");
     _ = @import("textedit.zig");
     _ = @import("theme.zig");
-    _ = @import("transfer.zig");
     _ = @import("view.zig");
     _ = @import("recui/tests.zig");
     _ = @import("tools/mod.zig");

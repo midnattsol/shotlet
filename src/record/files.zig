@@ -2,7 +2,7 @@
 //! as video/mp4 or image/gif), or copied where the person chooses.
 
 const std = @import("std");
-const transfer = @import("../ui/transfer.zig");
+const uri_mod = @import("../uri.zig");
 const env_mod = @import("../app/env.zig");
 const config = @import("../app/config.zig");
 const deliver = @import("../app/deliver.zig");
@@ -22,7 +22,7 @@ pub fn mimeOf(path: []const u8) []const u8 {
 /// Copy: the file as text/uri-list (file managers, chat apps) and, when
 /// not too large, its bytes as its own type.
 pub fn copyToClipboard(gpa: std.mem.Allocator, win: *window.Window, path: []const u8) !void {
-    const uri = try transfer.fileUriList(gpa, path);
+    const uri = try uri_mod.fileUriList(gpa, path);
     errdefer gpa.free(uri);
     const size = try sys.fileSize(path);
     const bytes: []u8 = if (size <= max_clipboard_bytes) try sys.readFileAlloc(gpa, path, max_clipboard_bytes) else &.{};

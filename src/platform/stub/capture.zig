@@ -16,6 +16,7 @@ const Env = @import("../../app/env.zig").Env;
 
 pub const Path = types.Path;
 pub const ScrollSupport = types.ScrollSupport;
+pub const PermissionsCli = types.PermissionsCli;
 
 /// Remember how the last capture went.
 pub fn remember(home: []const u8, p: Path) void {
@@ -92,7 +93,7 @@ pub fn resetSummary(o: ResetOutcome, buf: []u8) []const u8 {
     return "";
 }
 /// `shotlet permissions [reset [--dry-run]]`.
-pub fn permissionsCli(gpa: std.mem.Allocator, env: Env, args: []const []const u8) error{Unavailable}!void {
-    _ = .{ gpa, env, args };
+pub fn permissionsCli(gpa: std.mem.Allocator, env: Env, cmd: PermissionsCli) error{Unavailable}!void {
+    _ = .{ gpa, env, cmd };
     return error.Unavailable;
 }

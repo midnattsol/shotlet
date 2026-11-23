@@ -33,8 +33,11 @@ const shell_iface = "org.gnome.Shell.Extensions";
 
 /// XDG_CURRENT_DESKTOP names GNOME.
 pub fn isGnome() bool {
-    const d = std.mem.span(std.c.getenv("XDG_CURRENT_DESKTOP") orelse return false);
-    var it = std.mem.splitScalar(u8, d, ':');
+    return namesGnome(env_mod.xdg.current_desktop orelse return false);
+}
+
+fn namesGnome(desktops: []const u8) bool {
+    var it = std.mem.splitScalar(u8, desktops, ':');
     while (it.next()) |part| if (std.ascii.eqlIgnoreCase(part, "GNOME")) return true;
     return false;
 }
@@ -58,23 +61,39 @@ fn callShell(gpa: std.mem.Allocator, bus: *dbus.Connection, member: []const u8, 
     return bus.call(shell_dest, shell_path, shell_iface, member, "s", m.buf.items, timeout_ms);
 }
 
-/// GNOME Shell's view of the extension (org.gnome.Shell.Extensions
-/// state): 1 active, 2 inactive, 3 error, 4 out of date, 6 initialized,
-/// 99 unknown to it; null without GNOME Shell.
-pub fn shellState(gpa: std.mem.Allocator, bus: *dbus.Connection) ?u32 {
+/// GNOME Shell's view of the extension: org.gnome.Shell.Extensions'
+/// "state" (its ExtensionState numbers).
+pub const ShellState = enum(u32) {
+    active = 1,
+    inactive = 2,
+    failed = 3,
+    out_of_date = 4,
+    initialized = 6,
+    /// GNOME Shell does not know it (not installed, or installed since
+    /// it started)
+    unknown = 99,
+    _,
+
+    fn of(v: anytype) ShellState {
+        return @fromBackingInt(@intCast(@as(u32, @intCast(@max(0, v)))));
+    }
+};
+
+/// GNOME Shell's view of the extension; null without GNOME Shell.
+pub fn shellState(gpa: std.mem.Allocator, bus: *dbus.Connection) ?ShellState {
     var reply = callShell(gpa, bus, "GetExtensionInfo", 5000) catch return null;
     defer reply.deinit(gpa);
     var r = reply.reader();
     var it = r.readDictSV() catch return null;
     while (it.next() catch return null) |kv| {
         if (std.mem.eql(u8, kv.key, "state")) return switch (kv.value) {
-            .f64_ => |v| @intFromFloat(@max(0, v)),
-            .u32_ => |v| v,
-            .i32_ => |v| @intCast(@max(0, v)),
+            .f64_ => |v| .of(@as(i64, @intFromFloat(std.math.clamp(v, 0, std.math.maxInt(u32))))),
+            .u32_ => |v| @fromBackingInt(@intCast(v)),
+            .i32_ => |v| .of(v),
             else => null,
         };
     }
-    return 99; // an empty dict: not installed
+    return .unknown; // an empty dict
 }
 
 /// GNOME Shell's "path" for the extension (its schemas live there).
@@ -155,7 +174,7 @@ pub fn installExtension(gpa: std.mem.Allocator, env: Env, bus_opt: ?*dbus.Connec
         std.log.warn("GNOME Shell is not running here", .{});
         return .failed;
     }
-    if (state.? == 99) {
+    if (state.? == .unknown) {
         if (installRemote(gpa, bus)) |ok| {
             if (ok and waitActive(bus)) return .active;
         } else |err| std.log.info("extensions.gnome.org install not possible ({t}); using the bundled copy", .{err});
@@ -176,8 +195,7 @@ fn waitActive(bus: *dbus.Connection) bool {
     const end = sys.monoMs() + 2000;
     while (sys.monoMs() < end) {
         if (extensionActive(bus)) return true;
-        var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 100 * std.time.ns_per_ms };
-        _ = std.os.linux.nanosleep(&ts, null);
+        sys.sleepMs(100);
     }
     return false;
 }
@@ -191,4 +209,23 @@ test "the bundled extension declares the uuid and bus name we look for" {
     try std.testing.expect(std.mem.indexOf(u8, ext_schema, "id=\"" ++ ext_schema_id ++ "\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, ext_schema_compiled, ext_schema_id) != null);
     try std.testing.expect(std.mem.indexOf(u8, ext_js, "'--from-shell'") != null);
+}
+
+test "GNOME is told from XDG_CURRENT_DESKTOP" {
+    try std.testing.expect(namesGnome("GNOME"));
+    try std.testing.expect(namesGnome("ubuntu:GNOME"));
+    try std.testing.expect(namesGnome("gnome-classic:gnome"));
+    try std.testing.expect(!namesGnome("KDE"));
+    try std.testing.expect(!namesGnome("GNOME-Flashback-ish"));
+    try std.testing.expect(!namesGnome(""));
+    const saved = env_mod.xdg;
+    defer env_mod.xdg = saved;
+    env_mod.xdg = .read(struct {
+        pub fn get(_: @This(), name: []const u8) ?[]const u8 {
+            return if (std.mem.eql(u8, name, "XDG_CURRENT_DESKTOP")) "sway:GNOME" else null;
+        }
+    }{});
+    try std.testing.expect(isGnome());
+    env_mod.xdg = .{};
+    try std.testing.expect(!isGnome());
 }

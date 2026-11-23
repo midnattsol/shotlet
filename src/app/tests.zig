@@ -7,6 +7,7 @@ comptime {
     _ = @import("clock.zig");
     _ = @import("config.zig");
     _ = @import("deliver.zig");
+    _ = @import("dispatch.zig");
     _ = @import("editor_prefs.zig");
     _ = @import("env.zig");
     _ = @import("filename.zig");

@@ -4,14 +4,13 @@
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
-const transfer = @import("../../../ui/transfer.zig");
+const uri_mod = @import("../../../uri.zig");
 
 /// Ask the file manager to show `path`. Fire and forget: only a failure
 /// to send is an error.
 pub fn showItem(alloc: std.mem.Allocator, conn: *dbus.Connection, path: []const u8) !void {
-    const list = try transfer.fileUriList(alloc, path);
-    defer alloc.free(list);
-    const uri = std.mem.trimEnd(u8, list, "\r\n");
+    const uri = try uri_mod.fromFilePath(alloc, path);
+    defer alloc.free(uri);
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     const arr = try m.beginArray(4);

@@ -3,6 +3,7 @@
 const std = @import("std");
 const spec = @import("spec.zig");
 const Format = @import("../encode/sink.zig").Format;
+const fps = @import("../app/config/record.zig");
 
 const options = [_]spec.Option{
     .{ .long = "region", .value = "X,Y,W,H", .kind = .rect, .help = "Record this area (logical pixels) without the picker" },
@@ -10,7 +11,10 @@ const options = [_]spec.Option{
     .{ .long = "format", .value = "FORMAT", .kind = .choice, .choices = std.meta.fieldNames(Format), .help = "mp4 or gif (default: the settings' record_format, mp4)" },
     .{ .long = "gif", .help = "Record a GIF (the same as --format gif)" },
     .{ .long = "mp4", .help = "Record an MP4 (the same as --format mp4)" },
-    .{ .long = "fps", .value = "N", .kind = .int, .min = 1, .max = 60, .help = "Frames per second (MP4 15 to 60, GIF 10 to 30)" },
+    .{ .long = "fps", .value = "N", .kind = .int, .min = @min(fps.mp4_fps.min, fps.gif_fps.min), .max = @max(fps.mp4_fps.max, fps.gif_fps.max), .help = std.fmt.comptimePrint(
+        "Frames per second (MP4 {d} to {d}, GIF {d} to {d})",
+        .{ fps.mp4_fps.min, fps.mp4_fps.max, fps.gif_fps.min, fps.gif_fps.max },
+    ) },
     .{ .long = "seconds", .value = "N", .kind = .int, .min = 1, .max = 1 << 20, .help = "Stop after N seconds" },
     .{ .long = "out", .value = "FILE", .kind = .file, .help = "Write to FILE (default: in the Videos folder)" },
     .{ .long = "mic", .help = "Record the microphone" },

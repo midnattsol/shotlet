@@ -25,3 +25,13 @@ pub const ScrollSupport = enum {
     /// neither the shell integration nor direct capture here
     unsupported,
 };
+
+/// `shotlet permissions ...` as parsed: show where captures stand, or
+/// forget what they keep (src/cli/cmds_more.zig has its words).
+pub const PermissionsCli = union(enum) {
+    status,
+    reset: struct {
+        /// only list what would go
+        dry_run: bool = false,
+    },
+};

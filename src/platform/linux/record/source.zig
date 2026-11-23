@@ -12,6 +12,8 @@ const portal = @import("../portal.zig");
 const region = @import("../../../record/region.zig");
 const switches = @import("../../api/switches.zig");
 const rememberToken = @import("../capture/screencast.zig").rememberToken;
+const sys = @import("../sys.zig");
+const max_outputs = @import("../../api/window.zig").max_outputs;
 
 pub const Want = @import("../../api/record.zig").Want;
 
@@ -68,7 +70,11 @@ fn openPortal(gpa: std.mem.Allocator, bus: *dbus.Connection, home: []const u8, c
     };
     errdefer session.close(gpa, bus);
     if (session.start.restore_token) |t| rememberToken(gpa, home, cfg, t);
-    const pick = pickStream(session.start.streams, want.area) orelse return error.NoStream;
+    // the PipeWire fd is ours until Capture.open takes it
+    const pick = pickStream(session.start.streams, want.area) orelse {
+        sys.close(session.fd);
+        return error.NoStream;
+    };
     const cap = try pwstream.Capture.open(gpa, session.fd);
     std.log.info("recording: source ScreenCast portal (node {d}, monitor {d},{d} {d}x{d})", .{ pick.node, pick.rect.x, pick.rect.y, pick.rect.w, pick.rect.h });
     return .{ .ok = .{ .kind = .portal, .cap = cap, .node = pick.node, .stream_rect = pick.rect, .crop = want.area, .session = session } };
@@ -90,7 +96,7 @@ fn openSession(gpa: std.mem.Allocator, bus: *dbus.Connection, prev_token: ?[]con
 /// (the first stream is taken when none overlaps).
 fn pickStream(streams: []const portal.Stream, area: region.Rect) ?struct { node: u32, rect: region.Rect } {
     if (streams.len == 0) return null;
-    var rects: [16]region.Rect = undefined;
+    var rects: [max_outputs]region.Rect = undefined;
     const n = @min(streams.len, rects.len);
     for (streams[0..n], 0..) |s, i| {
         const pos = s.position orelse .{ 0, 0 };

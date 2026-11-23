@@ -8,7 +8,7 @@
 //! stays until closed: a recording is not glanced at like a screenshot.
 
 const std = @import("std");
-const transfer = @import("../ui/transfer.zig");
+const uri_mod = @import("../uri.zig");
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const history = @import("../app/history.zig");
@@ -183,7 +183,7 @@ const Quick = struct {
     }
 
     fn startDrag(self: *Quick) !void {
-        const uri = try transfer.fileUriList(self.gpa, self.info.path);
+        const uri = try uri_mod.fileUriList(self.gpa, self.info.path);
         errdefer self.gpa.free(uri);
         const poster = try history.readFile(self.gpa, self.root, self.id, .thumb);
         try self.drag.start(&self.win, poster, uri, null);

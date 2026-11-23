@@ -80,6 +80,7 @@ test {
     _ = @import("redact/tests.zig");
     _ = @import("ui/tests.zig");
     _ = @import("sync.zig");
+    _ = @import("uri.zig");
     _ = @import("optlib.zig");
     _ = @import("testutil.zig");
 }

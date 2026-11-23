@@ -15,9 +15,7 @@ const Env = env_mod.Env;
 
 const gnome_shot_keys = [_][]const u8{ "show-screenshot-ui", "screenshot", "screenshot-window", "show-screen-recording-ui" };
 
-fn out(comptime fmt: []const u8, args: anytype) void {
-    std.debug.print(fmt, args);
-}
+const out = @import("../../../cli/out.zig").say;
 
 /// The extension's settings key for shortcut `name` (mode.shortcuts).
 pub fn settingsKey(buf: []u8, name: []const u8) []const u8 {

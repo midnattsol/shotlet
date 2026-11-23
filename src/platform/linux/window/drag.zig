@@ -5,13 +5,22 @@ const std = @import("std");
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
-const transfer = @import("../../../ui/transfer.zig");
 
 const Window = window.Window;
 
 /// Progress of a drag started with startDrag().
 pub const DragState = window.DragState;
 pub const DragIcon = window.DragIcon;
+
+/// MIME types a dragged image offers, best first.
+pub const drag_mimes = [_][]const u8{ "image/png", "text/uri-list" };
+
+/// Which payload answers a request for `mime` (null: not offered).
+pub fn dragPayloadFor(mime: []const u8) ?enum { png, uri_list } {
+    if (std.mem.eql(u8, mime, "image/png")) return .png;
+    if (std.mem.eql(u8, mime, "text/uri-list")) return .uri_list;
+    return null;
+}
 
 pub const Drag = struct {
     /// wl_data_source of the drag; 0 when none
@@ -40,7 +49,7 @@ pub fn startDrag(w: *Window, idx: u8, png_data: []u8, uri_list: []u8, icon: ?Dra
     const c = &w.conn;
     const source = c.newId();
     try c.request(g.ddm, wl.wl_data_device_manager.create_data_source, &.{.{ .new_id = source }});
-    for (transfer.drag_mimes) |m| try c.request(source, wl.wl_data_source.offer, &.{.{ .string = m }});
+    for (drag_mimes) |m| try c.request(source, wl.wl_data_source.offer, &.{.{ .string = m }});
     if (g.ddm_version >= 3) try c.request(source, wl.wl_data_source.set_actions, &.{.{ .uint = wl.dnd_action_copy }});
     var icon_id: u32 = 0;
     if (icon) |ic| icon_id = makeIcon(w, ic) catch 0;
@@ -119,7 +128,7 @@ fn onSend(w: *Window, r: *wl.ArgReader) !void {
     const mime = try r.string();
     const fd = w.conn.takeFd() orelse return;
     defer sys.close(fd);
-    const data: []const u8 = switch (transfer.dragPayloadFor(mime) orelse return) {
+    const data: []const u8 = switch (dragPayloadFor(mime) orelse return) {
         .png => w.drag.png,
         .uri_list => w.drag.uri,
     };
@@ -153,4 +162,14 @@ pub fn endDrag(w: *Window) void {
     w.drag.png = &.{};
     w.drag.uri = &.{};
     w.drag_state = .none;
+}
+
+test "drag MIME types map to their payloads" {
+    const t = std.testing;
+    try t.expectEqual(.png, dragPayloadFor("image/png").?);
+    try t.expectEqual(.uri_list, dragPayloadFor("text/uri-list").?);
+    try t.expect(dragPayloadFor("text/plain") == null);
+    try t.expect(dragPayloadFor("image/png;x") == null);
+    try t.expect(dragPayloadFor("") == null);
+    for (drag_mimes) |m| try t.expect(dragPayloadFor(m) != null);
 }

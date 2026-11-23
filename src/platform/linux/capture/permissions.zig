@@ -15,21 +15,26 @@ const now_mod = @import("perms/now.zig");
 const store = @import("perms/store.zig");
 const reset = @import("perms/reset.zig");
 const app_id = @import("../../../app_id.zig").app_id;
+const cli_out = @import("../../../cli/out.zig");
+const Cli = @import("../../api/capture.zig").PermissionsCli;
 
-const out = std.debug.print;
+const out = cli_out.say;
 
-pub fn run(gpa: std.mem.Allocator, env: Env, args: []const []const u8) !void {
+pub fn run(gpa: std.mem.Allocator, env: Env, cmd: Cli) !void {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var bus_state: ?dbus.Connection = dbus.Connection.connectSession(gpa, env.session.bus) catch null;
     defer if (bus_state) |*b| b.deinit();
     const bus: ?*dbus.Connection = if (bus_state) |*b| b else null;
-    if (args.len > 0 and std.mem.eql(u8, args[0], "reset")) {
-        const dry = args.len > 1 and std.mem.eql(u8, args[1], "--dry-run");
-        return printReset(reset.run(arena, env, bus, dry), dry);
+    switch (cmd) {
+        .status => status(gpa, arena, env, bus),
+        .reset => |r| {
+            const o = reset.run(arena, env, bus, r.dry_run);
+            printReset(o, r.dry_run);
+            if (o.failed > 0) cli_out.exit(.failure);
+        },
     }
-    status(gpa, arena, env, bus);
 }
 
 fn status(gpa: std.mem.Allocator, arena: std.mem.Allocator, env: Env, bus: ?*dbus.Connection) void {
@@ -78,8 +83,8 @@ fn printReset(o: reset.Outcome, dry: bool) void {
             out("{s} a {s} permission of {s}{s}.\n", .{ verb, tableName(e.table), app, if (e.older()) " (an older version)" else "" });
         } else for (e.pick.apps) |a| out("{s} {s} from the {s} permission.\n", .{ verb, a, tableName(e.table) });
     }
-    if (o.store_error) |err| out("Could not read the portal permission store ({t}).\n", .{err});
-    if (o.failed > 0) out("Could not remove {d} of them (see the messages above).\n", .{o.failed});
+    if (o.store_error) |err| cli_out.warn("could not read the portal permission store ({t})", .{err});
+    if (o.failed > 0) cli_out.warn("could not remove {d} of them (see the messages above)", .{o.failed});
     if (o.nothing() and o.store_error == null) out("Nothing to remove.\n", .{});
     if (dry) {
         out("(dry run: nothing changed)\n", .{});

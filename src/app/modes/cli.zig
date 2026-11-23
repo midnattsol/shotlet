@@ -10,7 +10,7 @@ const shell = platform.shell;
 const env_mod = @import("../env.zig");
 const shot = @import("../shot.zig");
 const mode = @import("mode.zig");
-const settings = @import("settings.zig");
+const config = @import("../config.zig");
 const scroll_available = @import("../scroll/available.zig");
 const out = @import("../../cli/out.zig");
 const Parsed = @import("../../cli/parse.zig").Parsed;
@@ -21,7 +21,7 @@ fn gnomeExtension(gpa: std.mem.Allocator, env: env_mod.Env) bool {
 }
 
 pub fn run(gpa: std.mem.Allocator, env: env_mod.Env, p: *const Parsed) !void {
-    var req = request(p, settings.load(gpa, env.home).timer_s);
+    var req = request(p, config.load(gpa, env.home).modes.timer_s);
     if (req.mode == .window and !gnomeExtension(gpa, env)) {
         if (!shell.applies() and try platform.capture.captureWindow(gpa, env, req)) return;
         std.log.info("window capture: not offered here; selecting an area instead", .{});

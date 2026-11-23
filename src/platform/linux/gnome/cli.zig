@@ -12,39 +12,39 @@ const screenshot_keys = @import("screenshot_keys.zig");
 const setup = @import("setup.zig");
 const install_state = @import("install_state.zig");
 const gnome_keys = @import("mode_keys.zig");
+const cli_out = @import("../../../cli/out.zig");
+const Cli = @import("../../api/shell.zig").Cli;
 
 const ext_schema_id = extension.ext_schema_id;
-const out = std.debug.print;
+const out = cli_out.say;
 
-pub fn runCli(gpa: std.mem.Allocator, env: Env, sub: []const u8, rest: []const []const u8) !void {
+pub fn runCli(gpa: std.mem.Allocator, env: Env, cmd: Cli) !void {
     var bus = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer bus.deinit();
-    if (std.mem.eql(u8, sub, "install")) {
-        try runInstall(gpa, env, &bus, rest);
-    } else if (std.mem.eql(u8, sub, "uninstall")) {
-        try runUninstall(gpa, env, &bus);
-    } else if (std.mem.eql(u8, sub, "shortcut")) {
-        try runShortcut(gpa, env, &bus, rest);
-    } else {
-        runStatus(gpa, env, &bus);
+    switch (cmd) {
+        .status => runStatus(gpa, env, &bus),
+        .install => |how| runInstall(gpa, env, &bus, moveFor(how)),
+        .uninstall => try runUninstall(gpa, env, &bus),
+        .shortcut => |keys| try runShortcut(gpa, env, &bus, keys),
     }
 }
 
-fn runInstall(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, rest: []const []const u8) !void {
-    var move: setup.MoveShortcuts = .ask;
-    for (rest) |a| {
-        if (std.mem.eql(u8, a, "--move-shortcut")) move = .yes;
-        if (std.mem.eql(u8, a, "--keep-shortcut")) move = .no;
-    }
+/// What install does with the desktop's screenshot key.
+fn moveFor(how: Cli.Install) setup.MoveShortcuts {
+    return switch (how) {
+        .ask => .ask,
+        .move_shortcut => .yes,
+        .keep_shortcut => .no,
+    };
+}
+
+fn runInstall(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: setup.MoveShortcuts) void {
     switch (setup.install(gpa, env, bus, move)) {
         .active => out("GNOME integration is active: captures need no permission prompt.\n", .{}),
         .installed_relogin => out("Installed {s}. It loads at your next login (GNOME Shell only finds new\n" ++
             "extensions then). Shotlet finishes the setup with your answer the first time it\n" ++
             "runs through it; `shotlet gnome-integration install` after logging in does it at once.\n", .{extension.uuid}),
-        .failed => {
-            out("Could not install the GNOME integration (see the messages above).\n", .{});
-            return error.InstallFailed;
-        },
+        .failed => cli_out.fail(.failure, "could not install the GNOME integration (see the messages above)", .{}),
     }
 }
 
@@ -70,10 +70,10 @@ fn restoreTakenShortcuts(gpa: std.mem.Allocator, env: Env) void {
     defer arena_state.deinit();
     if (screenshot_keys.restoreKeys(arena_state.allocator(), env)) |n| {
         if (n > 0) out("Gave {d} of GNOME's screenshot shortcut(s) back.\n", .{n});
-    } else |err| out("Could not give GNOME's screenshot shortcuts back ({t}); see ~/.config/shotlet/gnome-moved-keys\n", .{err});
+    } else |err| cli_out.warn("could not give GNOME's screenshot shortcuts back ({t}); see ~/.config/shotlet/gnome-moved-keys", .{err});
     if (custom.restoreShortcuts(arena_state.allocator(), env)) |n| {
         if (n > 0) out("Put {d} custom shortcut(s) running shotlet back.\n", .{n});
-    } else |err| out("Could not put the moved shortcuts back ({t}); see ~/.config/shotlet/gnome-moved-shortcuts\n", .{err});
+    } else |err| cli_out.warn("could not put the moved shortcuts back ({t}); see ~/.config/shotlet/gnome-moved-shortcuts", .{err});
 }
 
 /// Show or set the capture shortcut, or a capture mode's own key.
@@ -115,4 +115,10 @@ fn runStatus(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) void {
     const info = capture.captureInfo(gpa, bus);
     out("capture: {s}\n", .{if (info.capture) "through the GNOME integration (no prompts)" else "through the screen-sharing portal"});
     capture.printShortcut(&info);
+}
+
+test "install's choice about the screenshot key reaches setup" {
+    try std.testing.expectEqual(setup.MoveShortcuts.ask, moveFor(.ask));
+    try std.testing.expectEqual(setup.MoveShortcuts.yes, moveFor(.move_shortcut));
+    try std.testing.expectEqual(setup.MoveShortcuts.no, moveFor(.keep_shortcut));
 }

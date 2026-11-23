@@ -12,6 +12,7 @@ const report = @import("report.zig");
 const sys = @import("../platform/api.zig").sys;
 const window = @import("../platform/api.zig").window;
 const imgload = @import("../gfx/imgload.zig");
+const uri = @import("../uri.zig");
 const pin = @import("pin.zig");
 const Env = env_mod.Env;
 
@@ -72,7 +73,7 @@ pub fn takeDrop(gpa: std.mem.Allocator, env: Env, win: *window.Window) void {
     if (win.drag_state != .none) return;
     var buf: env_mod.PathBuf = undefined;
     const path = if (std.mem.eql(u8, d.mime, "text/uri-list"))
-        imgload.firstFileUri(&buf, d.data) orelse return
+        uri.firstFilePath(&buf, d.data) orelse return
     else
         savedDrop(gpa, env, d.data, &buf) catch |err| {
             std.log.warn("drop: cannot keep the image: {t}", .{err});

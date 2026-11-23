@@ -18,7 +18,7 @@ const capture = @import("../../../app/capture.zig");
 const png = @import("../../../gfx/png.zig");
 const sys = @import("../sys.zig");
 
-pub const max_monitors = 16;
+const max_monitors = @import("../../api/window.zig").max_outputs;
 
 /// One monitor in the compositor's logical layout.
 pub const LogicalMonitor = struct {

@@ -33,7 +33,6 @@ comptime {
     _ = @import("permstore.zig");
     _ = @import("portal.zig");
     _ = @import("portal_test.zig");
-    _ = @import("uri.zig");
     _ = @import("pw.zig");
     _ = @import("gnome.zig");
     _ = @import("kde.zig");

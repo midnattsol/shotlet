@@ -53,23 +53,29 @@ pub fn watchAppearance(bus: *Session) !void {
 
 /// What the desktop sent since the last call, without waiting:
 /// appearance changes fold into `look` (true when it changed), and the
-/// answer to `dialog` is kept in it (Dialog.done()).
+/// answer to `dialog` is kept in it (Dialog.done(); a dialog left
+/// unanswered for portal.timeout_file_chooser_ms ends as a timeout).
 pub fn pump(bus: *Session, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*Dialog) bool {
-    const Pump = struct {
-        gpa: std.mem.Allocator,
+    // the dialog's own messages first (Request.step: the one wait path);
+    // the rest stays queued for the appearance
+    if (dialog) |d| if (!d.done()) {
+        _ = d.step(gpa, bus, portal.timeout_file_chooser_ms) catch |err| {
+            std.log.warn("file chooser: {t}", .{err});
+            d.outcome = .unavailable;
+        };
+    };
+    const Fold = struct {
         look: *Appearance,
-        dialog: ?*Dialog,
         changed: bool = false,
 
         fn take(self: *@This(), msg: *const dbus.Message) bool {
             if (appearance.applySignal(self.look, msg)) self.changed = true;
-            const r = self.dialog orelse return false;
-            return r.handle(self.gpa, msg) catch false;
+            return false;
         }
     };
-    var p: Pump = .{ .gpa = gpa, .look = look, .dialog = dialog };
-    bus.drain(16, &p, Pump.take);
-    return p.changed;
+    var f: Fold = .{ .look = look };
+    bus.drain(16, &f, Fold.take);
+    return f.changed;
 }
 
 /// Ask where to save a file (blocking); over `over` when given.
