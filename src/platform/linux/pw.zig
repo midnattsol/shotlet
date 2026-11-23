@@ -40,12 +40,9 @@ pub const Frame = capture.Frame;
 pub const Pre = grab.Pre;
 pub const preconnect = grab.preconnect;
 pub const connectDaemon = grab.connectDaemon;
-pub const discard = grab.discard;
 pub const teardown = grab.teardown;
 pub const max_nodes = grab.max_nodes;
 pub const grabNodes = grab.grabNodes;
-pub const grabPre = grab.grabPre;
-pub const grabFrame = grab.grabFrame;
 pub const grabFrames = grab.grabFrames;
 
 pub var lib: ?std.DynLib = null;

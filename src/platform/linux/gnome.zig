@@ -28,8 +28,6 @@
 //! shortcuts that run shotlet), screenshot_keys (GNOME's own screenshot
 //! keys), setup (install end to end) and cli.
 
-const std = @import("std");
-const dbus = @import("dbus.zig");
 const extension = @import("gnome/extension.zig");
 const capture = @import("gnome/capture.zig");
 const shell1 = @import("gnome/shell1.zig");
@@ -52,13 +50,6 @@ pub const InstallResult = extension.InstallResult;
 pub const InstallState = install_state.State;
 pub const installState = install_state.read;
 
-pub const CaptureRequest = shell1.CaptureRequest;
-/// Ask the extension to capture (it starts the editor itself).
-/// TODO(wave 2): drop the allocator once desktop/daemon.zig calls
-/// shell1.capture(bus).
-pub fn requestCapture(_: std.mem.Allocator, bus: *dbus.Connection) CaptureRequest {
-    return shell1.capture(bus);
-}
 pub const CaptureInfo = capture.CaptureInfo;
 pub const captureInfo = capture.captureInfo;
 

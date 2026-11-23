@@ -8,9 +8,7 @@ const png = @import("../../gfx/png.zig");
 const sys = @import("sys.zig");
 const dump = @import("window/dump.zig");
 const Env = @import("../../app/env.zig").Env;
-const pw = @import("pw.zig");
-const capture = @import("../../app/capture.zig");
-const stitchStreams = @import("capture/screencast.zig").stitchStreams;
+const screencast = @import("capture/screencast.zig");
 const text = @import("../../gfx/text.zig");
 const render = @import("../../gfx/render.zig");
 
@@ -63,48 +61,31 @@ fn testWindow(gpa: std.mem.Allocator, env: Env) !void {
 /// `test-grab`: ScreenCast + PipeWire, every monitor, stitched to a PNG.
 fn testGrab(gpa: std.mem.Allocator, env: Env) !void {
     var cfg = @import("../../app/config.zig").load(gpa, env.home);
-    var conn = try dbus.Connection.connectSession(gpa, env.session.bus);
-    defer conn.deinit();
-    portal.registerApp(gpa, &conn);
+    var bus = try dbus.Connection.connectSession(gpa, env.session.bus);
+    defer bus.deinit();
+    portal.registerApp(gpa, &bus);
     const t0 = sys.monoMs();
-    var sc = switch (try portal.openScreenCast(gpa, &conn, cfg.scToken())) {
+    var sc = switch (try portal.openScreenCast(gpa, &bus, .{ .restore_token = cfg.scToken() })) {
         .granted => |s| s,
         else => |o| {
             std.debug.print("screencast: {t}\n", .{o});
             return;
         },
     };
-    defer sc.deinit(gpa);
+    defer sc.close(gpa, &bus);
     const t1 = sys.monoMs();
-    if (sc.start.restore_token) |t| {
-        cfg.setScToken(t);
-        @import("../../app/config.zig").saveScreencastToken(gpa, env.home, t) catch {};
-    }
-    const streams = sc.start.streams[0..@min(sc.start.streams.len, pw.max_nodes)];
+    if (sc.start.restore_token) |t| screencast.rememberToken(gpa, env.home, &cfg, t);
     std.debug.print("session: streams={d} fd={d} portal={d}ms token={s}\n", .{
-        streams.len, sc.pw_fd, t1 - t0, if (sc.start.restore_token != null) "new" else "reused",
+        sc.start.streams.len, sc.fd, t1 - t0, if (sc.start.restore_token != null) "new" else "reused",
     });
-    var cap = try grabAndStitch(gpa, &conn, &sc, streams);
+    for (sc.start.streams) |st| std.debug.print("  node {d} position={any} size={any}\n", .{ st.node_id, st.position, st.size });
+    var cap = try screencast.grabStitched(gpa, &bus, &sc);
     defer cap.deinit(gpa);
     const t2 = sys.monoMs();
     std.debug.print("image: {d}x{d} grab+stitch={d}ms total={d}ms\n", .{ cap.image.width, cap.image.height, t2 - t1, t2 - t0 });
     const out = try png.encode(gpa, cap.image.pixels, cap.image.width, cap.image.height);
     defer gpa.free(out);
     try writeDebug(gpa, env, "shotlet-grab.png", out);
-}
-
-/// Grabs one frame of each stream, closes the session and stitches them.
-fn grabAndStitch(gpa: std.mem.Allocator, conn: *dbus.Connection, sc: *const portal.ScreenCastSession, streams: []const portal.Stream) !capture.Capture {
-    var ids: [pw.max_nodes]u32 = undefined;
-    for (streams, 0..) |st, i| {
-        ids[i] = st.node_id;
-        std.debug.print("  node {d} position={any} size={any}\n", .{ st.node_id, st.position, st.size });
-    }
-    var frames: [pw.max_nodes]pw.Frame = undefined;
-    try pw.grabFrames(sc.pw_fd, ids[0..streams.len], frames[0..streams.len], 5000);
-    defer for (frames[0..streams.len]) |*f| f.deinit();
-    portal.closeSession(gpa, conn, sc.session_path);
-    return stitchStreams(gpa, streams, frames[0..streams.len]);
 }
 
 /// `test-font`: renders sample text to a PNG; `test-font "line|line..."

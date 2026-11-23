@@ -1,6 +1,6 @@
 //! Where a scrolling capture's frames come from, and who scrolls:
 //!
-//! - GNOME: the Shotlet extension's scroll session (gnome/shell_bus.zig):
+//! - GNOME: the Shotlet extension's scroll session (gnome/shell1.zig):
 //!   it grabs the region, and turns the wheel there itself when asked to;
 //! - wlroots and KWin: direct capture of the outputs (capture/direct.zig),
 //!   cropped to the region; the wheel through inject_wl.zig when the
@@ -14,11 +14,12 @@ const env_mod = @import("../../../app/env.zig");
 const png = @import("../../../gfx/png.zig");
 const shellcap = @import("../gnome/shellcap.zig");
 const geom = @import("../../../app/modes/geom.zig");
-const shell_bus = @import("../gnome/shell_bus.zig");
+const shell1 = @import("../gnome/shell1.zig");
+const sys = @import("../sys.zig");
 const inject = @import("../wlroots/inject.zig");
 
 pub const Source = union(enum) {
-    shell: struct { session: shell_bus.Scroll, auto: bool },
+    shell: struct { session: shell1.Scroll, auto: bool },
     direct: struct { region: geom.Rect, logical: geom.Rect, wheel: ?inject.Wheel },
 
     /// Whether frames come after a scroll Shotlet makes (else the person
@@ -46,7 +47,7 @@ pub const Source = union(enum) {
     }
 };
 
-fn shellFrame(gpa: std.mem.Allocator, env: env_mod.Env, session: *shell_bus.Scroll, clicks: i32) !png.Image {
+fn shellFrame(gpa: std.mem.Allocator, env: env_mod.Env, session: *shell1.Scroll, clicks: i32) !png.Image {
     var idbuf: [64]u8 = undefined;
     const id = try session.step(clicks, &idbuf);
     var pbuf: [1200]u8 = undefined;
@@ -58,8 +59,7 @@ fn shellFrame(gpa: std.mem.Allocator, env: env_mod.Env, session: *shell_bus.Scro
 fn directFrame(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, region: geom.Rect, logical: geom.Rect, wheel: ?*inject.Wheel, clicks: i32) !png.Image {
     if (wheel) |w| if (clicks > 0) {
         try w.scroll(logical.x + @divTrunc(logical.w, 2), logical.y + @divTrunc(logical.h, 2), clicks);
-        var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 160 * std.time.ns_per_ms };
-        _ = std.os.linux.nanosleep(&ts, null);
+        sys.sleepMs(160);
     };
     var cap = switch (try direct.captureAll(gpa, env.runtime_dir, env.session.display, bus)) {
         .captured => |c| c.cap,
@@ -97,7 +97,7 @@ fn layoutBox(mons: []const capture.Monitor) geom.Rect {
 /// Start a session for the region (image pixels of `cap`).
 pub fn open(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, cap: *const capture.Capture, region: geom.Rect, shell: bool, auto: bool) !Source {
     const l = geom.imageToLogical(cap.monitors, region) orelse return error.RegionOffScreen;
-    if (shell) return .{ .shell = .{ .session = try shell_bus.Scroll.begin(gpa, bus, l.rect, auto), .auto = auto } };
+    if (shell) return .{ .shell = .{ .session = try shell1.Scroll.begin(gpa, bus, l.rect, auto), .auto = auto } };
     const wheel = if (auto) inject.Wheel.open(gpa, env.runtime_dir, env.session.display, layoutBox(cap.monitors)) catch null else null;
     return .{ .direct = .{ .region = region, .logical = l.rect, .wheel = wheel } };
 }

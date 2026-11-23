@@ -9,6 +9,7 @@ const std = @import("std");
 const dbus = @import("../dbus.zig");
 const gnome = @import("../gnome.zig");
 const direct = @import("direct.zig");
+const switches = @import("../../api/switches.zig");
 const Env = @import("../../../app/env.zig").Env;
 const ScrollSupport = @import("../../api/capture.zig").ScrollSupport;
 
@@ -46,7 +47,7 @@ pub fn support(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) ScrollSu
 /// Direct capture is offered (SHOTLET_NO_DIRECT turns it off, as for
 /// screen captures).
 fn directNow(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) bool {
-    if (std.c.getenv("SHOTLET_NO_DIRECT") != null) return false;
+    if (switches.get().no_direct) return false;
     return direct.probe(gpa, env.runtime_dir, env.session.display, bus) != null;
 }
 

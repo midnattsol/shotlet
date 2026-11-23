@@ -1,6 +1,7 @@
-//! org.freedesktop.portal.ScreenCast: a one-shot monitor capture session
-//! (create, select + start, open the PipeWire remote) and the streams it
-//! hands out.
+//! org.freedesktop.portal.ScreenCast: a session over every monitor
+//! (create, select + start, open the PipeWire remote), the streams it
+//! hands out, and its restore token. Screenshots keep one for a single
+//! grab, recordings for the whole recording.
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
@@ -12,6 +13,10 @@ const Result = request.Result;
 const notGranted = request.notGranted;
 const iface = "org.freedesktop.portal.ScreenCast";
 
+/// cursor_mode values (AvailableCursorModes is a mask of them)
+pub const cursor_hidden: u32 = 1;
+pub const cursor_embedded: u32 = 2;
+
 /// One captured monitor, as the portal describes it.
 pub const Stream = struct {
     node_id: u32,
@@ -22,50 +27,108 @@ pub const Stream = struct {
     source_type: u32 = 0,
 };
 
-pub const ScStart = struct {
+/// What Start started: the streams and a restore token.
+pub const Started = struct {
     streams: []Stream,
     /// new restore token to persist for silent future sessions (owned)
     restore_token: ?[]u8 = null,
 
-    pub fn deinit(self: *ScStart, alloc: std.mem.Allocator) void {
+    pub fn deinit(self: *Started, alloc: std.mem.Allocator) void {
         alloc.free(self.streams);
         if (self.restore_token) |t| alloc.free(t);
         self.* = undefined;
     }
 };
 
-pub const ScreenCastSession = struct {
-    session_path: []u8,
-    start: ScStart,
-    pw_fd: sys.fd_t,
+/// How SelectSources asks: every monitor, persisted until revoked.
+pub const SelectOptions = struct {
+    /// cursor_hidden for screenshots; recordings embed it when they can
+    /// (availableCursorModes)
+    cursor_mode: u32 = cursor_hidden,
+    /// a previous session's token: no picker while it still matches
+    restore_token: ?[]const u8 = null,
+};
 
-    pub fn deinit(self: *ScreenCastSession, alloc: std.mem.Allocator) void {
-        alloc.free(self.session_path);
+/// An open ScreenCast session.
+pub const Session = struct {
+    /// the portal's session object
+    path: []u8,
+    start: Started,
+    /// the PipeWire remote; whoever streams from it owns it
+    /// (pw.grabFrames, pwstream.Capture.open), never closed here
+    fd: sys.fd_t,
+    ended: bool = false,
+
+    /// Close the portal session (GNOME's screen-sharing indicator goes
+    /// away). Once; fire-and-forget.
+    pub fn end(self: *Session, bus: *dbus.Connection) void {
+        if (self.ended) return;
+        self.ended = true;
+        _ = bus.callMethod(request.bus_name, self.path, "org.freedesktop.portal.Session", "Close", "", &.{}) catch {};
+    }
+
+    /// end(), then free it.
+    pub fn close(self: *Session, alloc: std.mem.Allocator, bus: *dbus.Connection) void {
+        self.end(bus);
+        alloc.free(self.path);
         self.start.deinit(alloc);
-        // pw_fd ownership is transferred to the PipeWire client; not closed here
         self.* = undefined;
     }
 };
 
+/// Open a session over every monitor: create, select + start, open the
+/// PipeWire remote. With a valid restore token this is silent; otherwise
+/// the compositor shows its source picker (the choice is remembered).
+pub fn open(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: SelectOptions) !Result(Session) {
+    var session: Session = .{ .path = undefined, .start = undefined, .fd = -1 };
+    session.path = switch (try scCreateSession(alloc, bus)) {
+        .granted => |p| p,
+        else => |o| return notGranted(Session, o),
+    };
+    var started = false;
+    errdefer {
+        session.end(bus);
+        alloc.free(session.path);
+        if (started) session.start.deinit(alloc);
+    }
+    switch (try selectAndStart(alloc, bus, session.path, opts)) {
+        .granted => |st| session.start = st,
+        else => |o| {
+            session.end(bus);
+            alloc.free(session.path);
+            return notGranted(Session, o);
+        },
+    }
+    started = true;
+    session.fd = try scOpenRemote(alloc, bus, session.path);
+    return .{ .granted = session };
+}
+
+/// The cursor modes the portal offers (a mask of cursor_*); 0 when it
+/// does not say.
+pub fn availableCursorModes(bus: *dbus.Connection) u32 {
+    var prop = bus.getProperty(request.bus_name, request.object_path, iface, "AvailableCursorModes", 2000) catch return 0;
+    defer prop.deinit(bus.alloc);
+    return switch (prop.value) {
+        .u32_ => |x| x,
+        else => 0,
+    };
+}
+
+// --- the stages (open() runs them; portal_test.zig drives them one by one)
+
 /// Stage 1: create a ScreenCast session. Returns the session path (owned).
-pub fn scCreateSession(alloc: std.mem.Allocator, conn: *dbus.Connection) !Result([]u8) {
+pub fn scCreateSession(alloc: std.mem.Allocator, bus: *dbus.Connection) !Result([]u8) {
     var tok_buf: [64]u8 = undefined;
     var stok_buf: [64]u8 = undefined;
-    const tok = try request.makeToken(&tok_buf, "shotlet_r");
-    const stok = try request.makeToken(&stok_buf, "shotlet_s");
-
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
-    const arr = try m.beginArray(8);
-    try m.beginStruct();
-    try m.putString("handle_token");
-    try m.putVariantString(tok);
-    try m.beginStruct();
-    try m.putString("session_handle_token");
-    try m.putVariantString(stok);
-    m.endArray(arr);
+    const opts = try m.beginDict();
+    const tok = try opts.token("handle_token", &tok_buf, "shotlet_r");
+    _ = try opts.token("session_handle_token", &stok_buf, "shotlet_s");
+    opts.end();
 
-    var req = try request.call(alloc, conn, iface, "CreateSession", "a{sv}", m.buf.items, tok, request.timeout_quick_ms);
+    var req = try request.call(alloc, bus, iface, "CreateSession", "a{sv}", m.buf.items, tok, request.timeout_quick_ms);
     defer req.deinit(alloc);
     if (req.outcome.? != .granted) return notGranted([]u8, req.outcome.?);
     var r = try req.results();
@@ -79,81 +142,65 @@ pub fn scCreateSession(alloc: std.mem.Allocator, conn: *dbus.Connection) !Result
     return error.NoSessionHandle;
 }
 
-/// Stage 2: get the PipeWire socket fd for a started session.
-pub fn scOpenRemote(alloc: std.mem.Allocator, conn: *dbus.Connection, session_path: []const u8) !sys.fd_t {
+/// Stage 3: get the PipeWire socket fd for a started session.
+pub fn scOpenRemote(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !sys.fd_t {
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     try m.putObjectPath(session_path);
-    const arr = try m.beginArray(8);
-    m.endArray(arr);
-    const serial = try conn.callMethod(request.bus_name, request.object_path, iface, "OpenPipeWireRemote", "oa{sv}", m.buf.items);
-    var reply = try conn.waitReplyTimeout(serial, request.timeout_quick_ms);
+    (try m.beginDict()).end();
+    var reply = try bus.call(request.bus_name, request.object_path, iface, "OpenPipeWireRemote", "oa{sv}", m.buf.items, request.timeout_quick_ms);
     defer reply.deinit(alloc);
     return reply.takeFd() orelse error.NoPipeWireFd;
 }
 
-/// Stage 3: select monitor sources (all of them, so the whole desktop is
-/// one capture) and start the cast. GNOME shows its picker here unless the
-/// restore token still matches.
-pub fn scSelectAndStart(alloc: std.mem.Allocator, conn: *dbus.Connection, session_path: []const u8, prev_token: ?[]const u8) !Result(ScStart) {
-    const selected = try selectSources(alloc, conn, session_path, prev_token);
-    if (selected != .granted) return notGranted(ScStart, selected);
-    return startCast(alloc, conn, session_path);
+/// Stage 2 as screenshots ask: select every monitor, cursor hidden, and
+/// start the cast. GNOME shows its picker here unless `prev_token` still
+/// matches.
+pub fn scSelectAndStart(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, prev_token: ?[]const u8) !Result(Started) {
+    return selectAndStart(alloc, bus, session_path, .{ .restore_token = prev_token });
 }
 
-/// SelectSources: every monitor, cursor hidden, the choice persisted
-/// until revoked (and restored from `prev_token` when given).
-fn selectSources(alloc: std.mem.Allocator, conn: *dbus.Connection, session_path: []const u8, prev_token: ?[]const u8) !Outcome {
+fn selectAndStart(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, opts: SelectOptions) !Result(Started) {
+    const selected = try selectSources(alloc, bus, session_path, opts);
+    if (selected != .granted) return notGranted(Started, selected);
+    return startCast(alloc, bus, session_path);
+}
+
+/// SelectSources: every monitor (so the whole desktop is one capture),
+/// the choice persisted until revoked.
+fn selectSources(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, opts: SelectOptions) !Outcome {
     var tok_buf: [64]u8 = undefined;
-    const tok = try request.makeToken(&tok_buf, "shotlet_r");
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     try m.putObjectPath(session_path);
-    const arr = try m.beginArray(8);
-    try m.beginStruct();
-    try m.putString("handle_token");
-    try m.putVariantString(tok);
-    try m.beginStruct();
-    try m.putString("types");
-    try m.putVariantU32(1); // MONITOR
-    try m.beginStruct();
-    try m.putString("multiple");
-    try m.putVariantBool(true);
-    try m.beginStruct();
-    try m.putString("cursor_mode");
-    try m.putVariantU32(1); // HIDDEN
-    try m.beginStruct();
-    try m.putString("persist_mode");
-    try m.putVariantU32(2); // until revoked
-    if (prev_token) |t| {
-        try m.beginStruct();
-        try m.putString("restore_token");
-        try m.putVariantString(t);
-    }
-    m.endArray(arr);
+    const d = try m.beginDict();
+    const tok = try d.token("handle_token", &tok_buf, "shotlet_r");
+    try d.entry("types", @as(u32, 1)); // MONITOR
+    try d.entry("multiple", true);
+    try d.entry("cursor_mode", opts.cursor_mode);
+    try d.entry("persist_mode", @as(u32, 2)); // until revoked
+    if (opts.restore_token) |t| try d.entry("restore_token", t);
+    d.end();
 
-    var req = try request.call(alloc, conn, iface, "SelectSources", "oa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
+    var req = try request.call(alloc, bus, iface, "SelectSources", "oa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
     defer req.deinit(alloc);
     return req.outcome.?;
 }
 
 /// Start the cast and parse what it started.
-fn startCast(alloc: std.mem.Allocator, conn: *dbus.Connection, session_path: []const u8) !Result(ScStart) {
+fn startCast(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !Result(Started) {
     var tok_buf: [64]u8 = undefined;
-    const tok = try request.makeToken(&tok_buf, "shotlet_r");
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     try m.putObjectPath(session_path);
     try m.putString(""); // parent window
-    const arr = try m.beginArray(8);
-    try m.beginStruct();
-    try m.putString("handle_token");
-    try m.putVariantString(tok);
-    m.endArray(arr);
+    const d = try m.beginDict();
+    const tok = try d.token("handle_token", &tok_buf, "shotlet_r");
+    d.end();
 
-    var req = try request.call(alloc, conn, iface, "Start", "osa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
+    var req = try request.call(alloc, bus, iface, "Start", "osa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
     defer req.deinit(alloc);
-    if (req.outcome.? != .granted) return notGranted(ScStart, req.outcome.?);
+    if (req.outcome.? != .granted) return notGranted(Started, req.outcome.?);
     var r = try req.results();
     return .{ .granted = try parseStartResults(alloc, &r) };
 }
@@ -161,7 +208,7 @@ fn startCast(alloc: std.mem.Allocator, conn: *dbus.Connection, session_path: []c
 /// Parse the a{sv} results of ScreenCast.Start: every stream with its node
 /// id, logical position and size, and the restore token. Values with an
 /// unexpected signature are skipped, never misread.
-pub fn parseStartResults(alloc: std.mem.Allocator, r: *dbus.Reader) !ScStart {
+pub fn parseStartResults(alloc: std.mem.Allocator, r: *dbus.Reader) !Started {
     var streams: std.ArrayList(Stream) = .empty;
     errdefer streams.deinit(alloc);
     var token: ?[]u8 = null;
@@ -222,39 +269,6 @@ fn parseStream(r: *dbus.Reader) !Stream {
     return st;
 }
 
-/// Open a ScreenCast session for monitor capture: create, select + start,
-/// and open the PipeWire remote. With a valid restore token this is fully
-/// silent; otherwise the compositor shows its source picker (persist_mode=2
-/// remembers the choice).
-pub fn openScreenCast(alloc: std.mem.Allocator, conn: *dbus.Connection, prev_token: ?[]const u8) !Result(ScreenCastSession) {
-    const session_path = switch (try scCreateSession(alloc, conn)) {
-        .granted => |p| p,
-        else => |o| return notGranted(ScreenCastSession, o),
-    };
-    errdefer {
-        closeSession(alloc, conn, session_path);
-        alloc.free(session_path);
-    }
-    var started = switch (try scSelectAndStart(alloc, conn, session_path, prev_token)) {
-        .granted => |st| st,
-        else => |o| {
-            closeSession(alloc, conn, session_path);
-            alloc.free(session_path);
-            return notGranted(ScreenCastSession, o);
-        },
-    };
-    errdefer started.deinit(alloc);
-    const pw_fd = try scOpenRemote(alloc, conn, session_path);
-    return .{ .granted = .{ .session_path = session_path, .start = started, .pw_fd = pw_fd } };
-}
-
-/// Close a portal session (stops GNOME's screen-sharing indicator).
-/// Fire-and-forget: the call is flushed but the reply is not awaited.
-pub fn closeSession(alloc: std.mem.Allocator, conn: *dbus.Connection, session_path: []const u8) void {
-    _ = alloc;
-    _ = conn.callMethod(request.bus_name, session_path, "org.freedesktop.portal.Session", "Close", "", &.{}) catch return;
-}
-
 fn putStream(m: *dbus.Marshal, node: u32, pos: ?[2]i32, size: ?[2]i32) !void {
     try m.beginStruct();
     try m.putU32(node);
@@ -275,12 +289,8 @@ fn putStream(m: *dbus.Marshal, node: u32, pos: ?[2]i32, size: ?[2]i32) !void {
         try m.putI32(sz[0]);
         try m.putI32(sz[1]);
     }
-    try m.beginStruct();
-    try m.putString("source_type");
-    try m.putVariantU32(1);
-    try m.beginStruct();
-    try m.putString("id");
-    try m.putVariantString("monitor-x");
+    try m.putEntry("source_type", @as(u32, 1));
+    try m.putEntry("id", "monitor-x");
     m.endArray(props);
 }
 
@@ -297,12 +307,10 @@ pub fn startResponseBody(m: *dbus.Marshal, code: u32, token_sig: []const u8) !vo
     try putStream(m, 42, .{ 1280, -100 }, .{ 1600, 900 });
     try putStream(m, 43, null, null);
     m.endArray(streams);
-    try m.beginStruct();
-    try m.putString("restore_token");
     if (std.mem.eql(u8, token_sig, "s")) {
-        try m.putVariantString("tok-1");
+        try m.putEntry("restore_token", "tok-1");
     } else {
-        try m.putVariantU32(5);
+        try m.putEntry("restore_token", @as(u32, 5));
     }
     m.endArray(dict);
 }

@@ -16,6 +16,8 @@ const capture = @import("../../../app/capture.zig");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const gnome = @import("../gnome.zig");
+const shell1 = @import("../gnome/shell1.zig");
+const kde = @import("../kde.zig");
 const geom = @import("../../../app/modes/geom.zig");
 const env_mod = @import("../../../app/env.zig");
 const kwin = @import("../kde/winrects.zig");
@@ -28,10 +30,10 @@ pub const max_windows = 64;
 
 /// The windows of capture `cap` (owned, maybe empty). `shell_id`: the
 /// GNOME extension's capture id when it took the capture.
-pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, conn: *dbus.Connection, cap: *const capture.Capture, shell_id: ?[]const u8) []Rect {
+pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, cap: *const capture.Capture, shell_id: ?[]const u8) []Rect {
     var logical: [max_windows * 4]i32 = undefined;
     const t0 = sys.monoMs();
-    const flat = if (shell_id) |id| fromGnome(gpa, conn, id, &logical) else if (isKwin(conn)) kwin.fetch(gpa, env, conn, &logical) else return &.{};
+    const flat = if (shell_id) |id| shell1.captureWindows(bus, id, &logical) else if (kde.kwinRunning(bus)) kwin.fetch(gpa, env, bus, &logical) else return &.{};
     const out = toImage(gpa, cap.monitors, flat) catch return &.{};
     std.log.info("windows: {d} where the capture was taken ({d}ms)", .{ out.len, sys.monoMs() - t0 });
     return out;
@@ -39,37 +41,8 @@ pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, conn: *dbus.Connection, c
 
 /// Whether a window capture (`shotlet window`) can pick a window here:
 /// with the GNOME extension or on KWin (else it falls back to an area).
-pub fn windowCapture(conn: *dbus.Connection) bool {
-    return (gnome.isGnome() and gnome.extensionActive(conn)) or isKwin(conn);
-}
-
-fn isKwin(conn: *dbus.Connection) bool {
-    return conn.nameHasOwner("org.kde.KWin") catch false;
-}
-
-/// CaptureWindows(id) of the extension: [x, y, w, h, ...] logical, into
-/// `out`; empty when the extension is older or refuses.
-fn fromGnome(gpa: std.mem.Allocator, conn: *dbus.Connection, id: []const u8, out: []i32) []const i32 {
-    var m = dbus.Marshal.init(gpa);
-    defer m.deinit();
-    m.putString(id) catch return &.{};
-    const serial = conn.callMethod(gnome.bus_name, "/dev/shotlet/Shell1", "dev.shotlet.Shell1", "CaptureWindows", "s", m.buf.items) catch return &.{};
-    var reply = conn.waitReplyOrError(serial, 1000) catch return &.{};
-    defer reply.deinit(gpa);
-    if (reply.type == .@"error") {
-        std.log.info("windows: the GNOME integration has none to give ({s})", .{reply.error_name orelse "?"});
-        return &.{};
-    }
-    var r = reply.reader();
-    return readInts(&r, out) catch &.{};
-}
-
-/// An `ai` array into `out` (whole rectangles only, the topmost ones).
-fn readInts(r: *dbus.Reader, out: []i32) ![]const i32 {
-    const bytes = try r.readU32();
-    const n = @min(bytes / 4, out.len) / 4 * 4;
-    for (out[0..n]) |*v| v.* = @bitCast(try r.readU32());
-    return out[0..n];
+pub fn windowCapture(bus: *dbus.Connection) bool {
+    return gnome.integrationActive(bus) or kde.kwinRunning(bus);
 }
 
 /// Logical frames to image rectangles: each over every monitor it shows

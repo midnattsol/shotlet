@@ -13,12 +13,12 @@ const render = @import("../../../gfx/render.zig");
 /// First-run consent: open a small focused window, re-request the screenshot
 /// so GNOME can show its permission dialog, then recapture once granted.
 /// Null when the person closes the window.
-pub fn permissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?[]u8 {
+pub fn permissionFlow(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) !?[]u8 {
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = false, .width = 640, .height = 220 });
 
-    var dlg: Dialog = .{ .gpa = gpa, .win = &win, .conn = conn };
+    var dlg: Dialog = .{ .gpa = gpa, .win = &win, .bus = bus };
     defer if (dlg.pending) |*p| p.deinit(gpa);
     const uri = (try dlg.waitForGrant()) orelse return null;
     defer gpa.free(uri);
@@ -28,9 +28,8 @@ pub fn permissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) 
     gpa.free(tainted);
     win.closeWindow();
     // give the compositor a moment to unmap our window
-    var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 400 * std.time.ns_per_ms };
-    _ = std.os.linux.nanosleep(&ts, null);
-    return switch (try portal.screenshot(gpa, conn, false, portal.timeout_dialog_ms)) {
+    sys.sleepMs(400);
+    return switch (try portal.screenshot(gpa, bus, false, portal.timeout_dialog_ms)) {
         .granted => |d| d,
         .cancelled => null,
         else => error.NoScreenshotPortal,
@@ -41,34 +40,34 @@ pub fn permissionFlow(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) 
 const Dialog = struct {
     gpa: std.mem.Allocator,
     win: *window.Window,
-    conn: *dbus.Connection,
+    bus: *dbus.Connection,
     pending: ?portal.Request = null,
     status: []const u8 = "Press Enter to request it",
     hint_logged: bool = false,
 
-    /// What a bus message did to the request.
+    /// What the bus did to the request.
     const BusStep = union(enum) { wait, cancel, granted: []u8 };
 
     /// Pumps both Wayland and DBus until the portal grants a screenshot
-    /// (its URI, owned) or the person cancels (null).
+    /// (its URI, owned) or the person cancels (null). The bus is only
+    /// read while a request is in flight.
     fn waitForGrant(d: *Dialog) !?[]u8 {
         while (true) {
             if (!d.win.frame_pending and d.win.width > 0) try d.draw();
             try d.win.conn.flush();
             var fds = [_]sys.pollfd{
                 .{ .fd = d.win.conn.fd, .events = sys.POLL.IN, .revents = 0 },
-                .{ .fd = d.conn.fd, .events = sys.POLL.IN, .revents = 0 },
+                .{ .fd = d.bus.fd, .events = sys.POLL.IN, .revents = 0 },
             };
-            _ = try sys.poll(&fds, 200);
+            _ = try sys.poll(fds[0..if (d.pending != null) 2 else 1], 200);
             if (fds[0].revents != 0 or d.win.queue.items.len > 0) {
                 if (!try d.pumpWindow()) return null;
             }
-            if (fds[1].revents != 0 or d.conn.hasPending()) {
-                switch (try d.pumpBus()) {
-                    .wait => {},
-                    .cancel => return null,
-                    .granted => |uri| return uri,
-                }
+            const req = if (d.pending) |*p| p else continue;
+            switch (try d.pumpBus(req)) {
+                .wait => {},
+                .cancel => return null,
+                .granted => |uri| return uri,
             }
         }
     }
@@ -95,7 +94,7 @@ const Dialog = struct {
                 if (!k.pressed) continue;
                 if (k.code == .escape) return false;
                 if (k.code == .enter and d.pending == null) {
-                    d.pending = try portal.beginScreenshot(d.gpa, d.conn, false);
+                    d.pending = try portal.beginScreenshot(d.gpa, d.bus, false);
                     d.status = "Waiting for the system dialog...";
                 }
             },
@@ -105,26 +104,15 @@ const Dialog = struct {
         return true;
     }
 
-    /// Reads one bus message and feeds it to the pending request.
-    fn pumpBus(d: *Dialog) !BusStep {
-        const gpa = d.gpa;
-        var msg = d.conn.nextMessage() catch |err| {
-            if (dbus.isFatal(err)) return err;
-            return .wait;
-        };
-        // without an in-flight request, unrelated bus traffic is drained
-        // and discarded so poll() never spins on an unread socket
-        const req = if (d.pending) |*p| p else {
-            msg.deinit(gpa);
-            return .wait;
-        };
-        const kept = req.handle(gpa, &msg) catch false;
-        if (!kept) msg.deinit(gpa);
-        const outcome = req.outcome orelse return .wait;
+    /// Feeds what the bus sent to the pending request (Request.step,
+    /// with its deadlines).
+    fn pumpBus(d: *Dialog, req: *portal.Request) !BusStep {
+        const outcome = (try req.step(d.gpa, d.bus, portal.timeout_dialog_ms)) orelse return .wait;
         switch (outcome) {
-            .granted => return .{ .granted = try gpa.dupe(u8, try portal.screenshotUri(req)) },
-            .cancelled => return .cancel,
-            .unavailable, .timeout => return error.NoScreenshotPortal,
+            .granted => return .{ .granted = try d.gpa.dupe(u8, try portal.screenshotUri(req)) },
+            // nobody answered the system dialog: end quietly, as a cancel
+            .cancelled, .timeout => return .cancel,
+            .unavailable => return error.NoScreenshotPortal,
             .denied => {
                 d.onDenied();
                 return .wait;
