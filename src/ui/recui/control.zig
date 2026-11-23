@@ -17,7 +17,10 @@ const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../../app/env.zig");
 const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/api.zig").window;
-const fui = @import("../floatui.zig");
+const floatwin = @import("../floatwin.zig");
+const press = @import("../press.zig");
+const scale = @import("../scale.zig");
+const theme = @import("../theme.zig");
 const text = @import("../../gfx/text.zig");
 const region = @import("../../record/region.zig");
 const engine_mod = @import("../../record/engine.zig");
@@ -36,6 +39,7 @@ pub const Control = struct {
     covers_monitor: bool = false,
     layer: bool,
     hover: ?draw.Button = null,
+    pressed: press.Press(draw.Button) = .{},
     dirty: bool = true,
     state: draw.State = .{},
     last_draw_ms: i64 = 0,
@@ -48,26 +52,19 @@ pub const Control = struct {
         const mon = monitorOf(&c.win, area);
         c.pos = place(area, mon);
         c.covers_monitor = inside(area, mon);
-        c.layer = c.win.hasLayerShell();
-        const sz = draw.windowSize();
+        c.state.th = theme.load(gpa, env, 300);
         // on GNOME the extension reads where to put it from the title
         var tbuf: [48]u8 = undefined;
         const title = std.fmt.bufPrint(&tbuf, "shotlet:rec:{d}:{d}", .{ c.pos[0], c.pos[1] }) catch "shotlet:rec";
-        if (c.layer) {
-            try c.win.open(title, .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1], .layer = .{
-                .anchor = .{ .top = true, .left = true },
-                .width = sz[0],
-                .height = sz[1],
-                .margin = .{ c.pos[1] - mon.y, 0, 0, c.pos[0] - mon.x },
-                .keyboard = .none,
-                .namespace = "shotlet-rec",
-            } });
-        } else {
-            try c.win.open(title, .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1] });
-        }
-        c.win.report_leave = true;
-        c.win.setCursor(.arrow) catch {};
-        try c.win.setInputRegion(0, &.{draw.pillRect()});
+        c.layer = try floatwin.open(&c.win, .{
+            .title = title,
+            .namespace = "shotlet-rec",
+            .size = draw.windowSize(),
+            .anchor = .{ .top = true, .left = true },
+            .margin = .{ c.pos[1] - mon.y, 0, 0, c.pos[0] - mon.x },
+        });
+        const pill = draw.pillRect();
+        try c.win.setInputRegion(0, &.{.{ .x = pill.x, .y = pill.y, .w = pill.w, .h = pill.h }});
         return c;
     }
 
@@ -84,8 +81,10 @@ pub const Control = struct {
         return self.win.pollTimeoutMs(if (self.state.mode == .recording) 250 else 100);
     }
 
-    fn scale(self: *const Control) f64 {
-        return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
+    /// The button under a pointer position (physical px).
+    fn hitAt(self: *const Control, x: f64, y: f64) ?draw.Button {
+        const k = scale.of(self.win.scale120);
+        return draw.hit(scale.toLogical(x, k), scale.toLogical(y, k), self.state.mode);
     }
 
     /// Count down `seconds`; false when cancelled (× or a stop or discard
@@ -130,20 +129,23 @@ pub const Control = struct {
         return null;
     }
 
-    /// Window events; the button clicked, if any.
+    /// Window events; the button clicked (pressed and released over it),
+    /// if any.
     fn pump(self: *Control) ?draw.Button {
         var clicked: ?draw.Button = null;
         while (self.win.nextEventTimeout(0) catch null) |ev| {
             switch (ev) {
                 .resize, .frame_done => self.dirty = true,
                 .pointer_motion => |m| {
-                    const h = draw.hit(m.x / self.scale(), m.y / self.scale(), self.state.mode);
+                    const h = self.hitAt(m.x, m.y);
                     if (h != self.hover) self.dirty = true;
                     self.hover = h;
                 },
-                .pointer_button => |b| if (b.button == .left and !b.pressed) {
-                    clicked = draw.hit(b.x / self.scale(), b.y / self.scale(), self.state.mode);
-                    if (clicked == null and self.state.mode == .countdown) clicked = .skip;
+                .pointer_button => |b| if (b.button == .left) {
+                    const h = self.hitAt(b.x, b.y);
+                    if (b.pressed) self.pressed.down(h, b.x, b.y) else if (self.pressed.up(h)) |c| {
+                        clicked = c;
+                    }
                 },
                 .close => clicked = .stop,
                 else => {},
@@ -156,16 +158,15 @@ pub const Control = struct {
         const now = sys.monoMs();
         // the dot pulses: a frame every quarter second while recording
         if (self.state.mode == .recording and now - self.last_draw_ms >= 250) self.dirty = true;
-        if (!self.dirty or self.win.frame_pending or self.win.width == 0) return;
+        if (!self.dirty or !floatwin.canDraw(&self.win)) return;
         self.dirty = false;
         self.last_draw_ms = now;
         const px = try self.win.backBuffer();
         @memset(px, 0);
         self.state.hover = self.hover;
         self.state.pulse = @mod(now, 1000) < 500;
-        draw.paint(self.gpa, px, self.win.width, self.win.height, self.scale(), &self.state);
-        fui.premultiply(px, self.win.width, self.win.height, .{ .x = 0, .y = 0, .w = @intCast(self.win.width), .h = @intCast(self.win.height) });
-        try self.win.present();
+        draw.paint(self.gpa, px, self.win.width, self.win.height, scale.of(self.win.scale120), &self.state);
+        try floatwin.presentStraight(&self.win, px);
     }
 };
 
@@ -182,34 +183,34 @@ fn monitorOf(win: *window.Window, area: region.Rect) region.Rect {
     return rects[i];
 }
 
-/// Top-left of the control window: centred under the area, else above
-/// it, else inside its bottom edge; on the area's monitor.
+/// Top-left of the control window: the pill centred `gap` under the
+/// area, else above it, else inside its bottom edge; the window on the
+/// area's monitor.
 pub fn place(area: region.Rect, mon: region.Rect) [2]i32 {
     const sz = draw.windowSize();
     const w: i32 = @intCast(sz[0]);
     const h: i32 = @intCast(sz[1]);
-    const gap = 2;
+    const pill = draw.pillRect();
+    const gap = 18;
     const x = std.math.clamp(area.x + @divTrunc(area.w - w, 2), mon.x, @max(mon.x, mon.right() - w));
-    var y = area.bottom() + gap;
-    if (y + h > mon.bottom()) y = area.y - gap - h;
-    if (y < mon.y) y = area.bottom() - h - 16;
-    return .{ x, std.math.clamp(y, mon.y, @max(mon.y, mon.bottom() - h)) };
+    var py = area.bottom() + gap;
+    if (py + pill.h + pill.y > mon.bottom()) py = area.y - gap - pill.h;
+    if (py - pill.y < mon.y) py = area.bottom() - pill.h - 32;
+    return .{ x, std.math.clamp(py - pill.y, mon.y, @max(mon.y, mon.bottom() - h)) };
 }
 
 /// Whether the control would sit inside the area (it would be recorded).
 pub fn inside(area: region.Rect, mon: region.Rect) bool {
     const p = place(area, mon);
-    const sz = draw.windowSize();
     const pill = draw.pillRect();
     const r: region.Rect = .{ .x = p[0] + pill.x, .y = p[1] + pill.y, .w = pill.w, .h = pill.h };
-    _ = sz;
     return r.intersect(area) != null;
 }
 
 test "the control goes under the area, else above, else inside" {
     const mon: region.Rect = .{ .x = 0, .y = 0, .w = 1600, .h = 900 };
     const below = place(.{ .x = 100, .y = 100, .w = 400, .h = 300 }, mon);
-    try std.testing.expect(below[1] >= 400 - 20);
+    try std.testing.expectEqual(@as(i32, 400 + 18), below[1] + draw.pillRect().y);
     try std.testing.expect(!inside(.{ .x = 100, .y = 100, .w = 400, .h = 300 }, mon));
     const above = place(.{ .x = 100, .y = 500, .w = 400, .h = 395 }, mon);
     try std.testing.expect(above[1] < 500);

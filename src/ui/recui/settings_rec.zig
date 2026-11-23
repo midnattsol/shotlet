@@ -8,6 +8,7 @@ const settings = @import("../settings.zig");
 const theme_mod = @import("../theme.zig");
 const rs = @import("../../record/settings.zig");
 const shell = @import("../../platform/api.zig").shell;
+const env_mod = @import("../../app/env.zig");
 
 pub const Hit = enum(u8) {
     fmt_minus,
@@ -33,7 +34,7 @@ fn h(x: Hit) settings.Hit {
 }
 
 fn home() []const u8 {
-    return if (std.c.getenv("HOME")) |p| std.mem.span(p) else "/";
+    return env_mod.xdg.home orelse "/";
 }
 
 const fps_steps = [_]u32{ 15, 24, 30, 60 };

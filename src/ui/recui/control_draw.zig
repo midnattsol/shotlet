@@ -1,5 +1,6 @@
-//! Layout and drawing of the recording control (control.zig): a dark
-//! Glass pill, in logical pixels, scaled when painted.
+//! Layout and drawing of the recording control (control.zig): an opaque
+//! pill in the desktop's light or dark look (theme.Opaque), in logical
+//! pixels, scaled when painted.
 //!
 //!   countdown:  [ 3   Recording in 3…   × ]
 //!   recording:  [ ● 0:12 | ❚❚  ■  🗑 ]
@@ -9,7 +10,11 @@ const fui = @import("../floatui.zig");
 const render = @import("../../gfx/render.zig");
 const text = @import("../../gfx/text.zig");
 const icons = @import("../icons.zig");
-const Rect = @import("../../platform/api.zig").window.Rect;
+const theme = @import("../theme.zig");
+const scale = @import("../scale.zig");
+const press = @import("../press.zig");
+const material = @import("../material.zig");
+const Rect = @import("../shapes.zig").Rect;
 
 pub const Mode = enum { countdown, recording };
 pub const Button = enum { pause, stop, discard, cancel, skip };
@@ -21,18 +26,30 @@ pub const State = struct {
     paused: bool = false,
     pulse: bool = false,
     hover: ?Button = null,
+    /// the desktop's appearance (control.zig loads it)
+    th: theme.Theme = theme.Theme.get(true, null),
 };
 
-const pad = 16; // room for the shadow
+/// room around the pill for its shadow (theme card_shadow)
+pub const pad = 24;
 const pill_w = 232;
 const pill_h = 44;
 const btn = 32;
 
-const bg: u32 = 0xFF1F1F23;
-const fg: u32 = 0xFFF5F5F7;
-const muted: u32 = 0xFFA1A1AA;
-const hover_bg: u32 = 0xFF34343A;
-const red: u32 = 0xFFFF453A;
+/// The colours of the pill, from the theme.
+const Look = struct {
+    bg: u32,
+    fg: u32,
+    muted: u32,
+    hover: u32,
+    line: u32,
+    red: u32,
+
+    fn of(th: theme.Theme) Look {
+        const o = theme.Opaque.of(th);
+        return .{ .bg = o.panel, .fg = o.fg, .muted = o.muted, .hover = o.hover, .line = o.line, .red = th.destructive };
+    }
+};
 
 pub fn windowSize() [2]u32 {
     return .{ pill_w + 2 * pad, pill_h + 2 * pad };
@@ -61,14 +78,11 @@ fn buttons(mode: Mode) []const Button {
 }
 
 /// The button under a logical point of the window.
-pub fn hit(x: f64, y: f64, mode: Mode) ?Button {
-    const px: i32 = @as(i32, @intFromFloat(x)) - pad;
-    const py: i32 = @as(i32, @intFromFloat(y)) - pad;
-    for (buttons(mode)) |b| {
-        const r = buttonRect(b);
-        if (px >= r.x and py >= r.y and px < r.x + r.w and py < r.y + r.h) return b;
-    }
-    return null;
+pub fn hit(x: i32, y: i32, mode: Mode) ?Button {
+    var buf: [3]press.Target(Button) = undefined;
+    const bs = buttons(mode);
+    for (bs, 0..) |b, i| buf[i] = .{ .r = buttonRect(b), .t = b };
+    return press.hitTest(Button, buf[0..bs.len], x - pad, y - pad);
 }
 
 /// "0:07", "12:30", "1:02:03"
@@ -78,82 +92,68 @@ pub fn formatTime(buf: []u8, ms: i64) []const u8 {
     return std.fmt.bufPrint(buf, "{d}:{d:0>2}", .{ s / 60, s % 60 }) catch "";
 }
 
-fn sc(v: i32, k: f64) i32 {
-    return @intFromFloat(@round(@as(f64, @floatFromInt(v)) * k));
-}
+const px = scale.px;
+const ff = scale.ff;
 
 /// Paint onto a transparent (straight alpha) buffer of the window.
-pub fn paint(gpa: std.mem.Allocator, px: []u32, bw: u32, bh: u32, k: f64, st: *const State) void {
-    const cw: u32 = @intCast(sc(pill_w, k));
-    const ch: u32 = @intCast(sc(pill_h, k));
+pub fn paint(gpa: std.mem.Allocator, buf: []u32, bw: u32, bh: u32, k: f64, st: *const State) void {
+    const look = Look.of(st.th);
+    const cw: u32 = @intCast(px(pill_w, k));
+    const ch: u32 = @intCast(px(pill_h, k));
     const card = gpa.alloc(u32, @as(usize, cw) * ch) catch return;
     defer gpa.free(card);
-    @memset(card, bg);
+    @memset(card, look.bg);
     var cv = render.Canvas.init(card, cw, ch);
     switch (st.mode) {
-        .countdown => paintCountdown(&cv, k, st),
-        .recording => paintRecording(&cv, k, st),
+        .countdown => paintCountdown(&cv, k, st, look),
+        .recording => paintRecording(&cv, k, st, look),
     }
-    fui.placeCard(px, bw, bh, card, cw, ch, sc(pad, k), sc(pad, k), @intCast(sc(pill_h / 2, k)), @intCast(sc(10, k)));
+    const radius = ff(ch) / 2;
+    material.hairline(&cv, .{ .x = 0, .y = 0, .w = @intCast(cw), .h = @intCast(ch) }, radius, look.line);
+    fui.place(gpa, .{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ px(pad, k), px(pad, k) }, radius, st.th.card_shadow, k);
 }
 
-fn buttonBg(cv: *render.Canvas, k: f64, b: Button, st: *const State) Rect {
-    const r = buttonRect(b);
-    const s: Rect = .{ .x = sc(r.x, k), .y = sc(r.y, k), .w = sc(r.w, k), .h = sc(r.h, k) };
-    if (st.hover == b) cv.fillRoundRectAA(s.x, s.y, s.w, s.h, 9 * k, hover_bg);
+/// The button's rectangle on the card, with its hover fill.
+fn buttonBg(cv: *render.Canvas, k: f64, b: Button, st: *const State, look: Look) Rect {
+    const s = scale.rect(buttonRect(b), k);
+    if (st.hover == b) cv.fillRoundRectAA(s.x, s.y, s.w, s.h, 9 * k, look.hover);
     return s;
 }
 
-fn paintCountdown(cv: *render.Canvas, k: f64, st: *const State) void {
+fn centre(r: Rect) [2]f64 {
+    return .{ ff(r.x) + ff(r.w) / 2, ff(r.y) + ff(r.h) / 2 };
+}
+
+fn paintCountdown(cv: *render.Canvas, k: f64, st: *const State, look: Look) void {
     var buf: [32]u8 = undefined;
     const fs = 22 * k;
     const digit = std.fmt.bufPrint(&buf, "{d}", .{st.count}) catch "";
     const cy = @divTrunc(cv.h, 2);
-    text.drawStyled(cv, sc(18, k), cy - @divTrunc(text.heightStyled(fs, .semibold), 2), fs, red, text.Style.semibold.num(), digit);
+    text.drawStyled(cv, px(18, k), cy - @divTrunc(text.heightStyled(fs, .semibold), 2), fs, look.red, text.Style.semibold.num(), digit);
     const label = if (st.hover == .skip) "Start now" else "Recording starts\u{2026}";
     const ls = 13 * k;
-    text.draw(cv, sc(46, k), cy - @divTrunc(text.height(ls), 2), ls, if (st.hover == .skip) fg else muted, label);
-    const r = buttonBg(cv, k, .cancel, st);
-    icons.drawCentered(cv, .close, r.x + @divTrunc(r.w, 2), r.y + @divTrunc(r.h, 2), sc(16, k), fg);
+    text.draw(cv, px(46, k), cy - @divTrunc(text.height(ls), 2), ls, if (st.hover == .skip) look.fg else look.muted, label);
+    const c = centre(buttonBg(cv, k, .cancel, st, look));
+    icons.drawAt(cv, .close, c[0], c[1], 16 * k, .{}, look.fg);
 }
 
-fn paintRecording(cv: *render.Canvas, k: f64, st: *const State) void {
-    const cy = @as(f64, @floatFromInt(cv.h)) / 2;
-    const dot: u32 = if (st.paused) muted else if (st.pulse) red else 0xFFC8352C;
+fn paintRecording(cv: *render.Canvas, k: f64, st: *const State, look: Look) void {
+    const cy = ff(cv.h) / 2;
+    const dot: u32 = if (st.paused) look.muted else if (st.pulse) look.red else theme.mix(look.red, 0xFF000000, 0.22);
     cv.fillCircleAA(18 * k, cy, 6 * k, dot);
     var buf: [32]u8 = undefined;
     const fs = 15 * k;
     const t = formatTime(&buf, st.elapsed_ms);
-    text.drawStyled(cv, sc(32, k), @as(i32, @intFromFloat(cy)) - @divTrunc(text.heightStyled(fs, .semibold), 2), fs, if (st.paused) muted else fg, text.Style.semibold.num(), t);
-    const sep_x = sc(buttonRect(.pause).x - 6, k);
-    cv.fillRect(sep_x, sc(12, k), @max(1, sc(1, k)), sc(pill_h - 24, k), 0xFF3A3A40);
-    paintPause(cv, k, st);
-    const s = buttonBg(cv, k, .stop, st);
-    const q = sc(12, k);
-    cv.fillRoundRectAA(s.x + @divTrunc(s.w - q, 2), s.y + @divTrunc(s.h - q, 2), q, q, 2.5 * k, red);
-    const d = buttonBg(cv, k, .discard, st);
-    icons.drawCentered(cv, .trash, d.x + @divTrunc(d.w, 2), d.y + @divTrunc(d.h, 2), sc(17, k), fg);
-}
-
-fn paintPause(cv: *render.Canvas, k: f64, st: *const State) void {
-    const r = buttonBg(cv, k, .pause, st);
-    const cx = r.x + @divTrunc(r.w, 2);
-    const cy = r.y + @divTrunc(r.h, 2);
-    if (st.paused) {
-        // resume: a play triangle, drawn as narrowing bars
-        const h = sc(14, k);
-        var i: i32 = 0;
-        while (i < h) : (i += 1) {
-            const half = @divTrunc(h, 2);
-            const w = half - @as(i32, @intCast(@abs(i - half)));
-            cv.fillRect(cx - @divTrunc(half, 2), cy - half + i, w + 1, 1, fg);
-        }
-        return;
-    }
-    const bw = sc(4, k);
-    const bh = sc(14, k);
-    cv.fillRoundRectAA(cx - bw - sc(2, k), cy - @divTrunc(bh, 2), bw, bh, 1.5 * k, fg);
-    cv.fillRoundRectAA(cx + sc(2, k), cy - @divTrunc(bh, 2), bw, bh, 1.5 * k, fg);
+    text.drawStyled(cv, px(32, k), @as(i32, @intFromFloat(cy)) - @divTrunc(text.heightStyled(fs, .semibold), 2), fs, if (st.paused) look.muted else look.fg, text.Style.semibold.num(), t);
+    const sep_x = px(buttonRect(.pause).x - 6, k);
+    cv.fillRect(sep_x, px(12, k), @max(1, px(1, k)), px(pill_h - 24, k), look.line);
+    const p = centre(buttonBg(cv, k, .pause, st, look));
+    icons.drawAt(cv, if (st.paused) .play else .pause, p[0], p[1], 18 * k, .{}, look.fg);
+    const s = buttonBg(cv, k, .stop, st, look);
+    const q = px(12, k);
+    cv.fillRoundRectAA(s.x + @divTrunc(s.w - q, 2), s.y + @divTrunc(s.h - q, 2), q, q, 2.5 * k, look.red);
+    const d = centre(buttonBg(cv, k, .discard, st, look));
+    icons.drawAt(cv, .trash, d[0], d[1], 17 * k, .{}, look.fg);
 }
 
 test "time format and hit testing" {
@@ -162,7 +162,14 @@ test "time format and hit testing" {
     try std.testing.expectEqualStrings("12:30", formatTime(&buf, 750_000));
     try std.testing.expectEqualStrings("1:02:03", formatTime(&buf, 3_723_000));
     const r = buttonRect(.stop);
-    try std.testing.expectEqual(@as(?Button, .stop), hit(@floatFromInt(pad + r.x + 4), @floatFromInt(pad + r.y + 4), .recording));
+    try std.testing.expectEqual(@as(?Button, .stop), hit(pad + r.x + 4, pad + r.y + 4, .recording));
     try std.testing.expectEqual(@as(?Button, null), hit(1, 1, .recording));
     try std.testing.expectEqual(@as(?Button, .skip), hit(pad + 20, pad + 20, .countdown));
+}
+
+test "the control follows the theme" {
+    const d = Look.of(theme.Theme.get(true, null));
+    const l = Look.of(theme.Theme.get(false, null));
+    try std.testing.expect(theme.luminance(d.bg) < theme.luminance(l.bg));
+    try std.testing.expect(theme.contrast(l.fg, l.bg) > 4.5 and theme.contrast(d.fg, d.bg) > 4.5);
 }
