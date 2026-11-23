@@ -3,6 +3,7 @@
 //! `write`, the one way debug output reaches a file (devtools too).
 
 const std = @import("std");
+const log = std.log.scoped(.window);
 const sys = @import("../sys.zig");
 const png = @import("../../../gfx/png.zig");
 const window = @import("../window.zig");
@@ -24,20 +25,20 @@ pub fn dumpFrames(w: *Window) void {
     }
 }
 
-fn writeDump(alloc: std.mem.Allocator, prefix: []const u8, index: usize, px: []const u32, w: u32, h: u32) void {
+fn writeDump(gpa: std.mem.Allocator, prefix: []const u8, index: usize, px: []const u32, w: u32, h: u32) void {
     var path_buf: [4096]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}-{d}.png", .{ prefix, index }) catch return;
-    const data = png.encode(alloc, px, w, h) catch |err| {
-        std.log.warn("frame dump: encode failed: {t}", .{err});
+    const data = png.encode(gpa, px, w, h) catch |err| {
+        log.warn("frame dump: encode failed: {t}", .{err});
         return;
     };
-    defer alloc.free(data);
-    write(path, data) catch |err| std.log.warn("frame dump: cannot write {s}: {t}", .{ path, err });
+    defer gpa.free(data);
+    write(path, data) catch |err| log.warn("frame dump: cannot write {s}: {t}", .{ path, err });
 }
 
 /// Write a debug file: private (0600), replacing what was there without
 /// following a symlink planted in its place; logged.
 pub fn write(path: []const u8, data: []const u8) !void {
     try sys.writeAtomic(path, data, 0o600);
-    std.log.info("debug output: wrote {s}", .{path});
+    log.info("debug output: wrote {s}", .{path});
 }

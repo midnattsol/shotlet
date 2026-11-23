@@ -35,12 +35,12 @@ const LineCtx = struct {
     y: i32,
 };
 
-pub fn drawText(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
+pub fn drawText(canvas: *Canvas, gpa: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
     const str = s.str.items;
     // line breaks come from the image-size layout, so the preview at any
     // zoom wraps exactly like the export
-    var lay = textbox.Layout.init(alloc, str, s.fontPx(), s.box_w) catch return;
-    defer lay.deinit(alloc);
+    var lay = textbox.Layout.init(gpa, str, s.fontPx(), s.box_w) catch return;
+    defer lay.deinit(gpa);
     const fs = s.fontPx() * xf.scale;
     const lh = text_mod.height(fs);
     const fg = if (s.pill) raster.contrastColor(s.color) else s.color;
@@ -96,12 +96,12 @@ fn drawCaret(canvas: *Canvas, lc: LineCtx, caret: usize, fg: u32) void {
 }
 
 test "fixed-width text wraps: frame, drawing and preview match the export" {
-    const alloc = std.testing.allocator;
-    text_mod.init(alloc);
+    const gpa = std.testing.allocator;
+    text_mod.init(gpa);
     defer text_mod.deinit();
     var s = Shape{ .tool = .text, .color = 0xFFFF0000, .thickness = 2, .p0 = .{ .x = 10, .y = 10 } };
-    defer s.deinit(alloc);
-    try s.str.appendSlice(alloc, "one two three four five six\n\u{5E9}\u{5DC}\u{5D5}\u{5DD} \u{5E2}\u{5D5}\u{5DC}\u{5DD} \u{645}\u{631}\u{62D}\u{628}\u{627}");
+    defer s.deinit(gpa);
+    try s.str.appendSlice(gpa, "one two three four five six\n\u{5E9}\u{5DC}\u{5D5}\u{5DD} \u{5E2}\u{5D5}\u{5DC}\u{5DD} \u{645}\u{631}\u{62D}\u{628}\u{627}");
     const fs = s.fontPx();
     const lh = text_mod.height(fs);
     const auto = s.frame();
@@ -119,13 +119,13 @@ test "fixed-width text wraps: frame, drawing and preview match the export" {
     var px: [400 * 300]u32 = @splat(0xFF000000);
     var c = Canvas.init(&px, 400, 300);
     for ([_]f64{ 1.0, 0.5 }) |sc| {
-        drawShape(&c, alloc, &s, .{ .scale = sc }, .{ .caret = 14, .sel = .{ 4, 40 } });
-        drawShape(&c, alloc, &s, .{ .scale = sc }, .{ .caret = 8, .upstream = true });
+        drawShape(&c, gpa, &s, .{ .scale = sc }, .{ .caret = 14, .sel = .{ 4, 40 } });
+        drawShape(&c, gpa, &s, .{ .scale = sc }, .{ .caret = 8, .upstream = true });
     }
     // RTL text puts its width handle on the left
     try std.testing.expect(!s.textRtl());
     var r = Shape{ .tool = .text, .color = 0xFFFF0000, .thickness = 2 };
-    defer r.deinit(alloc);
-    try r.str.appendSlice(alloc, "123 \u{5D0}\u{5D1}");
+    defer r.deinit(gpa);
+    try r.str.appendSlice(gpa, "123 \u{5D0}\u{5D1}");
     try std.testing.expect(r.textRtl());
 }

@@ -55,34 +55,34 @@ pub const Source = struct {
         return "";
     }
     /// After the engine stopped.
-    pub fn close(self: *Source, gpa: std.mem.Allocator, s: *desktop.Session) void {
-        _ = .{ self, gpa, s };
+    pub fn close(self: *Source, gpa: std.mem.Allocator, bus: *desktop.Bus) void {
+        _ = .{ self, gpa, bus };
     }
 };
 pub const Opened = union(enum) { ok: Source, cancelled, failed: anyerror };
 
 /// Open the source for `want` (asking for consent where needed; what lets
 /// the next one skip asking is kept in `cfg`).
-pub fn open(gpa: std.mem.Allocator, s: *desktop.Session, home: []const u8, cfg: *config.Config, want: Want) Opened {
-    _ = .{ gpa, s, home, cfg, want };
+pub fn open(gpa: std.mem.Allocator, bus: *desktop.Bus, home: []const u8, cfg: *config.Config, want: Want) Opened {
+    _ = .{ gpa, bus, home, cfg, want };
     return .{ .failed = error.Unavailable };
 }
 /// The shell shows its own stop button for recordings.
-pub fn shellHasControls(gpa: std.mem.Allocator, s: *desktop.Session) bool {
-    _ = .{ gpa, s };
+pub fn shellHasControls(gpa: std.mem.Allocator, bus: *desktop.Bus) bool {
+    _ = .{ gpa, bus };
     return false;
 }
 /// Put the area picker up in the shell; true when it did.
-pub fn pickInShell(gpa: std.mem.Allocator, s: *desktop.Session) bool {
-    _ = .{ gpa, s };
+pub fn pickInShell(gpa: std.mem.Allocator, bus: *desktop.Bus) bool {
+    _ = .{ gpa, bus };
     return false;
 }
 /// Listen for the shell's stop requests.
-pub fn watchStop(s: *desktop.Session) error{Unavailable}!void {
-    _ = s;
+pub fn watchStop(bus: *desktop.Bus) error{Unavailable}!void {
+    _ = bus;
 }
 /// True when the session asked to stop since the last call.
-pub fn pollStop(s: *desktop.Session, gpa: std.mem.Allocator) bool {
-    _ = .{ s, gpa };
+pub fn pollStop(bus: *desktop.Bus, gpa: std.mem.Allocator) bool {
+    _ = .{ bus, gpa };
     return false;
 }

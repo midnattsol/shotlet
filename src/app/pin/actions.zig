@@ -3,6 +3,7 @@
 //! in place, show the window menu (Keep on Top), close it or every pin.
 
 const std = @import("std");
+const log = std.log.scoped(.pin);
 const config = @import("../config.zig");
 const deliver = @import("../deliver.zig");
 const desktop = @import("../../platform/api.zig").desktop;
@@ -37,7 +38,7 @@ fn nextOpacity(o: view.Opacity) view.Opacity {
 }
 
 pub fn run(p: *Pin, it: menu.Item) void {
-    runInner(p, it) catch |err| std.log.warn("pin: {t} failed: {t}", .{ it, err });
+    runInner(p, it) catch |err| log.warn("{t} failed: {t}", .{ it, err });
 }
 
 fn runInner(p: *Pin, it: menu.Item) !void {
@@ -54,7 +55,7 @@ fn runInner(p: *Pin, it: menu.Item) !void {
         .close => p.quit = true,
         .close_all => {
             const n = ipc.closeOthers(p.gpa, p.env, &p.ipc);
-            std.log.info("pin: closing every pin ({d} more)", .{n});
+            log.info("closing every pin ({d} more)", .{n});
             p.quit = true;
         },
     }
@@ -68,7 +69,7 @@ fn copy(p: *Pin) !void {
         p.gpa.free(px);
         return err;
     };
-    std.log.info("pin: copied", .{});
+    log.info("copied", .{});
 }
 
 /// Where the person says, as the editor's Save As does (copy_on_save
@@ -91,5 +92,5 @@ pub fn setLocked(p: *Pin, on: bool) void {
     p.locked = on;
     p.drag_from = null;
     p.dirty = true;
-    std.log.info("pin: {s}", .{if (on) "locked in place" else "unlocked"});
+    log.info("{s}", .{if (on) "locked in place" else "unlocked"});
 }

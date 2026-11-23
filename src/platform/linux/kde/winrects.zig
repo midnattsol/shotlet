@@ -6,6 +6,7 @@
 //! ours) knows, so nobody else on the bus can pass windows off as KWin's.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
@@ -57,12 +58,12 @@ pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, ou
     var name_buf: [48]u8 = undefined;
     const plugin = std.fmt.bufPrint(&name_buf, "shotlet-windows-{s}", .{token}) catch return &.{};
     const id = loadScript(gpa, bus, path, plugin) catch |err| {
-        std.log.info("windows: KWin scripting unavailable ({t})", .{err});
+        log.info("windows: KWin scripting unavailable ({t})", .{err});
         return &.{};
     };
     defer unload(gpa, bus, plugin);
     runScript(bus, id) catch |err| {
-        std.log.info("windows: KWin did not run the script ({t})", .{err});
+        log.info("windows: KWin did not run the script ({t})", .{err});
         return &.{};
     };
     return awaitRects(bus, token, out);
@@ -117,7 +118,7 @@ fn awaitRects(bus: *dbus.Connection, token: []const u8, out: []i32) []const i32 
     }.f;
     while (true) {
         var msg = (bus.waitFor(deadline, {}, isRects) catch return &.{}) orelse {
-            std.log.info("windows: KWin's script did not answer", .{});
+            log.info("windows: KWin's script did not answer", .{});
             return &.{};
         };
         defer msg.deinit(bus.alloc);
@@ -142,6 +143,8 @@ pub fn parse(s: []const u8, token: []const u8, out: []i32) ?[]const i32 {
     return out[0 .. n / 4 * 4];
 }
 
+const testutil = @import("../../../testutil.zig");
+
 test "the script's answer counts only with our token" {
     var out: [8]i32 = undefined;
     try std.testing.expectEqualSlices(i32, &.{ 1, 2, 3, 4 }, parse("ab12 1,2,3,4,5", "ab12", &out).?);
@@ -153,6 +156,6 @@ test "the script's answer counts only with our token" {
 test "the script is filled in" {
     var buf: [2048]u8 = undefined;
     const s = try std.fmt.bufPrint(&buf, script_fmt, .{ ":1.42", obj_path, iface, "beef" });
-    try std.testing.expect(std.mem.indexOf(u8, s, "callDBus(\":1.42\", \"/dev/shotlet/WinRects\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, s, "\"beef \" + out.join") != null);
+    try testutil.expectContains(s, "callDBus(\":1.42\", \"/dev/shotlet/WinRects\"");
+    try testutil.expectContains(s, "\"beef \" + out.join");
 }

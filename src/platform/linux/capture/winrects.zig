@@ -12,6 +12,7 @@
 //!   editor simply offers no window clicks.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const capture = @import("../../../app/capture.zig");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
@@ -35,7 +36,7 @@ pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, ca
     const t0 = sys.monoMs();
     const flat = if (shell_id) |id| shell1.captureWindows(bus, id, &logical) else if (kde.kwinRunning(bus)) kwin.fetch(gpa, env, bus, &logical) else return &.{};
     const out = toImage(gpa, cap.monitors, flat) catch return &.{};
-    std.log.info("windows: {d} where the capture was taken ({d}ms)", .{ out.len, sys.monoMs() - t0 });
+    log.info("windows: {d} where the capture was taken ({d}ms)", .{ out.len, sys.monoMs() - t0 });
     return out;
 }
 

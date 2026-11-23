@@ -3,6 +3,7 @@
 //! process-wide instance and its lifecycle.
 
 const std = @import("std");
+const log = std.log.scoped(.fonts);
 const ttf = @import("../ttf.zig");
 const fontdb = @import("../../platform/api.zig").fonts;
 const bidi = @import("../bidi.zig");
@@ -107,7 +108,7 @@ pub const State = struct {
             return null;
         }
         const f = ttf.Font.loadFace(self.alloc, face.path, face.index) catch |e| {
-            std.log.debug("font {s}: {t}", .{ face.path, e });
+            log.debug("font {s}: {t}", .{ face.path, e });
             if (self.n_failed < max_failed) {
                 self.failed[self.n_failed] = face.path;
                 self.n_failed += 1;
@@ -234,22 +235,22 @@ pub var state: ?State = null;
 
 /// Find and load the system UI font once at startup. Safe to call
 /// repeatedly. Bold, monospace and fallback faces load on first use.
-pub fn init(alloc: std.mem.Allocator) void {
-    initWith(alloc, null);
+pub fn init(gpa: std.mem.Allocator) void {
+    initWith(gpa, null);
 }
 
 /// init, with `font_path` (when given and loadable) as the regular face
 /// instead of the system UI font; for development tools and tests.
-pub fn initWith(alloc: std.mem.Allocator, font_path: ?[]const u8) void {
+pub fn initWith(gpa: std.mem.Allocator, font_path: ?[]const u8) void {
     if (state != null) return;
-    var st: State = .{ .alloc = alloc, .db = fontdb.Db.init(alloc) };
-    if (font_path) |fp| if (alloc.dupe(u8, fp)) |path| {
+    var st: State = .{ .alloc = gpa, .db = fontdb.Db.init(gpa) };
+    if (font_path) |fp| if (gpa.dupe(u8, fp)) |path| {
         st.regular = st.add(.{ .path = path }) orelse no_font;
     } else |_| {};
     if (st.regular == no_font) st.regular = st.loadQuery(.sans);
     if (st.regular == no_font) st.loadAnyRegular();
     if (st.regular == no_font) {
-        std.log.warn("no usable system font found; falling back to the bitmap font", .{});
+        log.warn("no usable system font found; falling back to the bitmap font", .{});
         st.deinit();
         return;
     }
@@ -278,8 +279,8 @@ pub fn bitmapScale(size_px: f64) i32 {
 }
 
 test "fallback chain covers characters the UI font lacks" {
-    const alloc = std.testing.allocator;
-    init(alloc);
+    const gpa = std.testing.allocator;
+    init(gpa);
     defer deinit();
     const st = if (state) |*p| p else return; // no fonts installed
     const kanji: u21 = 0x6F22;
@@ -290,8 +291,8 @@ test "fallback chain covers characters the UI font lacks" {
 }
 
 test "every face resolves to a loaded slot; medium never smears" {
-    const alloc = std.testing.allocator;
-    init(alloc);
+    const gpa = std.testing.allocator;
+    init(gpa);
     defer deinit();
     const st = if (state) |*p| p else return; // no fonts installed
     inline for (@typeInfo(Face).@"enum".field_names) |name| {

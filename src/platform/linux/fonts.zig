@@ -5,8 +5,10 @@
 //! caller (free with the same allocator).
 
 const std = @import("std");
+const log = std.log.scoped(.fonts);
 const sys = @import("sys.zig");
 const env_mod = @import("../../app/env.zig");
+const optlib = @import("../../optlib.zig");
 
 const types = @import("../api/fonts.zig");
 pub const Query = types.Query;
@@ -37,30 +39,22 @@ const FcApi = struct {
 };
 
 const Fc = struct {
-    lib: std.DynLib,
-    api: FcApi,
+    lib: optlib.Table(FcApi),
 
     fn open() ?Fc {
-        var lib = std.DynLib.open("libfontconfig.so.1") catch return null;
-        var api: FcApi = undefined;
-        const info = @typeInfo(FcApi).@"struct";
-        inline for (info.field_names, info.field_types) |name, T| {
-            @field(api, name) = lib.lookup(T, name) orelse {
-                lib.close();
-                return null;
-            };
-        }
-        if (api.FcInit() == 0) {
-            lib.close();
+        var why: []const u8 = "";
+        var t = optlib.bind(FcApi, "fontconfig", &.{"1"}, &why) catch return null;
+        if (t.api.FcInit() == 0) {
+            t.close();
             return null;
         }
-        return .{ .lib = lib, .api = api };
+        return .{ .lib = t };
     }
 
     /// Best match for a fontconfig pattern string; when `cp` is set, only a
     /// face whose charset really contains it.
-    fn match(self: *Fc, alloc: std.mem.Allocator, pattern: [*:0]const u8, cp: ?u21) ?Face {
-        const a = &self.api;
+    fn match(self: *Fc, gpa: std.mem.Allocator, pattern: [*:0]const u8, cp: ?u21) ?Face {
+        const a = &self.lib.api;
         const pat = a.FcNameParse(pattern) orelse return null;
         defer a.FcPatternDestroy(pat);
         if (cp) |c| {
@@ -83,7 +77,7 @@ const Fc = struct {
         if (a.FcPatternGetString(m, "file", 0, &file) != FcResultMatch) return null;
         var index: c_int = 0;
         _ = a.FcPatternGetInteger(m, "index", 0, &index);
-        const path = alloc.dupe(u8, std.mem.span(file.?)) catch return null;
+        const path = gpa.dupe(u8, std.mem.span(file.?)) catch return null;
         // variable-font named instances encode the instance in the high bits
         return .{ .path = path, .index = @intCast(@as(u32, @bitCast(index)) & 0xFFFF) };
     }
@@ -140,7 +134,7 @@ fn isFontFile(name: []const u8) bool {
 }
 
 /// Recursively collect font file paths under `dir` (bounded depth/count).
-fn scanDir(alloc: std.mem.Allocator, out: *std.ArrayList([]u8), dir: []const u8, depth: u8) void {
+fn scanDir(gpa: std.mem.Allocator, out: *std.ArrayList([]u8), dir: []const u8, depth: u8) void {
     if (depth > 8 or out.items.len > 50_000) return;
     const Scan = struct {
         alloc: std.mem.Allocator,
@@ -161,7 +155,7 @@ fn scanDir(alloc: std.mem.Allocator, out: *std.ArrayList([]u8), dir: []const u8,
             } else self.out.append(self.alloc, child) catch self.alloc.free(child);
         }
     };
-    const scan: Scan = .{ .alloc = alloc, .out = out, .dir = dir, .depth = depth };
+    const scan: Scan = .{ .alloc = gpa, .out = out, .dir = dir, .depth = depth };
     sys.eachEntry(dir, &scan, Scan.visit) catch {};
 }
 
@@ -171,8 +165,8 @@ pub const Db = struct {
     fc_tried: bool = false,
     files: ?std.ArrayList([]u8) = null,
 
-    pub fn init(alloc: std.mem.Allocator) Db {
-        return .{ .alloc = alloc };
+    pub fn init(gpa: std.mem.Allocator) Db {
+        return .{ .alloc = gpa };
     }
 
     pub fn deinit(self: *Db) void {
@@ -188,7 +182,7 @@ pub const Db = struct {
         if (!self.fc_tried) {
             self.fc_tried = true;
             self.fc = Fc.open();
-            if (self.fc == null) std.log.info("fontconfig unavailable; scanning font directories", .{});
+            if (self.fc == null) log.info("fontconfig unavailable; scanning font directories", .{});
         }
         return if (self.fc) |*f| f else null;
     }
@@ -292,18 +286,18 @@ pub const Db = struct {
 };
 
 test "font discovery finds something or nothing, without crashing" {
-    const alloc = std.testing.allocator;
-    var db = Db.init(alloc);
+    const gpa = std.testing.allocator;
+    var db = Db.init(gpa);
     defer db.deinit();
     inline for (@typeInfo(Query).@"enum".field_names) |name| {
         const q = @field(Query, name);
         if (db.match(q)) |f| {
-            defer f.deinit(alloc);
+            defer f.deinit(gpa);
             try std.testing.expect(f.path.len > 0);
         }
-        if (db.scanMatch(q, 0)) |f| f.deinit(alloc);
+        if (db.scanMatch(q, 0)) |f| f.deinit(gpa);
     }
-    if (db.forCodepoint(0x6F22)) |f| f.deinit(alloc);
+    if (db.forCodepoint(0x6F22)) |f| f.deinit(gpa);
     var i: usize = 0;
-    while (db.fallback(i)) |f| : (i += 1) f.deinit(alloc);
+    while (db.fallback(i)) |f| : (i += 1) f.deinit(gpa);
 }

@@ -4,6 +4,7 @@
 //! shows a short line about it.
 
 const std = @import("std");
+const log = std.log.scoped(.settings);
 const platform_capture = @import("../../platform/api.zig").capture;
 const model = @import("model.zig");
 const w = @import("widgets.zig");
@@ -54,6 +55,6 @@ pub fn resetAll(app: *App) void {
     app.cfg.setScToken("");
     var buf: [96]u8 = undefined;
     app.st.perm_note.set(platform_capture.resetSummary(o, &buf));
-    std.log.info("permissions reset from Settings: {s}", .{app.st.perm_note.text().?});
+    log.info("permissions reset from Settings: {s}", .{app.st.perm_note.text().?});
     app.st.dirty = true;
 }

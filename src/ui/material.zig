@@ -350,9 +350,9 @@ pub const Snapshot = struct {
     r: Rect,
     px: []u32,
 
-    pub fn take(alloc: std.mem.Allocator, canvas: *Canvas, r_in: Rect) ?Snapshot {
+    pub fn take(gpa: std.mem.Allocator, canvas: *Canvas, r_in: Rect) ?Snapshot {
         const r = Rect.intersect(r_in, .{ .x = 0, .y = 0, .w = canvas.w, .h = canvas.h }) orelse return null;
-        const px = alloc.alloc(u32, @intCast(r.w * r.h)) catch return null;
+        const px = gpa.alloc(u32, @intCast(r.w * r.h)) catch return null;
         const rw: usize = @intCast(r.w);
         for (0..@intCast(r.h)) |yy| {
             const off = @as(usize, @intCast(r.y + @as(i32, @intCast(yy)))) * @as(usize, @intCast(canvas.w)) + @as(usize, @intCast(r.x));
@@ -361,8 +361,8 @@ pub const Snapshot = struct {
         return .{ .r = r, .px = px };
     }
 
-    pub fn restore(self: Snapshot, alloc: std.mem.Allocator, canvas: *Canvas, alpha: f64) void {
-        defer alloc.free(self.px);
+    pub fn restore(self: Snapshot, gpa: std.mem.Allocator, canvas: *Canvas, alpha: f64) void {
+        defer gpa.free(self.px);
         if (alpha >= 1) return;
         const k: u32 = @intFromFloat(@round(std.math.clamp(alpha, 0, 1) * 256));
         const rw: usize = @intCast(self.r.w);

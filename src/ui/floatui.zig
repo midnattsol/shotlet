@@ -12,7 +12,7 @@
 //!   premultiply(px, w, h, r), fadeAlpha(px, f), blitOver(...)
 //!   textCentered(canvas, r, size, color, style, s)
 //!   Surface, Image                      a straight-alpha buffer; pixels to read
-//!   place(gpa, dst, card, at, radius, shadow, k)   an opaque card with
+//!   place(dst, card, at, radius, shadow, k)   an opaque card with
 //!                                       rounded corners and a theme.Shadow
 //!   compositeFaded(gpa, dst, card, at, radius, shadow, alpha, k)   the same,
 //!                                       faded as a whole

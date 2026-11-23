@@ -57,15 +57,16 @@ pub fn render(self: *Panel) !void {
     } else if (self.confirm_clear) {
         drawConfirm(self, &cv, kk, op);
     } else if (self.items.items.len > 0) drawClear(self, &cv, kk, op);
-    if (self.notice.len > 0) {
+    const word = self.notice.text(sys.monoMs());
+    if (word.len > 0) {
         // centred above the footer
         const nh = s(30, kk);
         const area: Rect = .{ .x = 0, .y = @as(i32, @intCast(ph)) - nh - s(actions_h + 12, kk), .w = @intCast(pw), .h = nh };
-        fui.notice(&cv, area, self.notice, kk, self.th);
+        fui.notice(&cv, area, word, kk, self.th);
     }
 
     const o = s(pad, kk);
-    fui.place(self.gpa, .{ .px = px, .w = bw, .h = bh }, .{ .px = panel, .w = pw, .h = ph }, .{ o, o }, 14 * kk, self.th.card_shadow, kk);
+    fui.place(.{ .px = px, .w = bw, .h = bh }, .{ .px = panel, .w = pw, .h = ph }, .{ o, o }, 14 * kk, self.th.card_shadow, kk);
     try floatwin.presentStraight(&self.win, px);
 }
 

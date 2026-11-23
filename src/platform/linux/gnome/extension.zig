@@ -3,6 +3,7 @@
 //! or from the copy bundled in the binary, and where its files live.
 
 const std = @import("std");
+const log = std.log.scoped(.gnome);
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
@@ -171,21 +172,21 @@ pub fn installExtension(gpa: std.mem.Allocator, env: Env, bus_opt: ?*dbus.Connec
     if (extensionActive(bus)) return .active;
     const state = shellState(gpa, bus);
     if (state == null) {
-        std.log.warn("GNOME Shell is not running here", .{});
+        log.warn("GNOME Shell is not running here", .{});
         return .failed;
     }
     if (state.? == .unknown) {
         if (installRemote(gpa, bus)) |ok| {
             if (ok and waitActive(bus)) return .active;
-        } else |err| std.log.info("extensions.gnome.org install not possible ({t}); using the bundled copy", .{err});
+        } else |err| log.info("extensions.gnome.org install not possible ({t}); using the bundled copy", .{err});
     }
     const dir = writeBundled(env.home) catch |err| {
-        std.log.warn("could not copy the extension: {t}", .{err});
+        log.warn("could not copy the extension: {t}", .{err});
         return .failed;
     };
-    std.log.info("installed the GNOME Shell extension in {s}", .{dir});
+    log.info("installed the GNOME Shell extension in {s}", .{dir});
     _ = callBool(gpa, bus, "EnableExtension", 5000) catch |err|
-        std.log.warn("could not enable the extension: {t}", .{err});
+        log.warn("could not enable the extension: {t}", .{err});
     if (waitActive(bus)) return .active;
     return .installed_relogin;
 }
@@ -200,15 +201,17 @@ fn waitActive(bus: *dbus.Connection) bool {
     return false;
 }
 
+const testutil = @import("../../../testutil.zig");
+
 test "the bundled extension declares the uuid and bus name we look for" {
-    try std.testing.expect(std.mem.indexOf(u8, ext_metadata, "\"uuid\": \"" ++ uuid ++ "\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_js, bus_name) != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_js, "shotlet:quick") != null);
+    try testutil.expectContains(ext_metadata, "\"uuid\": \"" ++ uuid ++ "\"");
+    try testutil.expectContains(ext_js, bus_name);
+    try testutil.expectContains(ext_js, "shotlet:quick");
     // the settings schema the metadata names ships, compiled
-    try std.testing.expect(std.mem.indexOf(u8, ext_metadata, "\"settings-schema\": \"" ++ ext_schema_id ++ "\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_schema, "id=\"" ++ ext_schema_id ++ "\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_schema_compiled, ext_schema_id) != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_js, "'--from-shell'") != null);
+    try testutil.expectContains(ext_metadata, "\"settings-schema\": \"" ++ ext_schema_id ++ "\"");
+    try testutil.expectContains(ext_schema, "id=\"" ++ ext_schema_id ++ "\"");
+    try testutil.expectContains(ext_schema_compiled, ext_schema_id);
+    try testutil.expectContains(ext_js, "'--from-shell'");
 }
 
 test "GNOME is told from XDG_CURRENT_DESKTOP" {

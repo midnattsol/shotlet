@@ -2,6 +2,7 @@
 //! PNG, copied to the clipboard; and the dev frame/export dumps.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const png = @import("../../gfx/png.zig");
 const sys = @import("../../platform/api.zig").sys;
@@ -28,7 +29,7 @@ pub fn copyToClipboard(ed: *Editor) !void {
     const exported = try exportPixels(ed);
     ed.win.setClipboardImage(exported.pixels, exported.width, exported.height) catch |err| {
         ed.alloc.free(exported.pixels);
-        std.log.warn("copy failed: {t}", .{err});
+        log.warn("copy failed: {t}", .{err});
         ed.tools.toast.show(.problem, "Copy failed", 2400);
         ed.needs_render = true;
         return;
@@ -60,12 +61,12 @@ pub fn dumpFrame(ed: *Editor, path: []const u8) void {
     if (ed.pn().last_frame.len == 0) return;
     const data = png.encode(ed.alloc, ed.pn().last_frame, ed.pn().width, ed.pn().height) catch return;
     defer ed.alloc.free(data);
-    sys.writeAtomic(path, data, 0o600) catch |e| std.log.warn("dump {s}: {t}", .{ path, e });
+    sys.writeAtomic(path, data, 0o600) catch |e| log.warn("dump {s}: {t}", .{ path, e });
 }
 
 /// The export as a PNG at `path`.
 pub fn dumpExport(ed: *Editor, path: []const u8) void {
     const data = exportPng(ed) catch return;
     defer ed.alloc.free(data);
-    sys.writeAtomic(path, data, 0o600) catch |e| std.log.warn("dump {s}: {t}", .{ path, e });
+    sys.writeAtomic(path, data, 0o600) catch |e| log.warn("dump {s}: {t}", .{ path, e });
 }

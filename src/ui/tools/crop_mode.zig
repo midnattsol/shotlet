@@ -3,6 +3,7 @@
 //! and Apply. Enter applies, Esc leaves the picture as it was.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const render = @import("../../gfx/render.zig");
 const shapes = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
@@ -23,7 +24,7 @@ pub fn enter(ed: *Editor) !void {
     if (ed.doc.sel == null) ed.doc.sel = ed.doc.imageRect();
     try setAspect(ed, ed.tools.aspect);
     ed.selDirty();
-    std.log.info("crop: started", .{});
+    log.info("crop: started", .{});
 }
 
 pub fn setAspect(ed: *Editor, a: tools.Aspect) !void {
@@ -95,7 +96,7 @@ pub fn apply(ed: *Editor) !void {
     crop.moveShapes(ed.doc.shapes.items, r);
     ed.doc.sel = .ofSize(after.width, after.height);
     try ed.replaceImage(after);
-    std.log.info("crop: {d}x{d} at {d},{d}", .{ r.w, r.h, r.x, r.y });
+    log.info("crop: {d}x{d} at {d},{d}", .{ r.w, r.h, r.x, r.y });
 }
 
 /// After an undo or redo: a crop it crossed swaps the picture back.

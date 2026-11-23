@@ -7,6 +7,7 @@
 //! backToPin.
 
 const std = @import("std");
+const log = std.log.scoped(.pin);
 const png = @import("../../gfx/png.zig");
 const env_mod = @import("../env.zig");
 const relaunch = @import("../relaunch.zig");
@@ -47,7 +48,7 @@ pub fn start(p: *Pin) !void {
     p.hover = .none;
     p.drag_from = null;
     p.dirty = true;
-    std.log.info("pin: annotating in the editor", .{});
+    log.info("annotating in the editor", .{});
 }
 
 /// The picture as a PNG in the cache, for the editor to open.
@@ -69,7 +70,7 @@ pub fn pump(p: *Pin) void {
     var buf: [65536]u8 = undefined;
     const n = sys.read(e.fd, &buf) catch 0;
     if (n > 0 and e.got.items.len + n <= max_png) {
-        e.got.appendSlice(p.gpa, buf[0..n]) catch |err| std.log.warn("pin: {t}", .{err});
+        e.got.appendSlice(p.gpa, buf[0..n]) catch |err| log.warn("{t}", .{err});
         return;
     }
     if (n > 0) return; // too big: ignored, read to the end
@@ -81,9 +82,9 @@ fn finish(p: *Pin) void {
     p.edit = null;
     defer e.deinit(p.gpa);
     p.dirty = true;
-    if (e.got.items.len == 0) return std.log.info("pin: back from the editor, unchanged", .{});
+    if (e.got.items.len == 0) return log.info("back from the editor, unchanged", .{});
     const img = png.decode(p.gpa, e.got.items) catch |err| {
-        std.log.warn("pin: the editor's picture does not decode: {t}", .{err});
+        log.warn("the editor's picture does not decode: {t}", .{err});
         return;
     };
     p.img.deinit(p.gpa);
@@ -91,5 +92,5 @@ fn finish(p: *Pin) void {
     // the cached fitted copy is of the old picture (its buffer may be
     // at the same address)
     p.fit.deinit(p.gpa);
-    std.log.info("pin: updated from the editor ({d}x{d})", .{ img.width, img.height });
+    log.info("updated from the editor ({d}x{d})", .{ img.width, img.height });
 }

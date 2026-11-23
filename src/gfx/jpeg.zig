@@ -291,8 +291,8 @@ pub fn isJpeg(data: []const u8) bool {
     return data.len >= 3 and data[0] == 0xFF and data[1] == 0xD8 and data[2] == 0xFF;
 }
 
-pub fn decode(alloc: std.mem.Allocator, data: []const u8) Error!png.Image {
-    var d: Decoder = .{ .alloc = alloc, .data = data };
+pub fn decode(gpa: std.mem.Allocator, data: []const u8) Error!png.Image {
+    var d: Decoder = .{ .alloc = gpa, .data = data };
     defer d.deinit();
     try d.run();
     return d.pixels();

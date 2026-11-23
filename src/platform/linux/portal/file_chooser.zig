@@ -20,18 +20,18 @@ pub const SaveFileOptions = struct {
 /// Ask for a path to save a PNG to (org.freedesktop.portal.FileChooser
 /// SaveFile). Returns the chosen local path (owned) when granted. The
 /// dialog already asked about overwriting an existing file.
-pub fn saveFile(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: SaveFileOptions) !Result([]u8) {
-    var req = try beginSaveFile(alloc, bus, opts);
-    defer req.deinit(alloc);
-    try req.wait(alloc, bus, request.timeout_file_chooser_ms);
-    return savedPath(alloc, &req);
+pub fn saveFile(gpa: std.mem.Allocator, bus: *dbus.Connection, opts: SaveFileOptions) !Result([]u8) {
+    var req = try beginSaveFile(gpa, bus, opts);
+    defer req.deinit(gpa);
+    try req.wait(gpa, bus, request.timeout_file_chooser_ms);
+    return savedPath(gpa, &req);
 }
 
 /// Start asking where to save without blocking: feed bus messages to the
 /// Request's handle(), then read the answer with savedPath().
-pub fn beginSaveFile(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: SaveFileOptions) !Request {
+pub fn beginSaveFile(gpa: std.mem.Allocator, bus: *dbus.Connection, opts: SaveFileOptions) !Request {
     var tok_buf: [64]u8 = undefined;
-    var m = dbus.Marshal.init(alloc);
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putString(opts.parent_window);
     try m.putString(opts.title);
@@ -39,14 +39,14 @@ pub fn beginSaveFile(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: Save
     const token = try d.token("handle_token", &tok_buf, "shotlet_f");
     try putSaveFileOptions(d, opts);
     d.end();
-    return Request.start(alloc, bus, "org.freedesktop.portal.FileChooser", "SaveFile", "ssa{sv}", m.buf.items, token);
+    return Request.start(gpa, bus, "org.freedesktop.portal.FileChooser", "SaveFile", "ssa{sv}", m.buf.items, token);
 }
 
 /// A finished SaveFile request's answer: the chosen local path (owned)
 /// when granted.
-pub fn savedPath(alloc: std.mem.Allocator, req: *const Request) !Result([]u8) {
+pub fn savedPath(gpa: std.mem.Allocator, req: *const Request) !Result([]u8) {
     if (req.outcome.? != .granted) return request.notGranted([]u8, req.outcome.?);
-    return .{ .granted = try chosenPath(alloc, req) };
+    return .{ .granted = try chosenPath(gpa, req) };
 }
 
 /// The a{sv} entries of a SaveFile call after its handle_token: modal,
@@ -79,9 +79,9 @@ pub const FolderOptions = struct {
 /// Start asking for a folder (FileChooser OpenFile with directory=true)
 /// without blocking: feed bus messages to the Request's handle() while
 /// the window stays responsive, then read the answer with chosenPath().
-pub fn beginChooseFolder(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: FolderOptions) !Request {
+pub fn beginChooseFolder(gpa: std.mem.Allocator, bus: *dbus.Connection, opts: FolderOptions) !Request {
     var tok_buf: [64]u8 = undefined;
-    var m = dbus.Marshal.init(alloc);
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putString(""); // parent_window
     try m.putString(opts.title);
@@ -92,12 +92,12 @@ pub fn beginChooseFolder(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: 
     try d.entry("accept_label", "Select");
     if (opts.current_folder) |dir| try putCurrentFolder(&m, dir);
     d.end();
-    return Request.start(alloc, bus, "org.freedesktop.portal.FileChooser", "OpenFile", "ssa{sv}", m.buf.items, token);
+    return Request.start(gpa, bus, "org.freedesktop.portal.FileChooser", "OpenFile", "ssa{sv}", m.buf.items, token);
 }
 
 /// The local path a granted FileChooser request chose (owned).
-pub fn chosenPath(alloc: std.mem.Allocator, req: *const Request) ![]u8 {
-    return uri.toFilePath(alloc, try firstUri(req));
+pub fn chosenPath(gpa: std.mem.Allocator, req: *const Request) ![]u8 {
+    return uri.toFilePath(gpa, try firstUri(req));
 }
 
 /// The current_folder option: bytes with a terminating NUL, not a string.

@@ -61,15 +61,13 @@ fn cutGif(gpa: std.mem.Allocator, src: []const u8, dst: [:0]const u8, r: Range) 
     try enc.finish(r.end_ms - r.start_ms);
 }
 
-/// The first picture of an MP4 at `ms`, as 0xFFRRGGBB w x h (ffmpeg).
-pub const frameAt = ffmpeg.frameAt;
+const testutil = @import("../testutil.zig");
 
 test "trimmed GIFs keep the pictures of the range" {
     const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-trim");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
-    const src = try std.fmt.allocPrint(gpa, "{s}/a.gif", .{dir});
+    var tmp = try testutil.TmpDir.init("shotlet-trim");
+    defer tmp.deinit();
+    const src = try tmp.joinZ("a.gif");
     defer gpa.free(src);
     {
         const fd = try sys.createWrite(src);
@@ -86,7 +84,7 @@ test "trimmed GIFs keep the pictures of the range" {
     const dst = try outputPath(gpa, src);
     defer gpa.free(dst);
     try std.testing.expect(std.mem.endsWith(u8, dst, "/a-trim.gif"));
-    try cut(gpa, @ptrCast(std.c.environ), src, dst, .{ .start_ms = 250, .end_ms = 650 });
+    try cut(gpa, testutil.envp(), src, dst, .{ .start_ms = 250, .end_ms = 650 });
     const data = try sys.readFileAlloc(gpa, dst, 1 << 20);
     defer gpa.free(data);
     const st = try gifdec.stats(gpa, data);

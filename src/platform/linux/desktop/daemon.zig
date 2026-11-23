@@ -6,6 +6,7 @@
 //! io.github.midnattsol.Shotlet (its app id).
 
 const std = @import("std");
+const log = std.log.scoped(.daemon);
 const dbus = @import("../dbus.zig");
 const portal = @import("../portal.zig");
 const sys = @import("../sys.zig");
@@ -26,7 +27,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
 
     // single instance: lose the name race -> another daemon already runs
     if (!(bus.requestName(@import("../../../app_id.zig").app_id) catch true)) {
-        std.log.warn("shotlet daemon is already running", .{});
+        log.warn("already running", .{});
         return;
     }
     portal.registerApp(gpa, &bus);
@@ -42,9 +43,9 @@ pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     };
     var tray = try tray_mod.Tray.init(gpa, &bus, &icons);
 
-    std.log.info("shotlet daemon running", .{});
-    var log = LogFile.init(env, foreground);
-    try serve(gpa, env, &bus, &tray, &log);
+    log.info("running", .{});
+    var log_file = LogFile.init(env, foreground);
+    try serve(gpa, env, &bus, &tray, &log_file);
 }
 
 /// Double fork + setsid: the shell gets control back and the daemon can
@@ -60,26 +61,26 @@ fn detach(env: Env) void {
 }
 
 /// The bus loop: tray calls until Quit or the session bus goes away.
-fn serve(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, tray: *tray_mod.Tray, log: *LogFile) !void {
+fn serve(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, tray: *tray_mod.Tray, log_file: *LogFile) !void {
     while (true) {
         // wake up now and then to keep the log bounded: children write to
         // it through the stderr they inherit
         const maybe = bus.nextMessageDeadline(sys.monoMs() + 60_000) catch |err| {
             if (err == error.Disconnected) {
-                std.log.warn("session bus closed; exiting daemon", .{});
+                log.warn("session bus closed; exiting", .{});
                 return;
             }
             if (dbus.isFatal(err)) return err;
             // one malformed message must never take the tray down
-            std.log.warn("dropped malformed bus message: {t}", .{err});
+            log.warn("dropped malformed bus message: {t}", .{err});
             continue;
         };
-        log.check();
+        log_file.check();
         var msg = maybe orelse continue;
         defer msg.deinit(gpa);
 
         const action = tray.handleMessage(&msg) catch |err| blk: {
-            std.log.warn("tray message error: {t}", .{err});
+            log.warn("tray message error: {t}", .{err});
             if (msg.type == .method_call) {
                 bus.replyError(&msg, "org.freedesktop.DBus.Error.InvalidArgs", "malformed arguments") catch {};
             }
@@ -122,9 +123,9 @@ fn redirectStdio(env: Env) void {
         sys.dup2(null_fd, 0);
         if (null_fd > 2) sys.close(null_fd);
     } else |_| {}
-    var log = LogFile.init(env, false);
-    log.rotateIfBig();
-    log.reopen();
+    var log_file = LogFile.init(env, false);
+    log_file.rotateIfBig();
+    log_file.reopen();
 }
 
 /// The daemon log in $XDG_STATE_HOME/shotlet (0600). Rotated past
@@ -189,6 +190,6 @@ const LogFile = struct {
                 sys.close(fd);
             } else |_| {}
         }
-        std.log.info("daemon log rotated", .{});
+        log.info("daemon log rotated", .{});
     }
 };

@@ -11,7 +11,7 @@ pub const Face = struct {
     path: []u8,
     index: u32 = 0,
 
-    pub fn deinit(self: Face, alloc: std.mem.Allocator) void {
-        alloc.free(self.path);
+    pub fn deinit(self: Face, gpa: std.mem.Allocator) void {
+        gpa.free(self.path);
     }
 };

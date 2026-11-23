@@ -8,6 +8,7 @@
 //! stays until closed: a recording is not glanced at like a screenshot.
 
 const std = @import("std");
+const log = std.log.scoped(.quick_video);
 const uri_mod = @import("../uri.zig");
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
@@ -23,6 +24,7 @@ const motion = @import("../ui/motion.zig");
 const press = @import("../ui/press.zig");
 const scale = @import("../ui/scale.zig");
 const theme = @import("../ui/theme.zig");
+const Notice = @import("../ui/notice.zig").Notice;
 const card = @import("../ui/recui/vidcard.zig");
 const keepvid = @import("keepvid.zig");
 const files = @import("files.zig");
@@ -47,8 +49,8 @@ const Quick = struct {
     press: press.Press(card.Control) = .{},
     /// fading in from the first frame, out once closed
     life: motion.Life = .{},
-    notice: []const u8 = "",
-    notice_until: i64 = 0,
+    /// "Copied", "Saved" over the card for a moment
+    notice: Notice = .{},
     play_from: i64 = 0,
     dirty: bool = true,
     drag: fui.DragOut = .{},
@@ -105,7 +107,7 @@ const Quick = struct {
             .gif = self.info.format == .gif,
             .hover = self.hover,
             .hovered = self.hover != null,
-            .notice = if (now < self.notice_until) self.notice else "",
+            .notice = self.notice.text(now),
             .alpha = alpha,
             .th = self.th,
         });
@@ -113,8 +115,7 @@ const Quick = struct {
     }
 
     fn say(self: *Quick, s: []const u8) void {
-        self.notice = s;
-        self.notice_until = sys.monoMs() + 1200;
+        self.notice.show(s, sys.monoMs(), 1200);
         self.dirty = true;
     }
 
@@ -129,7 +130,7 @@ const Quick = struct {
                 self.hover = h;
                 if (self.press.held() == .body and !self.drag.active and self.press.dragged(m.x, m.y, self.factor())) {
                     self.press.cancel();
-                    self.startDrag() catch |err| std.log.warn("quick video: drag failed: {t}", .{err});
+                    self.startDrag() catch |err| log.warn("drag failed: {t}", .{err});
                 }
                 self.win.setCursor(self.cursor()) catch {};
             },
@@ -153,7 +154,7 @@ const Quick = struct {
 
     fn act(self: *Quick, c: card.Control) void {
         self.actInner(c) catch |err| {
-            std.log.warn("quick video: {t} failed: {t}", .{ c, err });
+            log.warn("{t} failed: {t}", .{ c, err });
             self.say("Failed");
         };
     }
@@ -163,7 +164,7 @@ const Quick = struct {
             .close => self.life.leave(sys.monoMs()),
             .copy => {
                 try files.copyToClipboard(self.gpa, &self.win, self.info.path);
-                std.log.info("quick video: copied {s}", .{self.info.path});
+                log.info("copied {s}", .{self.info.path});
                 self.say("Copied");
             },
             .save_as => {
@@ -171,7 +172,7 @@ const Quick = struct {
                 defer bus.deinit();
                 const saved = (try files.saveAs(self.gpa, self.env, &bus, self.info.path)) orelse return;
                 defer self.gpa.free(saved);
-                std.log.info("quick video: saved to {s}", .{saved});
+                log.info("saved to {s}", .{saved});
                 self.say("Saved");
             },
             .trim => {
@@ -188,7 +189,7 @@ const Quick = struct {
         const poster = try history.readFile(self.gpa, self.root, self.id, .thumb);
         try self.drag.start(&self.win, poster, uri, null);
         self.dirty = true;
-        std.log.info("quick video: dragging {s}", .{self.info.path});
+        log.info("dragging {s}", .{self.info.path});
     }
 
     /// A finished drag closes the thumbnail; a cancelled one keeps it.
@@ -203,10 +204,7 @@ const Quick = struct {
         const now = sys.monoMs();
         if (self.life.busy(now)) self.dirty = true;
         if (self.life.gone(now)) self.done = true;
-        if (self.notice_until != 0 and now >= self.notice_until) {
-            self.notice_until = 0;
-            self.dirty = true;
-        }
+        if (self.notice.expire(now)) self.dirty = true;
     }
 
     fn open(self: *Quick) !void {
@@ -253,7 +251,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
     };
     defer q.win.deinit();
     try q.open();
-    std.log.info("quick video: showing {s} ({d} ms)", .{ id, vi.info.duration_ms });
+    log.info("showing {s} ({d} ms)", .{ id, vi.info.duration_ms });
     while (!q.done) {
         try q.win.flush();
         var fds = [_]sys.pollfd{.{ .fd = q.win.pollFd(), .events = sys.POLL.IN, .revents = 0 }};

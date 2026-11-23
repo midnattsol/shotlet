@@ -4,6 +4,7 @@
 //! (org.freedesktop.FileManager1).
 
 const std = @import("std");
+const log = std.log.scoped(.desktop);
 const dbus = @import("dbus.zig");
 const portal = @import("portal.zig");
 const window = @import("window.zig");
@@ -17,8 +18,9 @@ pub const Appearance = types.Appearance;
 pub const SaveOptions = types.SaveOptions;
 pub const Choice = types.Choice;
 
-/// The connection to the desktop's services: the D-Bus session bus.
-pub const Session = dbus.Connection;
+/// The connection to the desktop's services (api: desktop.Bus): the
+/// D-Bus session bus.
+pub const Bus = dbus.Connection;
 
 /// A file dialog in progress, answered through pump().
 pub const Dialog = portal.Request;
@@ -28,18 +30,18 @@ pub const Addresses = @import("desktop/session_env.zig").Addresses;
 pub const addresses = @import("desktop/session_env.zig").addresses;
 
 /// Connect to the session, telling the portals who we are.
-pub fn connect(gpa: std.mem.Allocator, env: Env) !Session {
+pub fn connect(gpa: std.mem.Allocator, env: Env) !dbus.Connection {
     return portal.connectApp(gpa, env.session.bus);
 }
 
 /// Connect without telling the portals who we are (identify() does):
 /// for a quick question, or to ask the shell first.
-pub fn connectBrief(gpa: std.mem.Allocator, env: Env) !Session {
+pub fn connectBrief(gpa: std.mem.Allocator, env: Env) !dbus.Connection {
     return dbus.Connection.connectSession(gpa, env.session.bus);
 }
 
 /// Tell the portals who we are, before any portal call on `bus`.
-pub fn identify(gpa: std.mem.Allocator, bus: *Session) void {
+pub fn identify(gpa: std.mem.Allocator, bus: *dbus.Connection) void {
     portal.registerApp(gpa, bus);
 }
 
@@ -47,7 +49,7 @@ pub fn identify(gpa: std.mem.Allocator, bus: *Session) void {
 pub const readAppearance = appearance.read;
 
 /// Subscribe to appearance changes (pump() folds them in).
-pub fn watchAppearance(bus: *Session) !void {
+pub fn watchAppearance(bus: *dbus.Connection) !void {
     return appearance.watch(bus);
 }
 
@@ -55,12 +57,12 @@ pub fn watchAppearance(bus: *Session) !void {
 /// appearance changes fold into `look` (true when it changed), and the
 /// answer to `dialog` is kept in it (Dialog.done(); a dialog left
 /// unanswered for portal.timeout_file_chooser_ms ends as a timeout).
-pub fn pump(bus: *Session, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*Dialog) bool {
+pub fn pump(bus: *dbus.Connection, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*Dialog) bool {
     // the dialog's own messages first (Request.step: the one wait path);
     // the rest stays queued for the appearance
     if (dialog) |d| if (!d.done()) {
         _ = d.step(gpa, bus, portal.timeout_file_chooser_ms) catch |err| {
-            std.log.warn("file chooser: {t}", .{err});
+            log.warn("file chooser: {t}", .{err});
             d.outcome = .unavailable;
         };
     };
@@ -79,12 +81,12 @@ pub fn pump(bus: *Session, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*
 }
 
 /// Ask where to save a file (blocking); over `over` when given.
-pub fn askSavePath(gpa: std.mem.Allocator, bus: *Session, opts: SaveOptions, over: ?*window.Window) !Choice {
+pub fn askSavePath(gpa: std.mem.Allocator, bus: *dbus.Connection, opts: SaveOptions, over: ?*window.Window) !Choice {
     return save_dialog.askSavePath(gpa, bus, opts, over);
 }
 
 /// Start asking for a folder without blocking; pump() until done().
-pub fn chooseFolder(gpa: std.mem.Allocator, bus: *Session, current: ?[]const u8) !Dialog {
+pub fn chooseFolder(gpa: std.mem.Allocator, bus: *dbus.Connection, current: ?[]const u8) !Dialog {
     return portal.beginChooseFolder(gpa, bus, .{ .current_folder = current });
 }
 
@@ -92,7 +94,7 @@ pub fn chooseFolder(gpa: std.mem.Allocator, bus: *Session, current: ?[]const u8)
 pub fn dialogChoice(gpa: std.mem.Allocator, d: *const Dialog) Choice {
     if (d.outcome.? != .granted) return .cancelled;
     const p = portal.chosenPath(gpa, d) catch |err| {
-        std.log.warn("file chooser: {t}", .{err});
+        log.warn("file chooser: {t}", .{err});
         return .cancelled;
     };
     return .{ .chosen = p };
@@ -102,22 +104,22 @@ pub fn dialogChoice(gpa: std.mem.Allocator, d: *const Dialog) Choice {
 pub const daemon = @import("desktop/daemon.zig").run;
 
 /// The session's descriptor, to poll with others for what it sends.
-pub fn pollFd(bus: *const Session) @import("sys.zig").fd_t {
+pub fn pollFd(bus: *const dbus.Connection) @import("sys.zig").fd_t {
     return bus.fd;
 }
 
 /// Whether the session already holds messages (poll would not wake).
-pub fn hasPending(bus: *Session) bool {
+pub fn hasPending(bus: *dbus.Connection) bool {
     return bus.hasPending();
 }
 
 /// A notification (best effort).
-pub fn notify(gpa: std.mem.Allocator, bus: *Session, summary: []const u8, text: []const u8) void {
+pub fn notify(gpa: std.mem.Allocator, bus: *dbus.Connection, summary: []const u8, text: []const u8) void {
     portal.notify(gpa, bus, summary, text);
 }
 
 /// Show `path` selected in the file manager.
-pub fn revealFile(gpa: std.mem.Allocator, bus: *Session, path: []const u8) !void {
+pub fn revealFile(gpa: std.mem.Allocator, bus: *dbus.Connection, path: []const u8) !void {
     return filemanager.showItem(gpa, bus, path);
 }
 

@@ -20,9 +20,9 @@ pub const Page = struct {
     words: []Word,
     text_buf: []u8,
 
-    pub fn deinit(self: *Page, alloc: std.mem.Allocator) void {
-        alloc.free(self.words);
-        alloc.free(self.text_buf);
+    pub fn deinit(self: *Page, gpa: std.mem.Allocator) void {
+        gpa.free(self.words);
+        gpa.free(self.text_buf);
         self.* = undefined;
     }
 
@@ -42,13 +42,13 @@ pub const Page = struct {
 
 /// The word rows (level 5) of Tesseract's TSV: level page block par line
 /// word left top width height conf text. Empty words are dropped.
-pub fn parseTsv(alloc: std.mem.Allocator, tsv: []const u8) !Page {
+pub fn parseTsv(gpa: std.mem.Allocator, tsv: []const u8) !Page {
     var words: std.ArrayList(Word) = .empty;
-    defer words.deinit(alloc);
+    defer words.deinit(gpa);
     var text: std.ArrayList(u8) = .empty;
-    defer text.deinit(alloc);
+    defer text.deinit(gpa);
     var spans: std.ArrayList([2]usize) = .empty;
-    defer spans.deinit(alloc);
+    defer spans.deinit(gpa);
     var lines = std.mem.splitScalar(u8, tsv, '\n');
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r");
@@ -71,9 +71,9 @@ pub fn parseTsv(alloc: std.mem.Allocator, tsv: []const u8) !Page {
         if (!ok or v[0] != 5) continue;
         const word = std.mem.trim(u8, f.rest(), " \t");
         if (word.len == 0 or v[8] <= 0 or v[9] <= 0) continue;
-        try spans.append(alloc, .{ text.items.len, text.items.len + word.len });
-        try text.appendSlice(alloc, word);
-        try words.append(alloc, .{
+        try spans.append(gpa, .{ text.items.len, text.items.len + word.len });
+        try text.appendSlice(gpa, word);
+        try words.append(gpa, .{
             .block = @intCast(@max(0, v[2])),
             .par = @intCast(@max(0, v[3])),
             .line = @intCast(@max(0, v[4])),
@@ -82,10 +82,10 @@ pub fn parseTsv(alloc: std.mem.Allocator, tsv: []const u8) !Page {
             .text = "",
         });
     }
-    const buf = try text.toOwnedSlice(alloc);
-    errdefer alloc.free(buf);
+    const buf = try text.toOwnedSlice(gpa);
+    errdefer gpa.free(buf);
     for (words.items, spans.items) |*w, sp| w.text = buf[sp[0]..sp[1]];
-    return .{ .words = try words.toOwnedSlice(alloc), .text_buf = buf };
+    return .{ .words = try words.toOwnedSlice(gpa), .text_buf = buf };
 }
 
 /// How much to enlarge a region before reading it: screen text is small
@@ -99,10 +99,10 @@ pub fn scaleFor(w: u32, h: u32) u32 {
 
 /// The region `r` of `px` (`pw` wide), enlarged `scale` times (nearest),
 /// as dark text on a light ground (light-on-dark is inverted). Owned.
-pub fn prepare(alloc: std.mem.Allocator, px: []const u32, pw: u32, r: Rect, scale: u32) ![]u32 {
+pub fn prepare(gpa: std.mem.Allocator, px: []const u32, pw: u32, r: Rect, scale: u32) ![]u32 {
     const w: usize = @intCast(r.w);
     const h: usize = @intCast(r.h);
-    const out = try alloc.alloc(u32, w * h * scale * scale);
+    const out = try gpa.alloc(u32, w * h * scale * scale);
     var lum_sum: u64 = 0;
     for (0..h * scale) |y| for (0..w * scale) |x| {
         const p = px[(@as(usize, @intCast(r.y)) + y / scale) * pw + @as(usize, @intCast(r.x)) + x / scale];

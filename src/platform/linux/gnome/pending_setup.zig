@@ -7,6 +7,7 @@
 //! answer, once.
 
 const std = @import("std");
+const log = std.log.scoped(.gnome);
 const statefile = @import("../../../app/statefile.zig");
 const proc = @import("../proc.zig");
 const Env = @import("../../../app/env.zig").Env;
@@ -17,7 +18,7 @@ const file_name = "gnome-setup-pending";
 /// shortcuts go to it (--move-shortcut), else they stay (--keep-shortcut).
 pub fn record(home: []const u8, move: bool) void {
     statefile.write(home, .state, file_name, if (move) "move\n" else "keep\n") catch |err|
-        std.log.warn("could not remember to finish the setup: {t}", .{err});
+        log.warn("could not remember to finish the setup: {t}", .{err});
 }
 
 /// Nothing is pending any more (install ran by hand, or uninstall).
@@ -44,7 +45,7 @@ fn parseAnswer(s: []const u8) ?bool {
 /// The extension runs: finish a pending install in the background.
 pub fn finish(env: Env) void {
     const move = take(env.home) orelse return;
-    std.log.info("finishing the GNOME integration setup ({s} the shortcuts)", .{if (move) "moving" else "keeping"});
+    log.info("finishing the GNOME integration setup ({s} the shortcuts)", .{if (move) "moving" else "keeping"});
     proc.spawnSelf(env.envp, &.{ "gnome-integration", "install", if (move) "--move-shortcut" else "--keep-shortcut" }, null);
 }
 

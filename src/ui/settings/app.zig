@@ -3,6 +3,7 @@
 //! input, and redrawing when something changed.
 
 const std = @import("std");
+const log = std.log.scoped(.settings);
 const desktop = @import("../../platform/api.zig").desktop;
 const window = @import("../../platform/api.zig").window;
 const config = @import("../../app/config.zig");
@@ -41,7 +42,7 @@ pub const App = struct {
     cfg: config.Config,
     st: model.State,
     win: *Window,
-    bus: *?desktop.Session,
+    bus: *?desktop.Bus,
     regions: std.ArrayList(Region) = .empty,
     folder_req: ?desktop.Dialog = null,
     frame: frame_mod.Frame = .{},
@@ -54,17 +55,17 @@ pub const App = struct {
         return .{ .h = @intCast(self.frame.ch), .f = scale.of(self.win.scale120) };
     }
 
-    pub fn busPtr(self: *App) ?*desktop.Session {
+    pub fn busPtr(self: *App) ?*desktop.Bus {
         return if (self.bus.*) |*b| b else null;
     }
 
     pub fn saveConfig(self: *App) void {
         config.save(self.alloc, self.env.home, &self.cfg) catch |err|
-            std.log.warn("could not save config: {t}", .{err});
+            log.warn("could not save config: {t}", .{err});
     }
 
     /// Appearance changes and the folder chooser's answer.
-    fn pollBus(self: *App, b: *desktop.Session) void {
+    fn pollBus(self: *App, b: *desktop.Bus) void {
         if (desktop.pump(b, self.alloc, &self.st.prefs, if (self.folder_req) |*r| r else null)) {
             self.st.theme = theme_mod.of(self.st.prefs);
             self.st.dirty = true;
@@ -87,7 +88,7 @@ pub const App = struct {
             @memcpy(self.cfg.save_dir[0..p.len], p);
             self.cfg.save_dir_len = p.len;
             self.saveConfig();
-        } else std.log.warn("folder path too long: {s}", .{p});
+        } else log.warn("folder path too long: {s}", .{p});
     }
 
     fn onEvent(self: *App, ev: window.InputEvent) !Next {
@@ -228,7 +229,7 @@ pub const App = struct {
 
 /// The window's state from the desktop: appearance, shell integration,
 /// capture modes, and the headless test overrides.
-fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) model.State {
+fn initState(gpa: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Bus) model.State {
     const last = platform_capture.lastPath(env.home);
     var st: model.State = .{ .direct = last == .direct, .last_path = last };
     if (bus) |b| {
@@ -237,10 +238,10 @@ fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session)
     }
     st.theme = theme_mod.of(st.prefs);
     st.env = env;
-    st.integration = shell.state(alloc, env, bus);
+    st.integration = shell.state(gpa, env, bus);
     st.words = shell.words();
-    if (st.integration == .active) st.capture = shell.captureInfo(alloc, bus.?);
-    st.modes = settings_modes.load(alloc, env, bus);
+    if (st.integration == .active) st.capture = shell.captureInfo(gpa, bus.?);
+    st.modes = settings_modes.load(gpa, env, bus);
     // SHOTLET_SETTINGS_FOCUS=n starts with the n-th control focused, and
     // SHOTLET_SETTINGS_VIEW=general|editor|shortcuts on that view, so
     // headless runs (which cannot type) can check them
@@ -253,29 +254,29 @@ fn initState(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session)
     return st;
 }
 
-pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
+pub fn run(gpa: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
     var smoke_deadline: i64 = 0;
     if (smoke_ms > 0) smoke_deadline = sys.monoMs() + smoke_ms;
-    const cfg = config.load(alloc, env.home);
-    text.init(alloc);
+    const cfg = config.load(gpa, env.home);
+    text.init(gpa);
     defer text.deinit();
     defer icons.deinit();
 
     // the session bus: appearance (and its changes) and the folder chooser
-    var bus: ?desktop.Session = desktop.connect(alloc, env) catch null;
+    var bus: ?desktop.Bus = desktop.connect(gpa, env) catch null;
     defer if (bus) |*b| b.deinit();
-    const st = initState(alloc, env, if (bus) |*b| b else null);
+    const st = initState(gpa, env, if (bus) |*b| b else null);
 
-    var win = try Window.init(alloc, env);
+    var win = try Window.init(gpa, env);
     defer win.deinit();
     win.current_cursor = .arrow;
     const size = frame_mod.outer(720, 780);
     try win.open("Shotlet settings", .{ .fullscreen = false, .transparent = true, .width = size[0], .height = size[1] });
 
-    var app: App = .{ .alloc = alloc, .env = env, .cfg = cfg, .st = st, .win = &win, .bus = &bus };
-    defer app.regions.deinit(alloc);
-    defer app.frame.deinit(alloc);
-    defer if (app.folder_req) |*r| r.deinit(alloc);
+    var app: App = .{ .alloc = gpa, .env = env, .cfg = cfg, .st = st, .win = &win, .bus = &bus };
+    defer app.regions.deinit(gpa);
+    defer app.frame.deinit(gpa);
+    defer if (app.folder_req) |*r| r.deinit(gpa);
 
     while (true) {
         if (smoke_deadline != 0 and sys.monoMs() > smoke_deadline) break;
@@ -287,5 +288,5 @@ pub fn run(alloc: std.mem.Allocator, env: env_mod.Env, smoke_ms: i64) !void {
         };
         try app.redraw();
     }
-    config.save(alloc, env.home, &app.cfg) catch {};
+    config.save(gpa, env.home, &app.cfg) catch {};
 }

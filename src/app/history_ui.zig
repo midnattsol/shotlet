@@ -11,6 +11,7 @@
 //! render and ocr_scan (the background reader).
 
 const std = @import("std");
+const log = std.log.scoped(.history);
 const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
@@ -45,7 +46,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
     if (p.bus_()) |b| p.th = theme_mod.of(theme_mod.readPrefs(b, 1000));
     try p.load();
     p.searchable = ocr.available();
-    std.log.info("history: text search {s}", .{if (p.searchable) "on (tesseract)" else "off (no libtesseract)"});
+    log.info("text search {s}", .{if (p.searchable) "on (tesseract)" else "off (no libtesseract)"});
     try open(&p);
     p.startOcr();
     const end = if (smoke_ms > 0) sys.monoMs() + smoke_ms else 0;

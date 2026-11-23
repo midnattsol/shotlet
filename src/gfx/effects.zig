@@ -29,13 +29,13 @@ comptime {
 }
 
 test "effects clip to the buffer and leave the outside alone" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var px: [16]u32 = @splat(0xFF000000);
     px[5] = 0xFFFFFFFF;
     redact(&px, 4, 4, .{ .x = -2, .y = -2, .w = 3, .h = 3 }, 0x123456);
     try std.testing.expectEqual(@as(u32, 0xFF123456), px[0]);
     try std.testing.expectEqual(@as(u32, 0xFF000000), px[2]);
-    try blur(alloc, &px, 4, 4, .{ .x = 2, .y = 2, .w = 10, .h = 10 }, 2);
+    try blur(gpa, &px, 4, 4, .{ .x = 2, .y = 2, .w = 10, .h = 10 }, 2);
     try std.testing.expectEqual(@as(u32, 0xFF123456), px[0]);
     gradient(&px, 4, 4, .{ .x = 0, .y = 0, .w = 4, .h = 4 }, 0xFF000000, 0xFFFFFFFF);
     try std.testing.expectEqual(@as(u32, 0xFF000000), px[0]);
@@ -47,7 +47,7 @@ test "effects clip to the buffer and leave the outside alone" {
 }
 
 test "blur hides detail and noise stays faint" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const W = 120;
     const H = 40;
     var px: [W * H]u32 = undefined;
@@ -55,8 +55,8 @@ test "blur hides detail and noise stays faint" {
     for (&px, 0..) |*p, i| p.* = if ((i % W) % 4 == 0) 0xFF000000 else 0xFFFFFFFF;
     var plain = px;
     const area: Rect = .{ .x = 0, .y = 0, .w = W, .h = H };
-    try blur(alloc, &px, W, H, area, 12);
-    try boxBlur(alloc, &plain, W, H, area.clip(W, H).?, 12);
+    try blur(gpa, &px, W, H, area, 12);
+    try boxBlur(gpa, &plain, W, H, area.clip(W, H).?, 12);
     var lo: u32 = 255;
     var hi: u32 = 0;
     for (px, plain, 0..) |p, q, i| {
@@ -75,8 +75,8 @@ test "blur hides detail and noise stays faint" {
         return e;
     };
     // extreme inputs: nothing to do or clipped, never a crash
-    try blur(alloc, &px, W, H, .{ .x = std.math.maxInt(i32), .y = 0, .w = std.math.maxInt(i32), .h = 5 }, 5);
-    try blur(alloc, &px, W, H, .{ .x = std.math.minInt(i32), .y = std.math.minInt(i32), .w = std.math.maxInt(i32), .h = std.math.maxInt(i32) }, std.math.maxInt(u32));
+    try blur(gpa, &px, W, H, .{ .x = std.math.maxInt(i32), .y = 0, .w = std.math.maxInt(i32), .h = 5 }, 5);
+    try blur(gpa, &px, W, H, .{ .x = std.math.minInt(i32), .y = std.math.minInt(i32), .w = std.math.maxInt(i32), .h = std.math.maxInt(i32) }, std.math.maxInt(u32));
     gradient(&px, W, H, .{ .x = std.math.minInt(i32), .y = 0, .w = std.math.maxInt(i32), .h = std.math.maxInt(i32) }, 0, 0xFFFFFFFF);
     dropShadow(&px, W, H, .{ .x = std.math.minInt(i32), .y = std.math.maxInt(i32), .w = std.math.maxInt(i32), .h = 3 }, std.math.maxInt(u32), std.math.minInt(i32), 0xFF000000);
     dropShadow(&px, W, H, .{ .x = 3, .y = 3, .w = 9, .h = 9 }, std.math.maxInt(u32), std.math.maxInt(i32), 0xFF000000);

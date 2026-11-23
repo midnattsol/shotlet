@@ -25,6 +25,7 @@
 //! chrome, menu and menu_draw, input and keys, actions, annotate, ipc.
 
 const std = @import("std");
+const log = std.log.scoped(.pin);
 const shell = @import("../platform/api.zig").shell;
 const desktop = @import("../platform/api.zig").desktop;
 const sys = @import("../platform/api.zig").sys;
@@ -70,13 +71,13 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *png.Image, what: []const u8,
     askDesktop(&pin);
     pin.ipc = ipc.Listener.open(env);
     try pin.open();
-    std.log.info("pin: showing {s} ({d}x{d}, {s})", .{ what, img.width, img.height, if (pin.layer) "layer shell" else if (pin.plain) "plain window" else "kept above by the GNOME extension" });
+    log.info("showing {s} ({d}x{d}, {s})", .{ what, img.width, img.height, if (pin.layer) "layer shell" else if (pin.plain) "plain window" else "kept above by the GNOME extension" });
     try loop(&pin);
-    std.log.info("pin: closed", .{});
+    log.info("closed", .{});
     pin.ipc.close();
     win.closeWindow();
     if (win.hasClipboard()) {
-        std.log.info("pin: serving the clipboard", .{});
+        log.info("serving the clipboard", .{});
         try win.serveClipboard();
     }
 }
@@ -129,7 +130,7 @@ fn loop(p: *Pin) !void {
         _ = try sys.poll(&fds, p.win.pollTimeoutMs(wakeMs(p, now, moving)));
         while (try p.win.nextEventTimeout(0)) |ev| try input.handle(p, ev);
         if (fds[1].revents != 0 and p.ipc.closeAsked()) {
-            std.log.info("pin: closing, as another pin asked", .{});
+            log.info("closing, as another pin asked", .{});
             p.quit = true;
         }
         if (fds[2].revents != 0) annotate.pump(p);

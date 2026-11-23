@@ -16,10 +16,10 @@ const cases = [_]Case{
 };
 
 test "baseline files decode like libjpeg" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     for (cases) |c| {
-        var img = try jpeg.decode(alloc, c.jpg);
-        defer img.deinit(alloc);
+        var img = try jpeg.decode(gpa, c.jpg);
+        defer img.deinit(gpa);
         try std.testing.expectEqual(@as(u32, 37), img.width);
         try std.testing.expectEqual(@as(u32, 29), img.height);
         try std.testing.expectEqual(c.rgb.len, img.pixels.len * 3);
@@ -44,21 +44,21 @@ test "baseline files decode like libjpeg" {
 }
 
 test "progressive files and non-JPEG data are refused" {
-    const alloc = std.testing.allocator;
-    try std.testing.expectError(error.Unsupported, jpeg.decode(alloc, @embedFile("testdata/progressive.jpg")));
-    try std.testing.expectError(error.NotJpeg, jpeg.decode(alloc, "\x89PNG\r\n\x1a\n"));
-    try std.testing.expectError(error.NotJpeg, jpeg.decode(alloc, ""));
-    try std.testing.expectError(error.Truncated, jpeg.decode(alloc, "\xFF\xD8\xFF"));
+    const gpa = std.testing.allocator;
+    try std.testing.expectError(error.Unsupported, jpeg.decode(gpa, @embedFile("testdata/progressive.jpg")));
+    try std.testing.expectError(error.NotJpeg, jpeg.decode(gpa, "\x89PNG\r\n\x1a\n"));
+    try std.testing.expectError(error.NotJpeg, jpeg.decode(gpa, ""));
+    try std.testing.expectError(error.Truncated, jpeg.decode(gpa, "\xFF\xD8\xFF"));
 }
 
 /// Decode `data`; any outcome but a crash or a leak is fine.
-fn tryDecode(alloc: std.mem.Allocator, data: []const u8) void {
-    var img = jpeg.decode(alloc, data) catch return;
-    img.deinit(alloc);
+fn tryDecode(gpa: std.mem.Allocator, data: []const u8) void {
+    var img = jpeg.decode(gpa, data) catch return;
+    img.deinit(gpa);
 }
 
 test "damaged files fail cleanly (fuzz)" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(0x5107_1e7);
     const rnd = prng.random();
     var buf: [4096]u8 = undefined;
@@ -69,11 +69,11 @@ test "damaged files fail cleanly (fuzz)" {
             // flip a few bytes, sometimes cut the file short
             for (0..rnd.intRangeAtMost(usize, 1, 8)) |_| buf[rnd.uintLessThan(usize, n)] = rnd.int(u8);
             const len = if (rnd.boolean()) n else rnd.uintLessThan(usize, n);
-            tryDecode(alloc, buf[0..len]);
+            tryDecode(gpa, buf[0..len]);
         }
         // every prefix
         var len: usize = 0;
-        while (len < c.jpg.len) : (len += 7) tryDecode(alloc, c.jpg[0..len]);
+        while (len < c.jpg.len) : (len += 7) tryDecode(gpa, c.jpg[0..len]);
     }
 }
 

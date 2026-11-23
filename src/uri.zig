@@ -36,12 +36,12 @@ pub fn toFilePathBuf(buf: []u8, uri: []const u8) error{ BadUri, NoSpaceLeft }![]
 }
 
 /// toFilePathBuf, owned.
-pub fn toFilePath(alloc: std.mem.Allocator, uri: []const u8) ![]u8 {
+pub fn toFilePath(gpa: std.mem.Allocator, uri: []const u8) ![]u8 {
     // decoding never makes it longer
-    const buf = try alloc.alloc(u8, uri.len);
-    errdefer alloc.free(buf);
+    const buf = try gpa.alloc(u8, uri.len);
+    errdefer gpa.free(buf);
     const path = try toFilePathBuf(buf, uri);
-    return alloc.realloc(buf, path.len);
+    return gpa.realloc(buf, path.len);
 }
 
 /// The first local file of a text/uri-list ("file:///a%20b.png\r\n..."),
@@ -67,17 +67,17 @@ pub fn writeFileUri(w: *std.Io.Writer, path: []const u8) std.Io.Writer.Error!voi
 }
 
 /// The file:// URI of `path`, owned.
-pub fn fromFilePath(alloc: std.mem.Allocator, path: []const u8) ![]u8 {
-    return build(alloc, path, "");
+pub fn fromFilePath(gpa: std.mem.Allocator, path: []const u8) ![]u8 {
+    return build(gpa, path, "");
 }
 
 /// A text/uri-list naming the one file `path` (CRLF ended), owned.
-pub fn fileUriList(alloc: std.mem.Allocator, path: []const u8) ![]u8 {
-    return build(alloc, path, "\r\n");
+pub fn fileUriList(gpa: std.mem.Allocator, path: []const u8) ![]u8 {
+    return build(gpa, path, "\r\n");
 }
 
-fn build(alloc: std.mem.Allocator, path: []const u8, end: []const u8) ![]u8 {
-    var out: std.Io.Writer.Allocating = .init(alloc);
+fn build(gpa: std.mem.Allocator, path: []const u8, end: []const u8) ![]u8 {
+    var out: std.Io.Writer.Allocating = .init(gpa);
     errdefer out.deinit();
     try writeFileUri(&out.writer, path);
     try out.writer.writeAll(end);
@@ -85,19 +85,19 @@ fn build(alloc: std.mem.Allocator, path: []const u8, end: []const u8) ![]u8 {
 }
 
 test "file URIs become local paths" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     for ([_][2][]const u8{
         .{ "file:///home/x/Im%C3%A1genes/a%20b.png", "/home/x/Imágenes/a b.png" },
         .{ "file://localhost/tmp/x.png", "/tmp/x.png" },
         .{ "file:///tmp/100%25", "/tmp/100%" },
         .{ "file:///tmp/%e2%82%ac", "/tmp/€" },
     }) |c| {
-        const p = try toFilePath(alloc, c[0]);
-        defer alloc.free(p);
+        const p = try toFilePath(gpa, c[0]);
+        defer gpa.free(p);
         try std.testing.expectEqualStrings(c[1], p);
     }
     for ([_][]const u8{ "http://x/y", "file://otherhost/x.png", "file:///a%00b", "file:///bad%zz", "file:///cut%4", "file:///cut%", "file://", "/tmp/x" }) |bad|
-        try std.testing.expectError(error.BadUri, toFilePath(alloc, bad));
+        try std.testing.expectError(error.BadUri, toFilePath(gpa, bad));
     var small: [4]u8 = undefined;
     try std.testing.expectError(error.NoSpaceLeft, toFilePathBuf(&small, "file:///tmp/x.png"));
 }
@@ -114,16 +114,16 @@ test "a uri list gives its first local file" {
 }
 
 test "local paths become file URIs and back" {
-    const alloc = std.testing.allocator;
-    const u = try fileUriList(alloc, "/home/a b/Imágenes/shot#1.png");
-    defer alloc.free(u);
+    const gpa = std.testing.allocator;
+    const u = try fileUriList(gpa, "/home/a b/Imágenes/shot#1.png");
+    defer gpa.free(u);
     try std.testing.expectEqualStrings("file:///home/a%20b/Im%C3%A1genes/shot%231.png\r\n", u);
-    const one = try fromFilePath(alloc, "/tmp/a b");
-    defer alloc.free(one);
+    const one = try fromFilePath(gpa, "/tmp/a b");
+    defer gpa.free(one);
     try std.testing.expectEqualStrings("file:///tmp/a%20b", one);
     for ([_][]const u8{ "/home/a b/Imágenes/shot#1.png", "/tmp/100%/x?y=z&w", "/~user/-._~", "/tab\there/\u{1F600}" }) |path| {
-        const list = try fileUriList(alloc, path);
-        defer alloc.free(list);
+        const list = try fileUriList(gpa, path);
+        defer gpa.free(list);
         var buf: [256]u8 = undefined;
         try std.testing.expectEqualStrings(path, firstFilePath(&buf, list).?);
     }

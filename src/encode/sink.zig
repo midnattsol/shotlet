@@ -4,6 +4,7 @@
 //! A recording with sound goes to the ffmpeg program.
 
 const std = @import("std");
+const log = std.log.scoped(.recording);
 const switches = @import("../platform/api/switches.zig");
 const gif = @import("gif.zig");
 const av = @import("av.zig");
@@ -63,16 +64,16 @@ pub const Sink = struct {
         if (cfg.vaapi != null and want != .libav and want != .ffmpeg) {
             var o = ff_opts;
             o.vaapi = cfg.vaapi;
-            if (ffmpeg.Proc.open(gpa, envp, path, o)) |p| return .{ .backend = .ffmpeg_vaapi, .cfg = cfg, .ff = p, .has_audio = cfg.audio } else |err| std.log.info("recording: ffmpeg with VA-API: {t}", .{err});
+            if (ffmpeg.Proc.open(gpa, envp, path, o)) |p| return .{ .backend = .ffmpeg_vaapi, .cfg = cfg, .ff = p, .has_audio = cfg.audio } else |err| log.info("ffmpeg with VA-API: {t}", .{err});
         }
         if (cfg.audio and want != .libav) {
-            if (ffmpeg.Proc.open(gpa, envp, path, ff_opts)) |p| return .{ .backend = .ffmpeg, .cfg = cfg, .ff = p, .has_audio = true } else |err| std.log.info("recording: ffmpeg: {t}; no sound", .{err});
+            if (ffmpeg.Proc.open(gpa, envp, path, ff_opts)) |p| return .{ .backend = .ffmpeg, .cfg = cfg, .ff = p, .has_audio = true } else |err| log.info("ffmpeg: {t}; no sound", .{err});
         }
         if (want != .ffmpeg) {
             if (av_mp4.Mp4.open(path, .{ .width = cfg.width, .height = cfg.height, .fps = cfg.fps, .quality = cfg.quality })) |m| {
-                std.log.info("recording: {s} through the FFmpeg libraries", .{m.encoder_name});
+                log.info("{s} through the FFmpeg libraries", .{m.encoder_name});
                 return .{ .backend = .libav, .cfg = cfg, .mp4 = m };
-            } else |err| std.log.info("recording: FFmpeg libraries: {t} ({s})", .{ err, if (av.available()) "loaded" else av.missing() });
+            } else |err| log.info("FFmpeg libraries: {t} ({s})", .{ err, if (av.available()) "loaded" else av.missing() });
         }
         var o = ff_opts;
         o.audio = false;
@@ -148,15 +149,15 @@ pub const Sink = struct {
     }
 };
 
+const testutil = @import("../testutil.zig");
+
 test "a GIF sink writes a file the decoder reads" {
     const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-sink");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
-    const path = try std.fmt.allocPrintSentinel(gpa, "{s}/a.gif", .{dir}, 0);
+    var tmp = try testutil.TmpDir.init("shotlet-sink");
+    defer tmp.deinit();
+    const path = try tmp.joinZ("a.gif");
     defer gpa.free(path);
-    const envp: proc.Envp = @ptrCast(std.c.environ);
-    var s = try Sink.open(gpa, envp, path, .{ .format = .gif, .width = 40, .height = 20, .fps = 10 });
+    var s = try Sink.open(gpa, testutil.envp(), path, .{ .format = .gif, .width = 40, .height = 20, .fps = 10 });
     var px: [40 * 20]u32 = undefined;
     for (0..20) |i| {
         for (&px, 0..) |*p, k| p.* = if (k % 40 == i * 2) 0xFFFFFFFF else 0xFF203040;

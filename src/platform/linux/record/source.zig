@@ -3,6 +3,7 @@
 //! (a monitor, cropped to the area; consent once, then the restore token).
 
 const std = @import("std");
+const log = std.log.scoped(.recording);
 const dbus = @import("../dbus.zig");
 const pwstream = @import("../pwstream.zig");
 const config = @import("../../../app/config.zig");
@@ -48,7 +49,7 @@ pub const Opened = union(enum) { ok: Source, cancelled, failed: anyerror };
 
 pub fn open(gpa: std.mem.Allocator, bus: *dbus.Connection, home: []const u8, cfg: *config.Config, want: Want) Opened {
     if (!switches.get().no_shell_record and gnome.isGnome() and shell1.supports(bus, .recording)) {
-        if (openShell(gpa, bus, want)) |s| return .{ .ok = s } else |err| std.log.info("recording: GNOME integration: {t}; the portal", .{err});
+        if (openShell(gpa, bus, want)) |s| return .{ .ok = s } else |err| log.info("GNOME integration: {t}; the portal", .{err});
     }
     return openPortal(gpa, bus, home, cfg, want) catch |err| .{ .failed = err };
 }
@@ -57,7 +58,7 @@ fn openShell(gpa: std.mem.Allocator, bus: *dbus.Connection, want: Want) !Source 
     const node = try shell1.startRecording(bus, .{ .area = want.area, .clicks = want.clicks, .keys = want.keys });
     errdefer shell1.stopRecording(bus);
     const cap = try pwstream.Capture.open(gpa, null);
-    std.log.info("recording: source GNOME integration (node {d})", .{node});
+    log.info("source GNOME integration (node {d})", .{node});
     return .{ .kind = .shell, .cap = cap, .node = node, .stream_rect = want.area, .crop = null };
 }
 
@@ -77,7 +78,7 @@ fn openPortal(gpa: std.mem.Allocator, bus: *dbus.Connection, home: []const u8, c
         return error.NoStream;
     };
     const cap = try pwstream.Capture.open(gpa, session.fd);
-    std.log.info("recording: source ScreenCast portal (node {d}, monitor {d},{d} {d}x{d})", .{ pick.node, pick.rect.x, pick.rect.y, pick.rect.w, pick.rect.h });
+    log.info("source ScreenCast portal (node {d}, monitor {d},{d} {d}x{d})", .{ pick.node, pick.rect.x, pick.rect.y, pick.rect.w, pick.rect.h });
     return .{ .ok = .{ .kind = .portal, .cap = cap, .node = pick.node, .stream_rect = pick.rect, .crop = want.area, .session = session } };
 }
 

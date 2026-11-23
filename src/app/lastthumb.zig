@@ -3,6 +3,7 @@
 //! when the history is off), whatever the thumbnail setting says.
 
 const std = @import("std");
+const log = std.log.scoped(.thumbnail);
 const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
@@ -19,7 +20,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env) !void {
     defer history.freeList(gpa, entries);
     if (entries.len == 0) out.fail(.failure, "no capture kept yet", .{});
     const id = entries[0].id.slice();
-    std.log.info("thumbnail: {s} again", .{id});
+    log.info("{s} again", .{id});
     if (keepvid.read(gpa, root, id)) |v| {
         gpa.free(v.buf);
         return @import("../record/quickvid.zig").run(gpa, env, root, id);

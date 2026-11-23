@@ -22,6 +22,7 @@ const parse = @import("config/parse.zig");
 const write = @import("config/write.zig");
 const location = @import("config/location.zig");
 const keys = @import("config/keys.zig");
+const stateflag = @import("stateflag.zig");
 
 // editor actions, their key bindings and key names (binds.zig)
 const binds = @import("binds.zig");
@@ -62,18 +63,22 @@ comptime {
 /// The whole configuration: every section (core, modes, record) with its
 /// defaults for what the file does not set. The one way to read the file:
 /// a configuration left by cliptux is carried over first.
-pub fn load(alloc: std.mem.Allocator, home: []const u8) Config {
+pub fn load(gpa: std.mem.Allocator, home: []const u8) Config {
     var dir_buf: env.PathBuf = undefined;
     const dir = env.configDir(&dir_buf, home) catch return .{};
     location.migrateLegacy(home, dir);
-    return loadDir(alloc, dir);
+    const cfg = loadDir(gpa, dir);
+    // older files kept the editor's first-run hint here (hint_shown): it
+    // is a state flag now, and nothing outside the config reads the key
+    if (cfg.hint_shown and !stateflag.isSet(home, .editor_hint)) stateflag.set(home, .editor_hint);
+    return cfg;
 }
 
-fn loadDir(alloc: std.mem.Allocator, dir: []const u8) Config {
+fn loadDir(gpa: std.mem.Allocator, dir: []const u8) Config {
     var cfg = Config{};
     var path_buf: env.PathBuf = undefined;
     const path = configFile(dir, &path_buf) catch return cfg;
-    const migrated = parse.readInto(alloc, path, &cfg);
+    const migrated = parse.readInto(gpa, path, &cfg);
     // missing keys get their defaults as baseline: unchanged, never written
     model.rememberBase(&cfg);
     // values read from an older file's spelling are written anew at the
@@ -90,10 +95,10 @@ fn loadDir(alloc: std.mem.Allocator, dir: []const u8) Config {
 /// merged into the current file: keys changed meanwhile by another process
 /// are kept. A Config that was never loaded writes every key. This is the
 /// one way settings are written: load, change fields, save.
-pub fn save(alloc: std.mem.Allocator, home: []const u8, cfg: *Config) !void {
+pub fn save(gpa: std.mem.Allocator, home: []const u8, cfg: *Config) !void {
     var dir_buf: env.PathBuf = undefined;
     const dir = try env.configDir(&dir_buf, home);
-    try saveDir(alloc, dir, cfg);
+    try saveDir(gpa, dir, cfg);
 }
 
 /// Take `cfg`'s current values as the baseline: a save afterwards writes
@@ -102,7 +107,7 @@ pub fn rebase(cfg: *Config) void {
     model.rememberBase(cfg);
 }
 
-fn saveDir(alloc: std.mem.Allocator, dir: []const u8, cfg: *Config) !void {
+fn saveDir(gpa: std.mem.Allocator, dir: []const u8, cfg: *Config) !void {
     const fresh = std.mem.allEqual(u64, &cfg.base, 0);
     var changes: [n_keys]write.Change = undefined;
     var vbufs: [n_keys][64]u8 = undefined;
@@ -114,22 +119,22 @@ fn saveDir(alloc: std.mem.Allocator, dir: []const u8, cfg: *Config) !void {
         changes[n] = .{ .key = model.keyName(k), .value = v };
         n += 1;
     }
-    if (n > 0) try updateDir(alloc, dir, changes[0..n]);
+    if (n > 0) try updateDir(gpa, dir, changes[0..n]);
     model.rememberBase(cfg);
 }
 
 /// Persist a new ScreenCast restore token without touching other settings
 /// (the capture that got it holds no Config to save).
-pub fn saveScreencastToken(alloc: std.mem.Allocator, home: []const u8, token: []const u8) !void {
+pub fn saveScreencastToken(gpa: std.mem.Allocator, home: []const u8, token: []const u8) !void {
     var dir_buf: env.PathBuf = undefined;
     const dir = try env.configDir(&dir_buf, home);
-    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = token }});
+    try updateDir(gpa, dir, &.{.{ .key = "screencast_restore_token", .value = token }});
 }
 
 const testutil = @import("../testutil.zig");
 
 test "config save/load roundtrip" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-config");
     defer tmp.deinit();
     const root = tmp.path;
@@ -150,9 +155,9 @@ test "config save/load roundtrip" {
     cfg.history_max_mb = 64;
     cfg.loupe = .never;
     cfg.loupe_zoom = 16;
-    try saveDir(alloc, dir, &cfg);
+    try saveDir(gpa, dir, &cfg);
 
-    const loaded = loadDir(alloc, dir);
+    const loaded = loadDir(gpa, dir);
     try std.testing.expectEqual(false, loaded.notify);
     try std.testing.expectEqual(true, loaded.copy_on_save);
     try std.testing.expectEqual(@as(i32, 9), loaded.default_thickness);
@@ -174,7 +179,7 @@ test "config save/load roundtrip" {
 }
 
 test "saving merges: a stale snapshot never reverts other keys" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-config");
     defer tmp.deinit();
     const root = tmp.path;
@@ -183,57 +188,57 @@ test "saving merges: a stale snapshot never reverts other keys" {
 
     var first = Config{};
     first.setScToken("old-token");
-    try saveDir(alloc, dir, &first);
+    try saveDir(gpa, dir, &first);
     // also keep lines we do not understand
-    try updateDir(alloc, dir, &.{.{ .key = "future_option", .value = "42" }});
+    try updateDir(gpa, dir, &.{.{ .key = "future_option", .value = "42" }});
 
     // the Settings window opens and holds a snapshot
-    var settings = loadDir(alloc, dir);
+    var settings = loadDir(gpa, dir);
     // meanwhile a capture stores a fresh token
-    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = "new-token" }});
+    try updateDir(gpa, dir, &.{.{ .key = "screencast_restore_token", .value = "new-token" }});
     // the user toggles one option; Settings saves its whole snapshot
     settings.notify = false;
-    try saveDir(alloc, dir, &settings);
+    try saveDir(gpa, dir, &settings);
 
-    var now = loadDir(alloc, dir);
+    var now = loadDir(gpa, dir);
     try std.testing.expectEqualStrings("new-token", now.scToken().?);
     try std.testing.expectEqual(false, now.notify);
 
     // toggling back is saved too (the baseline follows each save)
     settings.notify = true;
-    try saveDir(alloc, dir, &settings);
-    now = loadDir(alloc, dir);
+    try saveDir(gpa, dir, &settings);
+    now = loadDir(gpa, dir);
     try std.testing.expectEqual(true, now.notify);
 
     var path_buf: [600]u8 = undefined;
-    const data = try sys.readFileAlloc(alloc, try configFile(dir, &path_buf), 64 * 1024);
-    defer alloc.free(data);
+    const data = try sys.readFileAlloc(gpa, try configFile(dir, &path_buf), 64 * 1024);
+    defer gpa.free(data);
     try testutil.expectContains(data, "future_option=42\n");
     try std.testing.expectEqual(@as(usize, 1), std.mem.count(u8, data, "notify="));
 }
 
 test "forgetting the restore token asks again and survives a settings save" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-config");
     defer tmp.deinit();
     const root = tmp.path;
     var dir_buf: [512]u8 = undefined;
     const dir = try std.fmt.bufPrint(&dir_buf, "{s}/shotlet", .{root});
-    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = "tok" }});
-    var settings = loadDir(alloc, dir);
+    try updateDir(gpa, dir, &.{.{ .key = "screencast_restore_token", .value = "tok" }});
+    var settings = loadDir(gpa, dir);
     try std.testing.expectEqualStrings("tok", settings.scToken().?);
     // "Choose monitors again"
     settings.setScToken("");
-    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = "" }});
-    try std.testing.expectEqual(@as(?[]const u8, null), loadDir(alloc, dir).scToken());
+    try updateDir(gpa, dir, &.{.{ .key = "screencast_restore_token", .value = "" }});
+    try std.testing.expectEqual(@as(?[]const u8, null), loadDir(gpa, dir).scToken());
     // a later save of the same window keeps it forgotten
     settings.notify = !settings.notify;
-    try saveDir(alloc, dir, &settings);
-    try std.testing.expectEqual(@as(?[]const u8, null), loadDir(alloc, dir).scToken());
+    try saveDir(gpa, dir, &settings);
+    try std.testing.expectEqual(@as(?[]const u8, null), loadDir(gpa, dir).scToken());
 }
 
 test "settings from cliptux are carried over once, also from XDG_CONFIG_HOME" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-config");
     defer tmp.deinit();
     const root = tmp.path;
@@ -249,19 +254,19 @@ test "settings from cliptux are carried over once, also from XDG_CONFIG_HOME" {
     const xdg = testutil.useXdg(.{ .config_home = xdg_home });
     defer xdg.restore();
 
-    const migrated = load(alloc, root);
+    const migrated = load(gpa, root);
     try std.testing.expectEqual(@as(i32, 11), migrated.default_thickness);
     try std.testing.expect(if (sys.fileSize(old_dir)) |_| false else |_| true);
 
     // an existing Shotlet configuration always wins over a leftover cliptux one
     sys.mkdirAll(old_dir, 0o700);
     try sys.writeFile(try std.fmt.bufPrint(&b3, "{s}/config", .{old_dir}), "default_thickness=3\n");
-    const again = load(alloc, root);
+    const again = load(gpa, root);
     try std.testing.expectEqual(@as(i32, 11), again.default_thickness);
 }
 
 test "migration copies when the new directory already exists" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-config");
     defer tmp.deinit();
     const root = tmp.path;
@@ -275,11 +280,11 @@ test "migration copies when the new directory already exists" {
     try sys.writeFile(try std.fmt.bufPrint(&b3, "{s}/other", .{new_dir}), "x");
     try sys.writeFile(try std.fmt.bufPrint(&b3, "{s}/config", .{old_dir}), "default_color=4\n");
     migrateFrom(&.{old_dir}, new_dir);
-    try std.testing.expectEqual(@as(u3, 4), loadDir(alloc, new_dir).default_color);
+    try std.testing.expectEqual(@as(u3, 4), loadDir(gpa, new_dir).default_color);
 }
 
 test "binds of an older file are written anew in the neutral notation" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-config");
     defer tmp.deinit();
     const root = tmp.path;
@@ -290,19 +295,19 @@ test "binds of an older file are written anew in the neutral notation" {
     const path = try configFile(dir, &b2);
     try sys.writeFile(path, "bind_pen=ctrl+33\nnotify=false\n");
 
-    var cfg = loadDir(alloc, dir);
+    var cfg = loadDir(gpa, dir);
     try std.testing.expect(cfg.binds[@backingInt(Action.pen)].matches(.f, true, false));
     // a save of anything else carries the migrated bind along
     cfg.copy_on_save = true;
-    try saveDir(alloc, dir, &cfg);
-    const data = try sys.readFileAlloc(alloc, path, 4096);
-    defer alloc.free(data);
+    try saveDir(gpa, dir, &cfg);
+    const data = try sys.readFileAlloc(gpa, path, 4096);
+    defer gpa.free(data);
     try std.testing.expectEqualStrings("notify=false\ncopy_on_save=true\nshortcut_pen=Ctrl+F\n", data);
-    try std.testing.expect(loadDir(alloc, dir).binds[@backingInt(Action.pen)].matches(.f, true, false));
+    try std.testing.expect(loadDir(gpa, dir).binds[@backingInt(Action.pen)].matches(.f, true, false));
 }
 
 test "an older file's loupe=selecting or auto is written anew as hold" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-config");
     defer tmp.deinit();
     const root = tmp.path;
@@ -313,11 +318,11 @@ test "an older file's loupe=selecting or auto is written anew as hold" {
     const path = try configFile(dir, &b2);
     for ([_][]const u8{ "loupe=selecting\n", "loupe=auto\n" }) |old| {
         try sys.writeFile(path, old);
-        var cfg = loadDir(alloc, dir);
+        var cfg = loadDir(gpa, dir);
         try std.testing.expectEqual(Loupe.hold, cfg.loupe);
-        try saveDir(alloc, dir, &cfg);
-        const data = try sys.readFileAlloc(alloc, path, 4096);
-        defer alloc.free(data);
+        try saveDir(gpa, dir, &cfg);
+        const data = try sys.readFileAlloc(gpa, path, 4096);
+        defer gpa.free(data);
         try std.testing.expectEqualStrings("loupe=hold\n", data);
     }
 }

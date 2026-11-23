@@ -6,6 +6,7 @@
 //! SHOTLET_NO_CURSOR_SHAPE=1 ignores the protocol (registry.zig).
 
 const std = @import("std");
+const log = std.log.scoped(.window);
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const art = @import("cursor_art.zig");
@@ -68,10 +69,10 @@ pub fn apply(w: *Window) !void {
             .{ .uint = w.pointer.enter_serial },
             .{ .uint = shapeOf(kind) },
         });
-        std.log.debug("cursor: {t} via cursor-shape", .{kind});
+        log.debug("cursor: {t} via cursor-shape", .{kind});
     } else {
         try attachDrawn(w, kind);
-        std.log.debug("cursor: {t} drawn at {d}x", .{ kind, w.cursors.scale });
+        log.debug("cursor: {t} drawn at {d}x", .{ kind, w.cursors.scale });
     }
     try w.conn.flush();
 }

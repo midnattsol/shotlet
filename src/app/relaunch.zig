@@ -5,6 +5,7 @@
 //! its callers cannot drift apart.
 
 const std = @import("std");
+const log = std.log.scoped(.relaunch);
 const commands = @import("../cli/commands.zig");
 const env_mod = @import("env.zig");
 const proc = @import("../platform/api.zig").proc;
@@ -57,13 +58,13 @@ fn nameOf(comptime id: Id) [:0]const u8 {
 }
 
 fn run(e: Env, a: *const Args, keep: ?sys.fd_t) void {
-    std.log.debug("starting shotlet {s}", .{std.mem.span(a.ptrs[0])});
+    log.debug("starting shotlet {s}", .{std.mem.span(a.ptrs[0])});
     proc.spawnSelf(e.envp, a.slice(), keep);
 }
 
 /// Report a command line that did not fit.
 fn tooLong(err: anyerror, comptime what: []const u8) void {
-    std.log.warn("cannot start shotlet " ++ what ++ ": {t}", .{err});
+    log.warn("cannot start shotlet " ++ what ++ ": {t}", .{err});
 }
 
 /// `shotlet edit ROOT ID`: a history entry in the editor again.
@@ -159,7 +160,7 @@ pub fn history(e: Env) void {
 /// editor's mode strip), refused unless the table has it.
 pub fn capture(e: Env, name: []const u8) void {
     const c = commands.find(name) orelse {
-        std.log.warn("cannot start shotlet {s}: no such command", .{name});
+        log.warn("cannot start shotlet {s}: no such command", .{name});
         return;
     };
     var a: Args = .{};

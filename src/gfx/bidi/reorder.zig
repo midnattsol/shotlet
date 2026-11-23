@@ -43,28 +43,28 @@ pub fn reorder(levels: []const u8, order: []u32) void {
 }
 
 /// Visual order of a UTF-32 test string as a string of the same chars.
-fn visual(alloc: std.mem.Allocator, s: []const u21, dir: Direction) ![]u21 {
+fn visual(gpa: std.mem.Allocator, s: []const u21, dir: Direction) ![]u21 {
     const n = s.len;
-    const types = try alloc.alloc(Class, n);
-    defer alloc.free(types);
-    const levels = try alloc.alloc(u8, n);
-    defer alloc.free(levels);
-    const order = try alloc.alloc(u32, n);
-    defer alloc.free(order);
+    const types = try gpa.alloc(Class, n);
+    defer gpa.free(types);
+    const levels = try gpa.alloc(u8, n);
+    defer gpa.free(levels);
+    const order = try gpa.alloc(u32, n);
+    defer gpa.free(order);
     resolveLevels(s, paragraphLevel(s, dir), types, levels);
     reorder(levels, order);
-    const out = try alloc.alloc(u21, n);
+    const out = try gpa.alloc(u21, n);
     for (order, out) |o, *c| c.* = if (levels[o] % 2 == 1) mirror(s[o]) else s[o];
     return out;
 }
 
 fn expectVisual(comptime logical: []const u8, comptime expected: []const u8, dir: Direction) !void {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const l = u32s(logical);
-    const lv = try alloc.dupe(u21, &l);
-    defer alloc.free(lv);
-    const v = try visual(alloc, lv, dir);
-    defer alloc.free(v);
+    const lv = try gpa.dupe(u21, &l);
+    defer gpa.free(lv);
+    const v = try visual(gpa, lv, dir);
+    defer gpa.free(v);
     const e = u32s(expected);
     try std.testing.expectEqualSlices(u21, &e, v);
 }
@@ -89,10 +89,10 @@ test "bidi reordering" {
 /// expectVisual ignoring where the (invisible) explicit controls land;
 /// `expected` is written without them.
 fn expectVisualText(comptime logical: []const u8, comptime expected: []const u8, dir: Direction) !void {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const l = u32s(logical);
-    const v = try visual(alloc, &l, dir);
-    defer alloc.free(v);
+    const v = try visual(gpa, &l, dir);
+    defer gpa.free(v);
     var out: [64]u21 = undefined;
     var n: usize = 0;
     for (v) |c| {
@@ -123,7 +123,7 @@ test "explicit embeddings, overrides and isolates" {
     // RLE raises Latin text to level 2: order kept
     try expectVisualText("x\u{202B}ab 12\u{202C}y", "xab 12y", .ltr);
     // unbalanced and absurdly deep controls never crash or overflow
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var prng = std.Random.DefaultPrng.init(3);
     const r = prng.random();
     const pool = [_]u21{ 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069, 'a', 0x5D0, 0x627, '1', ' ', '(', ')', 0x64E, 0x200D };
@@ -145,5 +145,5 @@ test "explicit embeddings, overrides and isolates" {
         };
         reorder(levels[0..n], order[0..n]);
     }
-    _ = alloc;
+    _ = gpa;
 }

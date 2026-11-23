@@ -4,6 +4,7 @@
 //! Everything here runs on PipeWire's loop thread.
 
 const std = @import("std");
+const log = std.log.scoped(.pw);
 const abi = @import("abi.zig");
 const pod = @import("pod.zig");
 const pw = @import("../pw.zig");
@@ -31,7 +32,7 @@ pub fn visitFormat(f: *Format, key: u32, vt: u32, val: []const u8) void {
 /// `f`, then ask for crop regions (some producers send a larger buffer
 /// and mark the valid area with SPA_META_VideoCrop).
 pub fn onFormat(stream: ?*anyopaque, id: u32, param: ?*const anyopaque, f: *Format) void {
-    std.log.debug("pw param_changed id={d} param={}", .{ id, param != null });
+    log.debug("pw param_changed id={d} param={}", .{ id, param != null });
     if (id != abi.SPA_PARAM_Format or param == null) return;
     const head: [*]const u8 = @ptrCast(param.?);
     const body_size = std.mem.readInt(u32, head[0..4], .little);
@@ -47,9 +48,9 @@ pub fn onFormat(stream: ?*anyopaque, id: u32, param: ?*const anyopaque, f: *Form
 /// state_changed's common part: log the change; true when the stream
 /// failed (the warning names `who`).
 pub fn onState(comptime who: []const u8, old: c_int, new: c_int, msg: ?[*:0]const u8) bool {
-    std.log.debug("pw state {d} -> {d}", .{ old, new });
+    log.debug("pw state {d} -> {d}", .{ old, new });
     if (new != abi.PW_STREAM_STATE_ERROR) return false;
-    std.log.warn(who ++ "pipewire stream error: {s}", .{if (msg) |m| std.mem.span(m) else "?"});
+    log.warn(who ++ "pipewire stream error: {s}", .{if (msg) |m| std.mem.span(m) else "?"});
     return true;
 }
 
@@ -72,7 +73,7 @@ pub fn chunkOf(sb: *const abi.SpaBuffer) ?Chunk {
     const chunk = d.chunk orelse return null;
     // an empty or corrupted buffer is skipped; the next one will do
     if (chunk.size == 0 or (chunk.flags & abi.SPA_CHUNK_FLAG_CORRUPTED) != 0) {
-        std.log.debug("pw: skipping empty/corrupted buffer", .{});
+        log.debug("skipping empty/corrupted buffer", .{});
         return null;
     }
     const base: [*]const u8 = @ptrCast(d.data orelse return null);
@@ -128,7 +129,7 @@ pub fn validArea(sb: *const abi.SpaBuffer, width: u32, height: u32) ?Source {
     const first = c.offset + @as(usize, @intCast(crop.y)) * stride + @as(usize, @intCast(crop.x)) * 4;
     const needed = first + (@as(usize, crop.height) - 1) * stride + @as(usize, crop.width) * 4;
     if (needed > c.avail) {
-        std.log.debug("pw: buffer smaller than the frame ({d} < {d}); skipping", .{ c.avail, needed });
+        log.debug("buffer smaller than the frame ({d} < {d}); skipping", .{ c.avail, needed });
         return null;
     }
     return .{ .base = c.base, .first = first, .stride = stride, .crop = crop };

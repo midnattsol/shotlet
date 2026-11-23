@@ -5,6 +5,7 @@
 //! acts on release over what was pressed (ui/press.zig).
 
 const std = @import("std");
+const log = std.log.scoped(.history);
 const window = @import("../../platform/api.zig").window;
 const focus = @import("../../ui/focus.zig");
 const utf8 = @import("../../gfx/utf8.zig");
@@ -123,13 +124,13 @@ fn onClick(self: *Panel, t: layout.Target) !bool {
 fn askClear(self: *Panel) void {
     self.confirm_clear = true;
     self.hover_clear = false;
-    std.log.info("history: asking before clearing {d} captures", .{self.items.items.len});
+    log.info("asking before clearing {d} captures", .{self.items.items.len});
 }
 
 /// Not clearing after all.
 fn backOut(self: *Panel) void {
     self.confirm_clear = false;
-    std.log.info("history: clearing cancelled", .{});
+    log.info("clearing cancelled", .{});
 }
 
 /// A key press; returns false to close.

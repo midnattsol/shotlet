@@ -25,9 +25,9 @@ const Line = struct {
 };
 
 /// Words grouped into lines, in Tesseract's reading order.
-fn groupLines(alloc: std.mem.Allocator, words: []const Word) !std.ArrayList(Line) {
+fn groupLines(gpa: std.mem.Allocator, words: []const Word) !std.ArrayList(Line) {
     var lines: std.ArrayList(Line) = .empty;
-    errdefer lines.deinit(alloc);
+    errdefer lines.deinit(gpa);
     var i: usize = 0;
     while (i < words.len) {
         var j = i + 1;
@@ -35,30 +35,30 @@ fn groupLines(alloc: std.mem.Allocator, words: []const Word) !std.ArrayList(Line
         while (j < words.len and words[j].block == words[i].block and words[j].par == words[i].par and words[j].line == words[i].line) : (j += 1) {
             box = Rect.unite(box, words[j].box);
         }
-        try lines.append(alloc, .{ .block = words[i].block, .box = box, .first = i, .end = j });
+        try lines.append(gpa, .{ .block = words[i].block, .box = box, .first = i, .end = j });
         i = j;
     }
     return lines;
 }
 
 /// The text of `words` (owned).
-pub fn reflow(alloc: std.mem.Allocator, words: []const Word) ![]u8 {
-    var lines = try groupLines(alloc, words);
-    defer lines.deinit(alloc);
+pub fn reflow(gpa: std.mem.Allocator, words: []const Word) ![]u8 {
+    var lines = try groupLines(gpa, words);
+    defer lines.deinit(gpa);
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(alloc);
+    errdefer out.deinit(gpa);
     var b: usize = 0;
     while (b < lines.items.len) {
         var e = b + 1;
         while (e < lines.items.len and lines.items[e].block == lines.items[b].block) e += 1;
-        if (b > 0) try out.appendSlice(alloc, "\n\n");
-        try writeBlock(alloc, &out, words, lines.items[b..e]);
+        if (b > 0) try out.appendSlice(gpa, "\n\n");
+        try writeBlock(gpa, &out, words, lines.items[b..e]);
         b = e;
     }
-    return out.toOwnedSlice(alloc);
+    return out.toOwnedSlice(gpa);
 }
 
-fn writeBlock(alloc: std.mem.Allocator, out: *std.ArrayList(u8), words: []const Word, lines: []const Line) !void {
+fn writeBlock(gpa: std.mem.Allocator, out: *std.ArrayList(u8), words: []const Word, lines: []const Line) !void {
     var left: i32 = std.math.maxInt(i32);
     var right: i32 = std.math.minInt(i32);
     var heights: i64 = 0;
@@ -75,15 +75,15 @@ fn writeBlock(alloc: std.mem.Allocator, out: *std.ArrayList(u8), words: []const 
             const hyphen = sep == .join and endsWithHyphen(words[prev.end - 1].text) and startsLower(words[l.first].text);
             if (hyphen) {
                 out.items.len -= 1; // the hyphen
-            } else try out.appendSlice(alloc, switch (sep) {
+            } else try out.appendSlice(gpa, switch (sep) {
                 .join => " ",
                 .newline => "\n",
                 .paragraph => "\n\n",
             });
         }
         for (words[l.first..l.end], 0..) |w, i| {
-            if (i > 0) try out.append(alloc, ' ');
-            try out.appendSlice(alloc, w.text);
+            if (i > 0) try out.append(gpa, ' ');
+            try out.appendSlice(gpa, w.text);
         }
     }
 }

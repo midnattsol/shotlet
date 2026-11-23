@@ -8,6 +8,7 @@
 //! that animate nothing (registry.Effects.none) get no such frame.
 
 const std = @import("std");
+const log = std.log.scoped(.window);
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
@@ -48,7 +49,7 @@ pub fn vanish(w: *Window, clear: *Clear) void {
     // a frame still on its way would land after the clear one
     waitFrames(w, deadline);
     for (w.surfaces[0..w.n_surfaces], 0..) |*s, i| {
-        if (wants(s)) commitClear(w, s, clear, i) catch |err| std.log.debug("clear frame: {t}", .{err});
+        if (wants(s)) commitClear(w, s, clear, i) catch |err| log.debug("clear frame: {t}", .{err});
     }
     if (w.globals.effects == .mutter) minimize(w);
     w.conn.flush() catch return;

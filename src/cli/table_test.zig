@@ -64,7 +64,7 @@ fn checkCommand(arena: std.mem.Allocator, chain: []const []const u8, c: *const s
     if (c.id != .help) {
         const h = try ask(arena, try line(arena, chain, &.{"--help"}));
         try t.expectEqual(@backingInt(out.ExitCode.ok), h.result.exit);
-        try t.expect(std.mem.indexOf(u8, h.text, c.usage[0]) != null);
+        try testutil.expectContains(h.text, c.usage[0]);
         try expectRefused(arena, chain, &.{"--bogus"}, "unknown option '--bogus'");
     }
     var required: ?[]const u8 = null;
@@ -75,6 +75,8 @@ fn checkCommand(arena: std.mem.Allocator, chain: []const []const u8, c: *const s
     if (required) |name| try expectRefused(arena, chain, &.{}, try std.fmt.allocPrint(arena, "missing {s}", .{name}));
     if (c.args.len == 0 and c.subs.len == 0) try expectRefused(arena, chain, &.{"extra"}, "unexpected argument 'extra'");
 }
+
+const testutil = @import("../testutil.zig");
 
 test "every command: its examples, its help and refused command lines" {
     var arena_state = std.heap.ArenaAllocator.init(t.allocator);

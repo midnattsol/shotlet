@@ -58,7 +58,7 @@ fn picture(p: *Pin, px: []u32, bw: u32, bh: u32, k: f64, a: f64) !void {
     // the picture flattened on black: the card
     const card = try p.fit.ensure(p.gpa, .{ .px = p.img.pixels, .w = p.img.width, .h = p.img.height }, pw, ph, .contain, 0xFF000000);
     const ox: i32 = @intFromFloat(@round(state.pad * k));
-    fui.place(p.gpa, .{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = pw, .h = ph }, .{ ox, ox }, radius * k, p.th.card_shadow, k);
+    fui.place(.{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = pw, .h = ph }, .{ ox, ox }, radius * k, p.th.card_shadow, k);
     fui.fadeAlpha(px, a * p.opacity.alpha());
     const look: chrome.Look = .{ .hover = p.hover, .locked = p.locked, .zoom = p.zoom, .hint = hintShown(p, sys.monoMs()) };
     if (!look.locked and look.hover == .none and !look.hint) return;

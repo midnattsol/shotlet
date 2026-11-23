@@ -4,6 +4,7 @@
 //! and are reachable as methods.
 
 const std = @import("std");
+const log = std.log.scoped(.history);
 const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
@@ -15,6 +16,7 @@ const png = @import("../../gfx/png.zig");
 const window = @import("../../platform/api.zig").window;
 const fui = @import("../../ui/floatui.zig");
 const theme = @import("../../ui/theme.zig");
+const Notice = @import("../../ui/notice.zig").Notice;
 const scale = @import("../../ui/scale.zig");
 const press = @import("../../ui/press.zig");
 const layout = @import("layout.zig");
@@ -37,7 +39,7 @@ pub const Panel = struct {
     env: Env,
     cfg: config.Config,
     win: window.Window,
-    bus: ?desktop.Session = null,
+    bus: ?desktop.Bus = null,
     root_buf: [1024]u8 = undefined,
     root_len: usize = 0,
     items: std.ArrayList(Item) = .empty,
@@ -56,8 +58,8 @@ pub const Panel = struct {
     scroll: i32 = 0,
     search: std.ArrayList(u8) = .empty,
     searchable: bool = false,
-    notice: []const u8 = "",
-    notice_until: i64 = 0,
+    /// "Copied", "Saved" over the panel for a moment
+    notice: Notice = .{},
     dirty: bool = true,
     ocr_state: ocr_scan.Ocr = .{},
     /// the desktop's appearance (Opaque.of it for the panel's colours)
@@ -116,7 +118,7 @@ pub const Panel = struct {
             try self.items.append(self.gpa, .{ .entry = e, .thumb = self.loadThumb(e.id.slice()) });
         }
         self.filter();
-        std.log.info("history: {d} captures", .{self.items.items.len});
+        log.info("{d} captures", .{self.items.items.len});
     }
 
     fn loadThumb(self: *Panel, id: []const u8) ?png.Image {
@@ -137,7 +139,7 @@ pub const Panel = struct {
             }
             self.shown.append(self.gpa, i) catch {};
         }
-        if (self.search.items.len > 0) std.log.info("history: search '{s}': {d} shown", .{ self.search.items, self.shown.items.len });
+        if (self.search.items.len > 0) log.info("search '{s}': {d} shown", .{ self.search.items, self.shown.items.len });
         if (self.selected) |s| if (std.mem.indexOfScalar(usize, self.shown.items, s) == null) {
             self.selected = null;
         };
@@ -147,31 +149,26 @@ pub const Panel = struct {
 
     // --- actions ---
 
-    pub fn bus_(self: *Panel) ?*desktop.Session {
+    pub fn bus_(self: *Panel) ?*desktop.Bus {
         if (self.bus == null) self.bus = desktop.connect(self.gpa, self.env) catch return null;
         return &self.bus.?;
     }
 
     fn say(self: *Panel, s: []const u8) void {
-        self.notice = s;
-        self.notice_until = sys.monoMs() + 1500;
+        self.notice.show(s, sys.monoMs(), 1500);
         self.dirty = true;
     }
 
     /// Clear the notice once its time is up.
     pub fn expireNotice(self: *Panel) void {
-        if (self.notice_until != 0 and sys.monoMs() > self.notice_until) {
-            self.notice = "";
-            self.notice_until = 0;
-            self.dirty = true;
-        }
+        if (self.notice.expire(sys.monoMs())) self.dirty = true;
     }
 
     /// Apply an action to the picked capture.
     pub fn act(self: *Panel, a: Action) void {
         const i = self.selected orelse return;
         self.actInner(i, a) catch |err| {
-            std.log.warn("history: {t} failed: {t}", .{ a, err });
+            log.warn("{t} failed: {t}", .{ a, err });
             self.say("Failed");
         };
     }
@@ -191,7 +188,7 @@ pub const Panel = struct {
             .pin => try e.pin(self.env),
             .delete => {
                 try history.remove(self.root(), e.id);
-                std.log.info("history: deleted {s}", .{e.id});
+                log.info("deleted {s}", .{e.id});
                 self.selected = null;
                 try self.load();
                 try self.resize();
@@ -207,7 +204,7 @@ pub const Panel = struct {
     pub fn clearAll(self: *Panel) !void {
         self.confirm_clear = false;
         history.clear(self.root());
-        std.log.info("history: cleared", .{});
+        log.info("cleared", .{});
         self.selected = null;
         try self.load();
         try self.resize();

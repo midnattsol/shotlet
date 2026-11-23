@@ -11,11 +11,13 @@
 //! The loaded library and its function table live here, shared by all.
 
 const std = @import("std");
+const log = std.log.scoped(.pw);
 const abi = @import("pw/abi.zig");
 const pod = @import("pw/pod.zig");
 const stream = @import("pw/stream.zig");
 const capture = @import("pw/capture.zig");
 const grab = @import("pw/grab.zig");
+const optlib = @import("../../optlib.zig");
 
 pub const SPA_PARAM_Format = abi.SPA_PARAM_Format;
 pub const VideoFormat = abi.VideoFormat;
@@ -45,26 +47,27 @@ pub const max_nodes = grab.max_nodes;
 pub const grabNodes = grab.grabNodes;
 pub const grabFrames = grab.grabFrames;
 
-pub var lib: ?std.DynLib = null;
+/// The resolved entry points; valid once `available` returned true.
 pub var api: Api = undefined;
-var initialized = false;
 
-/// Try to load libpipewire. Returns false (and logs once) when unavailable.
+const Lib = optlib.Once(optlib.Table(Api), struct {
+    fn load(why: *[]const u8) anyerror!optlib.Table(Api) {
+        const t = optlib.bindPrefixed(Api, "pipewire-0.3", "pw_", &.{"0"}, why) catch |err| {
+            if (err == error.NotFound)
+                log.info("{s}; using the Screenshot portal", .{why.*})
+            else
+                log.warn("{s}; using the Screenshot portal", .{why.*});
+            return err;
+        };
+        api = t.api;
+        api.init(null, null);
+        return t;
+    }
+}.load);
+
+/// Try to load libpipewire, once. False (logged once) when unavailable.
 pub fn available() bool {
-    if (initialized) return lib != null;
-    initialized = true;
-    lib = std.DynLib.open("libpipewire-0.3.so.0") catch {
-        std.log.info("libpipewire not found; using the Screenshot portal", .{});
-        return false;
-    };
-    api = abi.loadApi(&lib.?) orelse {
-        std.log.warn("libpipewire is missing expected symbols; using the Screenshot portal", .{});
-        lib.?.close();
-        lib = null;
-        return false;
-    };
-    api.init(null, null);
-    return true;
+    return Lib.available();
 }
 
 comptime {

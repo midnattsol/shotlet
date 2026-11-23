@@ -5,6 +5,7 @@
 //! API is not needed (libtesseract pulls it in itself).
 
 const std = @import("std");
+const log = std.log.scoped(.ocr);
 const switches = @import("../platform/api/switches.zig");
 const optlib = @import("../optlib.zig");
 
@@ -30,7 +31,7 @@ fn load(why: *[]const u8) anyerror!optlib.Table(Api) {
         return error.Off;
     }
     return optlib.bind(Api, "tesseract", &.{ "5", "4" }, why) catch |err| {
-        if (err == error.MissingSymbol) std.log.info("{s}; no text search", .{why.*});
+        if (err == error.MissingSymbol) log.info("{s}; no text search", .{why.*});
         return err;
     };
 }
@@ -77,21 +78,21 @@ test "languages follow the locale, with English" {
 
 /// Text in an 0xAARRGGBB image (owned UTF-8), or null when Tesseract is
 /// missing or fails. Slow (hundreds of ms): call from a worker thread.
-pub fn recognize(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32) ?[]u8 {
-    return run(alloc, pixels, width, height, .text, 0);
+pub fn recognize(gpa: std.mem.Allocator, pixels: []const u32, width: u32, height: u32) ?[]u8 {
+    return run(gpa, pixels, width, height, .text, 0);
 }
 
 /// Every word with its box, as Tesseract's TSV (parsed by
 /// src/ocr/page.zig); `ppi` is the image's resolution (0: unknown).
-pub fn recognizeTsv(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, ppi: u32) ?[]u8 {
-    return run(alloc, pixels, width, height, .tsv, ppi);
+pub fn recognizeTsv(gpa: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, ppi: u32) ?[]u8 {
+    return run(gpa, pixels, width, height, .tsv, ppi);
 }
 
-fn run(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, what: enum { text, tsv }, ppi: u32) ?[]u8 {
+fn run(gpa: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, what: enum { text, tsv }, ppi: u32) ?[]u8 {
     const a = &(engine.get() orelse return null).api;
     if (width == 0 or height == 0) return null;
-    const rgb = alloc.alloc(u8, @as(usize, width) * height * 3) catch return null;
-    defer alloc.free(rgb);
+    const rgb = gpa.alloc(u8, @as(usize, width) * height * 3) catch return null;
+    defer gpa.free(rgb);
     for (pixels[0 .. @as(usize, width) * height], 0..) |p, i| {
         rgb[i * 3] = @truncate(p >> 16);
         rgb[i * 3 + 1] = @truncate(p >> 8);
@@ -104,15 +105,15 @@ fn run(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, w
     if (a.TessBaseAPIInit3(h, null, langs.ptr) != 0) {
         // the locale's language data may not be installed: English alone
         if (std.mem.eql(u8, langs, "eng") or a.TessBaseAPIInit3(h, null, "eng") != 0) {
-            std.log.info("tesseract has no data for {s}", .{langs});
+            log.info("tesseract has no data for {s}", .{langs});
             return null;
         }
-        std.log.info("tesseract has no data for {s}; reading English only", .{langs});
+        log.info("tesseract has no data for {s}; reading English only", .{langs});
     }
     defer a.TessBaseAPIEnd(h);
     a.TessBaseAPISetImage(h, rgb.ptr, @intCast(width), @intCast(height), 3, @intCast(width * 3));
     if (ppi > 0) a.TessBaseAPISetSourceResolution(h, @intCast(ppi));
     const out = (if (what == .tsv) a.TessBaseAPIGetTsvText(h, 0) else a.TessBaseAPIGetUTF8Text(h)) orelse return null;
     defer a.TessDeleteText(out);
-    return alloc.dupe(u8, std.mem.trim(u8, std.mem.span(out), " \t\r\n")) catch null;
+    return gpa.dupe(u8, std.mem.trim(u8, std.mem.span(out), " \t\r\n")) catch null;
 }

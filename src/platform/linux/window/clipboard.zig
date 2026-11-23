@@ -2,6 +2,7 @@
 //! possibly encoded in the background), serving reads, and letting go.
 
 const std = @import("std");
+const log = std.log.scoped(.window);
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const png = @import("../../../gfx/png.zig");
@@ -20,10 +21,10 @@ const ClipboardImage = struct {
     encode_failed: bool = false,
     thread: ?std.Thread = null,
 
-    fn create(alloc: std.mem.Allocator, pixels: []u32, width: u32, height: u32) !*ClipboardImage {
-        const self = try alloc.create(ClipboardImage);
-        self.* = .{ .alloc = alloc, .pixels = pixels, .width = width, .height = height };
-        errdefer alloc.destroy(self);
+    fn create(gpa: std.mem.Allocator, pixels: []u32, width: u32, height: u32) !*ClipboardImage {
+        const self = try gpa.create(ClipboardImage);
+        self.* = .{ .alloc = gpa, .pixels = pixels, .width = width, .height = height };
+        errdefer gpa.destroy(self);
         self.thread = try std.Thread.spawn(.{}, encodeWorker, .{self});
         return self;
     }
@@ -32,8 +33,8 @@ const ClipboardImage = struct {
         if (self.thread) |thread| thread.join();
         self.alloc.free(self.png_data);
         self.alloc.free(self.pixels);
-        const alloc = self.alloc;
-        alloc.destroy(self);
+        const gpa = self.alloc;
+        gpa.destroy(self);
     }
 
     fn waitPng(self: *ClipboardImage) ![]const u8 {
@@ -134,7 +135,7 @@ pub fn handleSource(w: *Window, opcode: u16, r: *wl.ArgReader) !void {
                 const data = payloadFor(w, mime) orelse return;
                 sys.writeAllBlocking(fd, data) catch |err| switch (err) {
                     error.BrokenPipe, error.ConnectionReset => {},
-                    else => std.log.warn("clipboard send failed: {t}", .{err}),
+                    else => log.warn("clipboard send failed: {t}", .{err}),
                 };
             }
         },
@@ -150,7 +151,7 @@ fn payloadFor(w: *Window, mime: []const u8) ?[]const u8 {
     const media = std.mem.startsWith(u8, mime, "video/") or std.mem.startsWith(u8, mime, "image/gif");
     if (w.clipboard_text.len > 0 and !media) return w.clipboard_text;
     if (w.clipboard.image) |image| return image.waitPng() catch |err| {
-        std.log.warn("clipboard encode failed: {t}", .{err});
+        log.warn("clipboard encode failed: {t}", .{err});
         return null;
     };
     return w.clipboard_png;

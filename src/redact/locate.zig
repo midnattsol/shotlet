@@ -10,31 +10,31 @@ const Rect = @import("../ui/shapes.zig").Rect;
 pub const Hit = struct { box: Rect, kind: detect.Kind };
 
 /// Boxes to redact, in the words' coordinates, `pad` pixels around.
-pub fn find(alloc: std.mem.Allocator, words: []const Word, pad: i32) ![]Hit {
+pub fn find(gpa: std.mem.Allocator, words: []const Word, pad: i32) ![]Hit {
     var hits: std.ArrayList(Hit) = .empty;
-    errdefer hits.deinit(alloc);
+    errdefer hits.deinit(gpa);
     var line: std.ArrayList(u8) = .empty;
-    defer line.deinit(alloc);
+    defer line.deinit(gpa);
     var spans: std.ArrayList([2]usize) = .empty;
-    defer spans.deinit(alloc);
+    defer spans.deinit(gpa);
     var i: usize = 0;
     while (i < words.len) {
         var j = i;
         line.clearRetainingCapacity();
         spans.clearRetainingCapacity();
         while (j < words.len and sameLine(words[i], words[j])) : (j += 1) {
-            if (j > i) try line.append(alloc, ' ');
-            try spans.append(alloc, .{ line.items.len, line.items.len + words[j].text.len });
-            try line.appendSlice(alloc, words[j].text);
+            if (j > i) try line.append(gpa, ' ');
+            try spans.append(gpa, .{ line.items.len, line.items.len + words[j].text.len });
+            try line.appendSlice(gpa, words[j].text);
         }
-        const matches = try detect.find(alloc, line.items);
-        defer alloc.free(matches);
+        const matches = try detect.find(gpa, line.items);
+        defer gpa.free(matches);
         for (matches) |m| {
-            if (cover(words[i..j], spans.items, m)) |box| try hits.append(alloc, .{ .box = box.expand(pad), .kind = m.kind });
+            if (cover(words[i..j], spans.items, m)) |box| try hits.append(gpa, .{ .box = box.expand(pad), .kind = m.kind });
         }
         i = j;
     }
-    return hits.toOwnedSlice(alloc);
+    return hits.toOwnedSlice(gpa);
 }
 
 fn sameLine(a: Word, b: Word) bool {

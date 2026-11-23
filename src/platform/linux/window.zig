@@ -254,6 +254,7 @@ pub const Window = struct {
     // events
     pub const nextEvent = events.nextEvent;
     pub const nextEventTimeout = events.nextEventTimeout;
+    pub const waitKeyboardFocus = events.waitKeyboardFocus;
     pub const pollTimeoutMs = events.pollTimeoutMs;
     pub const drainPending = events.drainPending;
     const roundtrip = registry.roundtrip;
@@ -306,10 +307,10 @@ test "window decls compile" {
 // color with its index bar, presents and waits for the frames.
 test "live: one surface per output" {
     if (std.c.getenv("SHOTLET_LIVE_WINDOW_TEST") == null) return error.SkipZigTest;
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const rt = std.mem.span(std.c.getenv("XDG_RUNTIME_DIR") orelse return error.SkipZigTest);
     const disp = std.mem.span(std.c.getenv("WAYLAND_DISPLAY") orelse return error.SkipZigTest);
-    var win = try Window.connect(alloc, rt, disp);
+    var win = try Window.connect(gpa, rt, disp);
     defer win.deinit();
     var n_out: usize = 0;
     for (win.outputList()) |o| if (o.id != 0) {

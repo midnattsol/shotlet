@@ -35,32 +35,32 @@ pub const Reader = struct {
 pub const Writer = struct {
     crc: std.hash.Crc32,
 
-    pub fn begin(alloc: std.mem.Allocator, out: *std.ArrayList(u8), chunk_type: *const [4]u8, len: u32) !Writer {
+    pub fn begin(gpa: std.mem.Allocator, out: *std.ArrayList(u8), chunk_type: *const [4]u8, len: u32) !Writer {
         var len_buf: [4]u8 = undefined;
         std.mem.writeInt(u32, &len_buf, len, .big);
-        try out.appendSlice(alloc, &len_buf);
+        try out.appendSlice(gpa, &len_buf);
         var w: Writer = .{ .crc = std.hash.Crc32.init() };
         w.crc.update(chunk_type);
-        try out.appendSlice(alloc, chunk_type);
+        try out.appendSlice(gpa, chunk_type);
         return w;
     }
 
-    pub fn append(self: *Writer, alloc: std.mem.Allocator, out: *std.ArrayList(u8), data: []const u8) !void {
+    pub fn append(self: *Writer, gpa: std.mem.Allocator, out: *std.ArrayList(u8), data: []const u8) !void {
         self.crc.update(data);
-        try out.appendSlice(alloc, data);
+        try out.appendSlice(gpa, data);
     }
 
-    pub fn end(self: *Writer, alloc: std.mem.Allocator, out: *std.ArrayList(u8)) !void {
+    pub fn end(self: *Writer, gpa: std.mem.Allocator, out: *std.ArrayList(u8)) !void {
         var crc_buf: [4]u8 = undefined;
         std.mem.writeInt(u32, &crc_buf, self.crc.final(), .big);
-        try out.appendSlice(alloc, &crc_buf);
+        try out.appendSlice(gpa, &crc_buf);
     }
 };
 
-pub fn writeChunk(alloc: std.mem.Allocator, out: *std.ArrayList(u8), chunk_type: *const [4]u8, data: []const u8) !void {
-    var w: Writer = try .begin(alloc, out, chunk_type, @intCast(data.len));
-    try w.append(alloc, out, data);
-    try w.end(alloc, out);
+pub fn writeChunk(gpa: std.mem.Allocator, out: *std.ArrayList(u8), chunk_type: *const [4]u8, data: []const u8) !void {
+    var w: Writer = try .begin(gpa, out, chunk_type, @intCast(data.len));
+    try w.append(gpa, out, data);
+    try w.end(gpa, out);
 }
 
 /// The 13-byte IHDR payload (compression, filter method 0).

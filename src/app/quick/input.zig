@@ -3,6 +3,7 @@
 //! card's life (fade in, stay, fade out).
 
 const std = @import("std");
+const log = std.log.scoped(.quick_access);
 const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/api.zig").window;
 const focus = @import("../../ui/focus.zig");
@@ -34,7 +35,7 @@ pub fn onEvent(self: *Quick, ev: window.InputEvent) void {
             // then belong to whatever the person went back to typing
             // in, not to the thumbnail's shortcuts
             if (self.layer and !self.win.pointer_in) {
-                std.log.debug("quick access: key ignored, the pointer is elsewhere", .{});
+                log.debug("key ignored, the pointer is elsewhere", .{});
             } else onKey(self, k);
         },
     }
@@ -48,7 +49,7 @@ fn onMotion(self: *Quick, x: f64, y: f64) void {
     self.hover = h;
     if (self.press.held()) |p| if (p.control == .body and self.dragging == null and self.press.dragged(x, y, self.factor())) {
         self.press.cancel();
-        self.startDrag(p.card) catch |err| std.log.warn("quick access: drag failed: {t}", .{err});
+        self.startDrag(p.card) catch |err| log.warn("drag failed: {t}", .{err});
     };
 }
 
@@ -134,11 +135,7 @@ pub fn tick(self: *Quick) void {
         const c = &self.cards.items[i];
         if (c.menu or (keep_alive and c.life.leaving == 0)) c.deadline_ms = @max(c.deadline_ms, now + 2000);
         if (now >= c.deadline_ms) c.life.leave(now);
-        if (c.notice_until != 0 and now >= c.notice_until) {
-            c.notice_until = 0;
-            c.notice = "";
-            self.dirty = true;
-        }
+        if (c.notice.expire(now)) self.dirty = true;
         if (fading(c, now)) self.dirty = true;
         if (c.life.gone(now)) {
             self.remove(i);
@@ -160,7 +157,7 @@ pub fn nextWakeMs(self: *const Quick) i32 {
     for (self.cards.items) |*c| {
         if (fading(c, now)) return 16;
         wait = @min(wait, c.deadline_ms - now);
-        if (c.notice_until != 0) wait = @min(wait, c.notice_until - now);
+        if (c.notice.left(now)) |l| wait = @min(wait, l);
     }
     return @intCast(std.math.clamp(wait, 5, 1000));
 }

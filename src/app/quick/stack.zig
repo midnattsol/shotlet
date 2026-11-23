@@ -4,6 +4,7 @@
 //! live in sibling files and are reachable as methods.
 
 const std = @import("std");
+const log = std.log.scoped(.quick_access);
 const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
@@ -20,6 +21,7 @@ const motion = @import("../../ui/motion.zig");
 const press = @import("../../ui/press.zig");
 const scale = @import("../../ui/scale.zig");
 const theme = @import("../../ui/theme.zig");
+const Notice = @import("../../ui/notice.zig").Notice;
 const layout = @import("layout.zig");
 const actions = @import("actions.zig");
 const input = @import("input.zig");
@@ -46,8 +48,8 @@ pub const Card = struct {
     menu: bool = false,
     /// how far its hover controls show (0..1)
     hov: motion.Tween = .{ .dur_ms = theme.motion_fast },
-    notice: []const u8 = "",
-    notice_until: i64 = 0,
+    /// "Copied", "Saved" over it for a moment
+    notice: Notice = .{},
 
     fn deinit(self: *Card, gpa: std.mem.Allocator) void {
         self.meta.deinit(gpa);
@@ -61,7 +63,7 @@ pub const Quick = struct {
     env: Env,
     cfg: config.Config,
     win: Window,
-    bus: ?desktop.Session = null,
+    bus: ?desktop.Bus = null,
     cards: std.ArrayList(Card) = .empty,
     /// the hand-off socket (quick_ipc.zig)
     server: ipc.Server = .{},
@@ -101,7 +103,7 @@ pub const Quick = struct {
         return scale.of(self.win.scale120);
     }
 
-    pub fn bus_(self: *Quick) ?*desktop.Session {
+    pub fn bus_(self: *Quick) ?*desktop.Bus {
         if (self.bus == null) self.bus = desktop.connect(self.gpa, self.env) catch return null;
         return &self.bus.?;
     }
@@ -128,7 +130,7 @@ pub const Quick = struct {
     /// False when another stack listens (a stale socket is taken over).
     pub fn listen(self: *Quick) bool {
         self.server = quick_ipc.listen(self.env) catch |err| {
-            if (err != error.AddressInUse) std.log.warn("quick access: no hand-off socket: {t}", .{err});
+            if (err != error.AddressInUse) log.warn("no hand-off socket: {t}", .{err});
             return false;
         };
         return true;
@@ -147,11 +149,11 @@ pub const Quick = struct {
                 continue;
             };
             self.add(a.root, a.id) catch |err| {
-                std.log.warn("quick access: cannot show {s}: {t}", .{ a.id, err });
+                log.warn("cannot show {s}: {t}", .{ a.id, err });
                 req.close();
                 continue;
             };
-            std.log.info("quick access: added {s}", .{a.id});
+            log.info("added {s}", .{a.id});
             req.reply("ok");
         }
     }

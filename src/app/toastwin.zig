@@ -9,6 +9,7 @@
 //! without the keyboard focus. A click closes it.
 
 const std = @import("std");
+const log = std.log.scoped(.toast);
 const env_mod = @import("env.zig");
 const sys = @import("../platform/api.zig").sys;
 const text = @import("../gfx/text.zig");
@@ -81,7 +82,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, t: Toast) !void {
         .anchor = .{ .bottom = true },
         .margin = .{ 0, 0, 24, 0 },
     });
-    std.log.info("toast: {s}: {s}", .{ t.title, t.body });
+    log.info("{s}: {s}", .{ t.title, t.body });
     const end = sys.monoMs() + t.kind.showMs();
     var drawn = false;
     // a click on the card (pressed and released on it) closes it
@@ -134,6 +135,6 @@ fn draw(gpa: std.mem.Allocator, win: *window.Window, th: theme.Theme, t: Toast, 
     const top: i32 = @divTrunc(@as(i32, @intCast(ch)) - text.heightStyled(fs, .semibold) - (if (t.body.len > 0) text.height(ss) else 0), 2);
     text.drawStyled(&c, tx, top, fs, o.fg, .semibold, text.ellipsize(&tbuf, fs, .semibold, t.title, room, .end));
     if (t.body.len > 0) text.draw(&c, tx, top + text.heightStyled(fs, .semibold), ss, o.muted, text.ellipsize(&bbuf, ss, .regular, t.body, room, .end));
-    fui.place(gpa, .{ .px = buf, .w = win.width, .h = win.height }, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, radius * k, th.card_shadow, k);
+    fui.place(.{ .px = buf, .w = win.width, .h = win.height }, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, radius * k, th.card_shadow, k);
     try floatwin.presentStraight(win, buf);
 }

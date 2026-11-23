@@ -20,23 +20,23 @@ pub fn sniff(data: []const u8) Format {
     return .unknown;
 }
 
-pub fn decode(alloc: std.mem.Allocator, data: []const u8) !png.Image {
+pub fn decode(gpa: std.mem.Allocator, data: []const u8) !png.Image {
     return switch (sniff(data)) {
-        .png => png.decode(alloc, data),
-        .jpeg => jpeg.decode(alloc, data) catch |err| switch (err) {
+        .png => png.decode(gpa, data),
+        .jpeg => jpeg.decode(gpa, data) catch |err| switch (err) {
             // progressive, CMYK...: libjpeg-turbo knows them
-            error.Unsupported => libs.decodeJpegLib(alloc, data),
+            error.Unsupported => libs.decodeJpegLib(gpa, data),
             else => err,
         },
-        .webp => libs.decodeWebp(alloc, data),
+        .webp => libs.decodeWebp(gpa, data),
         .unknown => error.UnknownImageFormat,
     };
 }
 
-pub fn loadFile(alloc: std.mem.Allocator, path: []const u8) !png.Image {
-    const data = try sys.readFileAlloc(alloc, path, max_file);
-    defer alloc.free(data);
-    return decode(alloc, data);
+pub fn loadFile(gpa: std.mem.Allocator, path: []const u8) !png.Image {
+    const data = try sys.readFileAlloc(gpa, path, max_file);
+    defer gpa.free(data);
+    return decode(gpa, data);
 }
 
 test "formats by content" {

@@ -71,31 +71,31 @@ pub const Font = struct {
     cache: std.AutoHashMap(CacheKey, Glyph),
 
     /// Load the first face of a font file.
-    pub fn load(alloc: std.mem.Allocator, path: []const u8) !Font {
-        return loadFace(alloc, path, 0);
+    pub fn load(gpa: std.mem.Allocator, path: []const u8) !Font {
+        return loadFace(gpa, path, 0);
     }
 
     /// Load face `index` of a font file (.ttf, .otf or .ttc). The file is
     /// memory-mapped, so large CJK collections cost address space only.
-    pub fn loadFace(alloc: std.mem.Allocator, path: []const u8, index: u32) !Font {
+    pub fn loadFace(gpa: std.mem.Allocator, path: []const u8, index: u32) !Font {
         if (mmap.mapFile(path)) |m| {
-            var f = parse(alloc, m, index) catch |e| {
+            var f = parse(gpa, m, index) catch |e| {
                 mmap.unmap(m);
                 return e;
             };
             f.storage = .mapped;
             return f;
         } else |_| {}
-        const data = try sys.readFileAlloc(alloc, path, 64 * 1024 * 1024);
-        errdefer alloc.free(data);
-        var f = try parse(alloc, data, index);
+        const data = try sys.readFileAlloc(gpa, path, 64 * 1024 * 1024);
+        errdefer gpa.free(data);
+        var f = try parse(gpa, data, index);
         f.storage = .heap;
         return f;
     }
 
     /// Parse font bytes without taking ownership (caller keeps `data` alive
     /// and frees it after deinit).
-    pub fn parse(alloc: std.mem.Allocator, data: []const u8, index: u32) LoadError!Font {
+    pub fn parse(gpa: std.mem.Allocator, data: []const u8, index: u32) LoadError!Font {
         const dir = try sfnt.directoryOffset(data, index);
         const t = try sfnt.readTables(data, dir);
         if (t.head.len < 54 or t.maxp.len < 6 or t.cmap.len < 4 or t.hhea.len < 36) return error.MissingTables;
@@ -105,7 +105,7 @@ pub const Font = struct {
         if (upem < 16 or upem > 16384) return error.BadFont;
 
         var font: Font = .{
-            .alloc = alloc,
+            .alloc = gpa,
             .data = data,
             .storage = .borrowed,
             .glyf = t.glyf,
@@ -125,7 +125,7 @@ pub const Font = struct {
         const cmaps = try cmap_table.pick(t.cmap);
         font.cmap4 = cmaps.cmap4;
         font.cmap12 = cmaps.cmap12;
-        font.cache = std.AutoHashMap(CacheKey, Glyph).init(alloc);
+        font.cache = std.AutoHashMap(CacheKey, Glyph).init(gpa);
         return font;
     }
 

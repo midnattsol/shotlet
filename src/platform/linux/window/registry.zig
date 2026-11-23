@@ -59,16 +59,16 @@ pub const Effects = enum {
 };
 
 /// Connect to the session's display (Env.session).
-pub fn init(alloc: std.mem.Allocator, env: Env) !Window {
-    return connect(alloc, env.runtime_dir, env.session.display);
+pub fn init(gpa: std.mem.Allocator, env: Env) !Window {
+    return connect(gpa, env.runtime_dir, env.session.display);
 }
 
 /// Connect to Wayland display `display` (a name in `runtime_dir`, or a
 /// path).
-pub fn connect(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Window {
+pub fn connect(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Window {
     var self = Window{
-        .alloc = alloc,
-        .conn = try wl.Connection.connect(alloc, runtime_dir, display),
+        .alloc = gpa,
+        .conn = try wl.Connection.connect(gpa, runtime_dir, display),
     };
     errdefer self.conn.deinit();
     self.kb = keyboard.Keyboard.init();

@@ -24,9 +24,9 @@ pub const Doc = struct {
     beautify: doc_mod.Beautify = .{},
     shapes: std.ArrayList(Shape) = .empty,
 
-    pub fn deinit(self: *Doc, alloc: std.mem.Allocator) void {
-        for (self.shapes.items) |*s| s.deinit(alloc);
-        self.shapes.deinit(alloc);
+    pub fn deinit(self: *Doc, gpa: std.mem.Allocator) void {
+        for (self.shapes.items) |*s| s.deinit(gpa);
+        self.shapes.deinit(gpa);
     }
 };
 
@@ -34,36 +34,36 @@ pub const Doc = struct {
 const max_shapes = 10_000;
 const max_points = 200_000;
 
-pub fn write(alloc: std.mem.Allocator, sel: ?Rect, beautify: doc_mod.Beautify, list: []const Shape) ![]u8 {
+pub fn write(gpa: std.mem.Allocator, sel: ?Rect, beautify: doc_mod.Beautify, list: []const Shape) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(alloc);
-    try out.appendSlice(alloc, "shotlet-doc 1\n");
-    if (sel) |r| try out.print(alloc, "sel {d} {d} {d} {d}\n", .{ r.x, r.y, r.w, r.h });
+    errdefer out.deinit(gpa);
+    try out.appendSlice(gpa, "shotlet-doc 1\n");
+    if (sel) |r| try out.print(gpa, "sel {d} {d} {d} {d}\n", .{ r.x, r.y, r.w, r.h });
     const b = beautify;
-    try out.print(alloc, "beautify {d} {d} {d} {d} {d}\n", .{ @intFromBool(b.enabled), b.bg, b.padding, @intFromBool(b.rounded), @intFromBool(b.shadow) });
+    try out.print(gpa, "beautify {d} {d} {d} {d} {d}\n", .{ @intFromBool(b.enabled), b.bg, b.padding, @intFromBool(b.rounded), @intFromBool(b.shadow) });
     for (list) |*s| {
         const flags: u8 = @as(u8, @intFromBool(s.filled)) | @as(u8, @intFromBool(s.rounded)) << 1 | @as(u8, @intFromBool(s.pill)) << 2;
-        try out.print(alloc, "shape {t} {X:0>8} {d} {d} {d} {d} {d} {d} {d} {d} ", .{
+        try out.print(gpa, "shape {t} {X:0>8} {d} {d} {d} {d} {d} {d} {d} {d} ", .{
             s.tool, s.color, s.thickness, s.p0.x, s.p0.y, s.p1.x, s.p1.y, s.number, flags, s.box_w,
         });
-        if (s.str.items.len == 0) try out.append(alloc, '-') else for (s.str.items) |c| try out.print(alloc, "{x:0>2}", .{c});
-        try out.append(alloc, ' ');
-        if (s.points.items.len == 0) try out.append(alloc, '-');
+        if (s.str.items.len == 0) try out.append(gpa, '-') else for (s.str.items) |c| try out.print(gpa, "{x:0>2}", .{c});
+        try out.append(gpa, ' ');
+        if (s.points.items.len == 0) try out.append(gpa, '-');
         for (s.points.items, 0..) |p, i| {
-            if (i > 0) try out.append(alloc, ';');
-            try out.print(alloc, "{d},{d}", .{ p.x, p.y });
+            if (i > 0) try out.append(gpa, ';');
+            try out.print(gpa, "{d},{d}", .{ p.x, p.y });
         }
-        try out.append(alloc, '\n');
+        try out.append(gpa, '\n');
     }
-    return out.toOwnedSlice(alloc);
+    return out.toOwnedSlice(gpa);
 }
 
-pub fn parse(alloc: std.mem.Allocator, data: []const u8) !Doc {
+pub fn parse(gpa: std.mem.Allocator, data: []const u8) !Doc {
     var lines = std.mem.splitScalar(u8, data, '\n');
     const head = std.mem.trimEnd(u8, lines.next() orelse return error.BadDocument, "\r");
     if (!std.mem.eql(u8, head, "shotlet-doc 1")) return error.BadDocument;
     var d: Doc = .{};
-    errdefer d.deinit(alloc);
+    errdefer d.deinit(gpa);
     var n_points: usize = 0;
     while (lines.next()) |raw| {
         const line = std.mem.trimEnd(u8, raw, "\r");
@@ -84,7 +84,7 @@ pub fn parse(alloc: std.mem.Allocator, data: []const u8) !Doc {
             const tool = std.meta.stringToEnum(shapes.Tool, f.next() orelse return error.BadDocument) orelse return error.BadDocument;
             const color = std.fmt.parseInt(u32, f.next() orelse return error.BadDocument, 16) catch return error.BadDocument;
             var s: Shape = .{ .tool = tool, .color = color, .thickness = std.math.clamp(try int(&f), 1, 512) };
-            errdefer s.deinit(alloc);
+            errdefer s.deinit(gpa);
             s.p0 = .{ .x = try int(&f), .y = try int(&f) };
             s.p1 = .{ .x = try int(&f), .y = try int(&f) };
             s.number = @intCast(std.math.clamp(try int(&f), 0, 1_000_000));
@@ -96,7 +96,7 @@ pub fn parse(alloc: std.mem.Allocator, data: []const u8) !Doc {
             const text = f.next() orelse return error.BadDocument;
             if (!std.mem.eql(u8, text, "-")) {
                 if (text.len % 2 != 0) return error.BadDocument;
-                try s.str.ensureTotalCapacity(alloc, text.len / 2);
+                try s.str.ensureTotalCapacity(gpa, text.len / 2);
                 var i: usize = 0;
                 while (i < text.len) : (i += 2) {
                     s.str.appendAssumeCapacity(std.fmt.parseInt(u8, text[i..][0..2], 16) catch return error.BadDocument);
@@ -110,10 +110,10 @@ pub fn parse(alloc: std.mem.Allocator, data: []const u8) !Doc {
                     n_points += 1;
                     if (n_points > max_points) return error.BadDocument;
                     const comma = std.mem.indexOfScalar(u8, pair, ',') orelse return error.BadDocument;
-                    try s.points.append(alloc, .{ .x = try coord(pair[0..comma]), .y = try coord(pair[comma + 1 ..]) });
+                    try s.points.append(gpa, .{ .x = try coord(pair[0..comma]), .y = try coord(pair[comma + 1 ..]) });
                 }
             }
-            try d.shapes.append(alloc, s);
+            try d.shapes.append(gpa, s);
         }
     }
     return d;
@@ -144,19 +144,19 @@ pub fn translate(d: *Doc, dx: i32, dy: i32) void {
 
 test "documents round-trip shapes, text, points and the frame" {
     const t = std.testing;
-    const alloc = t.allocator;
+    const gpa = t.allocator;
     var list: [3]Shape = .{
         .{ .tool = .arrow, .color = 0xFFE03131, .thickness = 4, .p0 = .{ .x = 10, .y = -5 }, .p1 = .{ .x = 200, .y = 90 } },
         .{ .tool = .text, .color = 0x80123456, .thickness = 3, .p0 = .{ .x = 1, .y = 2 }, .pill = true, .box_w = 120 },
         .{ .tool = .pen, .color = 0xFF000000, .thickness = 2, .filled = true, .rounded = true, .number = 7 },
     };
-    defer for (&list) |*s| s.deinit(alloc);
-    try list[1].str.appendSlice(alloc, "¿Qué? 漢字 a b\n2");
-    try list[2].points.appendSlice(alloc, &.{ .{ .x = 0, .y = 0 }, .{ .x = -3, .y = 4 }, .{ .x = 5, .y = 6 } });
-    const data = try write(alloc, .{ .x = 3, .y = 4, .w = 50, .h = 60 }, .{ .enabled = true, .bg = 3, .padding = 1, .rounded = false, .shadow = true }, &list);
-    defer alloc.free(data);
-    var d = try parse(alloc, data);
-    defer d.deinit(alloc);
+    defer for (&list) |*s| s.deinit(gpa);
+    try list[1].str.appendSlice(gpa, "¿Qué? 漢字 a b\n2");
+    try list[2].points.appendSlice(gpa, &.{ .{ .x = 0, .y = 0 }, .{ .x = -3, .y = 4 }, .{ .x = 5, .y = 6 } });
+    const data = try write(gpa, .{ .x = 3, .y = 4, .w = 50, .h = 60 }, .{ .enabled = true, .bg = 3, .padding = 1, .rounded = false, .shadow = true }, &list);
+    defer gpa.free(data);
+    var d = try parse(gpa, data);
+    defer d.deinit(gpa);
     try t.expectEqual(Rect{ .x = 3, .y = 4, .w = 50, .h = 60 }, d.sel.?);
     try t.expect(d.beautify.enabled and d.beautify.bg == 3 and d.beautify.padding == 1 and !d.beautify.rounded and d.beautify.shadow);
     try t.expectEqual(@as(usize, 3), d.shapes.items.len);
@@ -180,7 +180,7 @@ test "documents round-trip shapes, text, points and the frame" {
 }
 
 test "damaged documents are refused, not half loaded" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const bad = [_][]const u8{
         "",
         "shotlet-doc 2\n",
@@ -191,10 +191,10 @@ test "damaged documents are refused, not half loaded" {
         "shotlet-doc 1\nshape text FF000000 1 0 0 0 0 0 0 0 ff -\n", // not UTF-8
         "shotlet-doc 1\nshape line FF000000 1 0 0 99999999999 0 0 0 0 - -\n",
     };
-    for (bad) |b| try std.testing.expectError(error.BadDocument, parse(alloc, b));
+    for (bad) |b| try std.testing.expectError(error.BadDocument, parse(gpa, b));
     // unknown records are skipped
-    var d = try parse(alloc, "shotlet-doc 1\nfuture stuff here\n\nshape rect FF000000 3 1 1 9 9 0 1 0 - -\n");
-    defer d.deinit(alloc);
+    var d = try parse(gpa, "shotlet-doc 1\nfuture stuff here\n\nshape rect FF000000 3 1 1 9 9 0 1 0 - -\n");
+    defer d.deinit(gpa);
     try std.testing.expectEqual(@as(usize, 1), d.shapes.items.len);
     try std.testing.expect(d.shapes.items[0].filled);
 }

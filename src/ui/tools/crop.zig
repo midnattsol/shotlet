@@ -93,22 +93,22 @@ pub const Store = struct {
     owned: std.ArrayList(*png.Image) = .empty,
     next_mark: u32 = 1,
 
-    pub fn deinit(self: *Store, alloc: std.mem.Allocator) void {
+    pub fn deinit(self: *Store, gpa: std.mem.Allocator) void {
         for (self.owned.items) |im| {
-            im.deinit(alloc);
-            alloc.destroy(im);
+            im.deinit(gpa);
+            gpa.destroy(im);
         }
-        self.owned.deinit(alloc);
-        self.entries.deinit(alloc);
+        self.owned.deinit(gpa);
+        self.entries.deinit(gpa);
     }
 
     /// Keep `img` (taking it) alive until the editor ends.
-    pub fn adopt(self: *Store, alloc: std.mem.Allocator, img: png.Image) !*png.Image {
+    pub fn adopt(self: *Store, gpa: std.mem.Allocator, img: png.Image) !*png.Image {
         var im = img;
-        errdefer im.deinit(alloc);
-        const p = try alloc.create(png.Image);
-        errdefer alloc.destroy(p);
-        try self.owned.append(alloc, p);
+        errdefer im.deinit(gpa);
+        const p = try gpa.create(png.Image);
+        errdefer gpa.destroy(p);
+        try self.owned.append(gpa, p);
         p.* = im;
         return p;
     }
@@ -122,13 +122,13 @@ pub const Store = struct {
 const testing = std.testing;
 
 test "cropping keeps the annotations on their pixels" {
-    const alloc = testing.allocator;
+    const gpa = testing.allocator;
     var px: [8 * 6]u32 = undefined;
     for (&px, 0..) |*p, i| p.* = @intCast(i);
     const img: png.Image = .{ .width = 8, .height = 6, .pixels = &px };
     const r = Rect{ .x = 2, .y = 1, .w = 5, .h = 4 };
-    var out = try img.crop(alloc, r);
-    defer out.deinit(alloc);
+    var out = try img.crop(gpa, r);
+    defer out.deinit(gpa);
     try testing.expectEqual(@as(u32, 5), out.width);
     try testing.expectEqual(@as(u32, 4), out.height);
     try testing.expectEqual(px[1 * 8 + 2], out.pixels[0]);
@@ -166,12 +166,12 @@ test "aspect ratios from a corner, an edge and a fit" {
 }
 
 test "the store owns what it adopts" {
-    const alloc = testing.allocator;
+    const gpa = testing.allocator;
     var st: Store = .{};
-    defer st.deinit(alloc);
-    const px = try alloc.alloc(u32, 4);
-    const im = try st.adopt(alloc, .{ .width = 2, .height = 2, .pixels = px });
-    try st.entries.append(alloc, .{ .mark = 3, .rect = .{ .x = 0, .y = 0, .w = 2, .h = 2 }, .before = im, .after = im });
+    defer st.deinit(gpa);
+    const px = try gpa.alloc(u32, 4);
+    const im = try st.adopt(gpa, .{ .width = 2, .height = 2, .pixels = px });
+    try st.entries.append(gpa, .{ .mark = 3, .rect = .{ .x = 0, .y = 0, .w = 2, .h = 2 }, .before = im, .after = im });
     try testing.expect(st.find(3) != null);
     try testing.expect(st.find(4) == null);
 }

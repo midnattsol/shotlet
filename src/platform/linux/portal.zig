@@ -52,7 +52,7 @@ pub const savedPath = file_chooser.savedPath;
 pub const chosenPath = file_chooser.chosenPath;
 
 pub const Stream = screencast.Stream;
-pub const ScreenCastSession = screencast.Session;
+pub const ScreenCastSession = screencast.ScreenCastSession;
 pub const SelectOptions = screencast.SelectOptions;
 pub const openScreenCast = screencast.open;
 pub const availableCursorModes = screencast.availableCursorModes;

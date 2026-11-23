@@ -1,18 +1,19 @@
 //! Desktop notifications (org.freedesktop.Notifications), fire-and-forget.
 
 const std = @import("std");
+const log = std.log.scoped(.portal);
 const dbus = @import("../dbus.zig");
 const app_id = @import("../../../app_id.zig").app_id;
 
 /// Fire-and-forget desktop notification.
-pub fn notify(alloc: std.mem.Allocator, bus: *dbus.Connection, summary: []const u8, text: []const u8) void {
-    notifyInner(alloc, bus, summary, text) catch |err| {
-        std.log.warn("notification failed: {t}", .{err});
+pub fn notify(gpa: std.mem.Allocator, bus: *dbus.Connection, summary: []const u8, text: []const u8) void {
+    notifyInner(gpa, bus, summary, text) catch |err| {
+        log.warn("notification failed: {t}", .{err});
     };
 }
 
-fn notifyInner(alloc: std.mem.Allocator, bus: *dbus.Connection, summary: []const u8, text: []const u8) !void {
-    var m = dbus.Marshal.init(alloc);
+fn notifyInner(gpa: std.mem.Allocator, bus: *dbus.Connection, summary: []const u8, text: []const u8) !void {
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putString("Shotlet"); // app_name
     try m.putU32(0); // replaces_id

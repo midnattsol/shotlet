@@ -87,7 +87,7 @@ pub fn sendWithFds(fd: fd_t, data: []const u8, fds: []const fd_t) !usize {
 }
 
 /// Receive bytes; any fds received via SCM_RIGHTS are appended to out_fds.
-pub fn recvWithFds(fd: fd_t, buf: []u8, out_fds: *std.ArrayList(fd_t), alloc: std.mem.Allocator) !usize {
+pub fn recvWithFds(fd: fd_t, buf: []u8, out_fds: *std.ArrayList(fd_t), gpa: std.mem.Allocator) !usize {
     var iov = [_]std.posix.iovec{.{ .base = buf.ptr, .len = buf.len }};
     var cmsg_buf: [256]u8 align(8) = @splat(0);
     var msg: linux.msghdr = .{
@@ -101,7 +101,7 @@ pub fn recvWithFds(fd: fd_t, buf: []u8, out_fds: *std.ArrayList(fd_t), alloc: st
     };
     const n = try retryIntr(linux.recvmsg, .{ fd, &msg, linux.MSG.CMSG_CLOEXEC });
     if (n == 0) return 0;
-    try unpackRights(&cmsg_buf, msg.controllen, out_fds, alloc);
+    try unpackRights(&cmsg_buf, msg.controllen, out_fds, gpa);
     return n;
 }
 
@@ -137,7 +137,7 @@ fn packRights(cmsg_buf: *align(8) [256]u8, fds: []const fd_t) !usize {
 }
 
 /// Walk the received control messages and append every SCM_RIGHTS fd.
-fn unpackRights(cmsg_buf: *align(8) const [256]u8, controllen: usize, out_fds: *std.ArrayList(fd_t), alloc: std.mem.Allocator) !void {
+fn unpackRights(cmsg_buf: *align(8) const [256]u8, controllen: usize, out_fds: *std.ArrayList(fd_t), gpa: std.mem.Allocator) !void {
     var off: usize = 0;
     while (off + cmsgHdrSpace() <= controllen) {
         const hdr: *const cmsghdr = @ptrCast(@alignCast(cmsg_buf[off..].ptr));
@@ -146,7 +146,7 @@ fn unpackRights(cmsg_buf: *align(8) const [256]u8, controllen: usize, out_fds: *
             const payload = hdr.len - cmsgHdrSpace();
             const count = payload / @sizeOf(fd_t);
             const fds_ptr: [*]const fd_t = @ptrCast(@alignCast(cmsg_buf[off + cmsgHdrSpace() ..].ptr));
-            for (0..count) |i| try out_fds.append(alloc, fds_ptr[i]);
+            for (0..count) |i| try out_fds.append(gpa, fds_ptr[i]);
         }
         off += std.mem.alignForward(usize, hdr.len, @sizeOf(usize));
     }

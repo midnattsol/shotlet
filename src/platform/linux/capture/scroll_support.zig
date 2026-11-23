@@ -6,6 +6,7 @@
 //! the extension's install state says is what to tell the person.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("../dbus.zig");
 const gnome = @import("../gnome.zig");
 const direct = @import("direct.zig");
@@ -40,7 +41,7 @@ pub fn support(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) ScrollSu
         .direct = directNow(gpa, env, bus),
         .shell = if (gnome.isGnome()) gnome.installState(gpa, env, bus) else null,
     });
-    std.log.info("scrolling capture: {t}", .{why});
+    log.info("scrolling capture: {t}", .{why});
     return why;
 }
 

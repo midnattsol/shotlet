@@ -19,10 +19,10 @@ pub fn caretAt(s: *const Shape, p: Point) textbox.Hit {
 }
 
 test "caret lands on the nearest character" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
-    defer s.deinit(alloc);
-    try s.str.appendSlice(alloc, "abc\ndefgh");
+    defer s.deinit(gpa);
+    try s.str.appendSlice(gpa, "abc\ndefgh");
     try std.testing.expectEqual(@as(usize, 0), caretAt(&s, .{ .x = 0, .y = 0 }).off);
     try std.testing.expectEqual(@as(usize, 3), caretAt(&s, .{ .x = 10000, .y = 100 }).off);
     const lh = text_mod.height(s.fontPx());
@@ -32,12 +32,12 @@ test "caret lands on the nearest character" {
 }
 
 test "caret across wrapped lines of a fixed-width text" {
-    const alloc = std.testing.allocator;
-    text_mod.init(alloc);
+    const gpa = std.testing.allocator;
+    text_mod.init(gpa);
     defer text_mod.deinit();
     var s = Shape{ .tool = .text, .color = 0xFFFFFFFF, .thickness = 4, .p0 = .{ .x = 100, .y = 100 } };
-    defer s.deinit(alloc);
-    try s.str.appendSlice(alloc, "alpha beta gamma");
+    defer s.deinit(gpa);
+    try s.str.appendSlice(gpa, "alpha beta gamma");
     const fs = s.fontPx();
     s.box_w = text_mod.width(fs, "alpha beta") + 2;
     const lh = text_mod.height(fs);

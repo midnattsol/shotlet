@@ -2,6 +2,7 @@
 //! Space / Enter. Config changes are saved at once.
 
 const std = @import("std");
+const log = std.log.scoped(.settings);
 const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../../app/config.zig");
 const shell = @import("../../platform/api.zig").shell;
@@ -66,7 +67,7 @@ fn showView(st: *model.State, v: model.View) void {
 fn applyConfig(app: *App, hit: Hit) void {
     const cfg = &app.cfg;
     switch (hit) {
-        .rec => |r| settings_rec.activate(app.alloc, app.env.home, r),
+        .rec => |r| settings_rec.apply(&cfg.record, r),
         .toggle_notify => cfg.notify = !cfg.notify,
         .toggle_copy_on_save => cfg.copy_on_save = !cfg.copy_on_save,
         .th_minus => cfg.default_thickness = @max(1, cfg.default_thickness - 1),
@@ -87,7 +88,7 @@ fn forgetMonitors(app: *App) void {
     // only this key changes; the next capture shows the picker
     app.cfg.setScToken("");
     config.saveScreencastToken(app.alloc, app.env.home, "") catch |err| {
-        std.log.warn("could not save config: {t}", .{err});
+        log.warn("could not save config: {t}", .{err});
         report.failed(app.env, "Couldn\u{2019}t save the settings", err);
     };
     app.st.dirty = true;
@@ -97,13 +98,13 @@ fn forgetMonitors(app: *App) void {
 fn chooseFolder(app: *App) void {
     app.st.dirty = true;
     if (app.folder_req != null) return;
-    const conn = app.busPtr() orelse {
-        std.log.warn("no session bus: cannot show the folder chooser", .{});
+    const bus = app.busPtr() orelse {
+        log.warn("no session bus: cannot show the folder chooser", .{});
         report.problem(app.env, "Couldn\u{2019}t open the folder chooser", "The desktop session can\u{2019}t be reached");
         return;
     };
-    app.folder_req = desktop.chooseFolder(app.alloc, conn, app.cfg.saveDir()) catch |err| blk: {
-        std.log.warn("folder chooser: {t}", .{err});
+    app.folder_req = desktop.chooseFolder(app.alloc, bus, app.cfg.saveDir()) catch |err| blk: {
+        log.warn("folder chooser: {t}", .{err});
         report.failed(app.env, "Couldn\u{2019}t open the folder chooser", err);
         break :blk null;
     };
@@ -118,7 +119,7 @@ fn clearHistory(app: *App) void {
     }
     var buf: [1024]u8 = undefined;
     if (history.historyRoot(&buf, app.env.home)) |root| history.clear(root) else |_| {}
-    std.log.info("history cleared from Settings", .{});
+    log.info("history cleared from Settings", .{});
     app.st.history_clear = .cleared;
 }
 

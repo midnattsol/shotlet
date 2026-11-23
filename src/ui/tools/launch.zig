@@ -3,8 +3,6 @@
 
 const Env = @import("../../app/env.zig").Env;
 
-/// the process environment (to start `shotlet pin` and the like)
-pub var env: ?Env = null;
 /// `shotlet text`: select a region, its text goes to the clipboard
 pub var text_capture = false;
 /// start with the whole picture selected (an opened file)
@@ -14,7 +12,10 @@ pub var select_all = false;
 pub var pin_fd: ?sys.fd_t = null;
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const sys = @import("../../platform/api.zig").sys;
+const ipc = @import("../../app/ipc.zig");
+const testutil = @import("../../testutil.zig");
 
 /// Hand `png` back to the pin this edit is for, once, and let it show
 /// again (null: a Cancel, it stays as it was). False when no pin asked.
@@ -22,20 +23,25 @@ pub fn backToPin(png: ?[]const u8) bool {
     const fd = pin_fd orelse return false;
     pin_fd = null;
     defer sys.close(fd);
-    if (png) |d| sys.writeAllBlocking(fd, d) catch |err| std.log.warn("pin: could not hand the picture back: {t}", .{err});
+    if (png) |d| sys.writeAllBlocking(fd, d) catch |err| log.warn("pin: could not hand the picture back: {t}", .{err});
     return true;
 }
 
 /// With the GNOME integration the shell takes the screenshot and starts a
-/// new shotlet on it: a text capture leaves a note for that one.
-fn notePath(buf: []u8, runtime_dir: []const u8) ![]const u8 {
-    return std.fmt.bufPrint(buf, "{s}/shotlet-next-capture", .{runtime_dir});
+/// new shotlet on it: a text capture leaves a note for that one, in the
+/// runtime directory, per desktop session (ipc.sessionPath).
+fn notePath(buf: []u8, runtime_dir: []const u8, session: []const u8) ![]const u8 {
+    return ipc.sessionPath(buf, runtime_dir, session, "next-capture", "");
 }
 
-pub fn handOff(runtime_dir: []const u8) void {
+pub fn handOff(env: Env) void {
+    noteFor(env.runtime_dir, env.session.tag());
+}
+
+fn noteFor(runtime_dir: []const u8, session: []const u8) void {
     if (!text_capture) return;
     var buf: [512]u8 = undefined;
-    const path = notePath(&buf, runtime_dir) catch return;
+    const path = notePath(&buf, runtime_dir, session) catch return;
     var line: [32]u8 = undefined;
     const s = std.fmt.bufPrint(&line, "text {d}\n", .{sys.monoMs()}) catch return;
     sys.unlink(path) catch {};
@@ -43,9 +49,13 @@ pub fn handOff(runtime_dir: []const u8) void {
 }
 
 /// The note, when fresh (the last few seconds), sets the mode.
-pub fn takeHandOff(runtime_dir: []const u8) void {
+pub fn takeHandOff(env: Env) void {
+    takeNote(env.runtime_dir, env.session.tag());
+}
+
+fn takeNote(runtime_dir: []const u8, session: []const u8) void {
     var buf: [512]u8 = undefined;
-    const path = notePath(&buf, runtime_dir) catch return;
+    const path = notePath(&buf, runtime_dir, session) catch return;
     // no allocator: a FixedBufferAllocator smaller than an ArrayList's
     // first growth (a cache line, 128 bytes on x86_64) failed every read
     var mem: [64]u8 = undefined;
@@ -62,19 +72,20 @@ fn parseNote(data: []const u8, now: i64) bool {
 }
 
 test "a text capture's note reaches the shotlet the shell starts" {
-    const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-launch");
+    defer tmp.deinit();
     defer text_capture = false;
     text_capture = true;
-    handOff(dir);
+    noteFor(tmp.path, "wl0");
     text_capture = false;
-    takeHandOff(dir);
+    // another desktop session's shotlet does not take it
+    takeNote(tmp.path, "wl1");
+    try std.testing.expect(!text_capture);
+    takeNote(tmp.path, "wl0");
     try std.testing.expect(text_capture);
     // taken once: the next shell capture is a plain one
     text_capture = false;
-    takeHandOff(dir);
+    takeNote(tmp.path, "wl0");
     try std.testing.expect(!text_capture);
 }
 

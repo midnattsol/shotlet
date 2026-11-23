@@ -11,9 +11,9 @@ pub const Kind = enum { email, phone, card, iban, ip, jwt, api_key, token };
 pub const Match = struct { start: usize, end: usize, kind: Kind };
 
 /// Every match in `text`, left to right, without overlaps.
-pub fn find(alloc: std.mem.Allocator, text: []const u8) ![]Match {
+pub fn find(gpa: std.mem.Allocator, text: []const u8) ![]Match {
     var out: std.ArrayList(Match) = .empty;
-    errdefer out.deinit(alloc);
+    errdefer out.deinit(gpa);
     var i: usize = 0;
     while (i < text.len) {
         if (i > 0 and isWordChar(text[i - 1]) and isWordChar(text[i])) {
@@ -21,11 +21,11 @@ pub fn find(alloc: std.mem.Allocator, text: []const u8) ![]Match {
             continue;
         }
         if (matchAt(text, i)) |m| {
-            try out.append(alloc, m);
+            try out.append(gpa, m);
             i = m.end;
         } else i = skipNumber(text, i);
     }
-    return out.toOwnedSlice(alloc);
+    return out.toOwnedSlice(gpa);
 }
 
 /// Past a number that matched nothing (its later groups are no number

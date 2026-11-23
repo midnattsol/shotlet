@@ -3,6 +3,7 @@
 //! menu object lives in tray/menu.zig.
 
 const std = @import("std");
+const log = std.log.scoped(.daemon);
 const dbus = @import("../dbus.zig");
 const render = @import("../../../gfx/render.zig");
 
@@ -55,8 +56,8 @@ pub const Tray = struct {
         argb: []const u8,
     };
 
-    pub fn init(alloc: std.mem.Allocator, bus: *dbus.Connection, icons: []const IconPixmap) !Tray {
-        var self = Tray{ .alloc = alloc, .bus = bus, .icons = icons };
+    pub fn init(gpa: std.mem.Allocator, bus: *dbus.Connection, icons: []const IconPixmap) !Tray {
+        var self = Tray{ .alloc = gpa, .bus = bus, .icons = icons };
         // re-register if the watcher (gnome-shell / waybar) restarts
         try bus.watchNameOwner(watcher_name);
         try self.register();
@@ -68,7 +69,7 @@ pub const Tray = struct {
         // no watcher (GNOME without the AppIndicator extension): wait for
         // one to appear instead of failing a call
         if (!(self.bus.nameHasOwner(watcher_name) catch true)) {
-            std.log.warn("no system tray host found (on GNOME, enable the AppIndicator extension); waiting for one", .{});
+            log.warn("no system tray host found (on GNOME, enable the AppIndicator extension); waiting for one", .{});
             return;
         }
         var m = dbus.Marshal.init(self.alloc);
@@ -83,12 +84,12 @@ pub const Tray = struct {
             m.buf.items,
         ) catch return error.NoTrayHost;
         var reply = self.bus.waitReply(serial) catch {
-            std.log.warn("no system tray host found (on GNOME, enable the AppIndicator extension)", .{});
+            log.warn("no system tray host found (on GNOME, enable the AppIndicator extension)", .{});
             return;
         };
         reply.deinit(self.alloc);
         self.registered = true;
-        std.log.info("tray icon registered", .{});
+        log.info("tray icon registered", .{});
     }
 
     /// Handle one incoming message if it belongs to the tray objects.
@@ -226,16 +227,16 @@ const sni_introspect_xml =
 /// Draw the tray icon: assets/icon-symbolic.svg, the panel's outline and
 /// its corner past the cut, in a panel-friendly light gray. Returns ARGB
 /// bytes in big-endian order (SNI spec) at the given size.
-pub fn drawIcon(alloc: std.mem.Allocator, size: i32) ![]u8 {
+pub fn drawIcon(gpa: std.mem.Allocator, size: i32) ![]u8 {
     const n: usize = @intCast(size);
-    const outer = try iconMask(alloc, size, .outer);
-    defer alloc.free(outer);
-    const hole = try iconMask(alloc, size, .hole);
-    defer alloc.free(hole);
-    const corner = try iconMask(alloc, size, .corner);
-    defer alloc.free(corner);
-    const px = try alloc.alloc(u32, n * n);
-    defer alloc.free(px);
+    const outer = try iconMask(gpa, size, .outer);
+    defer gpa.free(outer);
+    const hole = try iconMask(gpa, size, .hole);
+    defer gpa.free(hole);
+    const corner = try iconMask(gpa, size, .corner);
+    defer gpa.free(corner);
+    const px = try gpa.alloc(u32, n * n);
+    defer gpa.free(px);
     const fg: u32 = 0x00E9ECEF;
     for (px, 0..) |*p, i| {
         // the outline: the panel less its inside, which keeps the corner
@@ -243,15 +244,15 @@ pub fn drawIcon(alloc: std.mem.Allocator, size: i32) ![]u8 {
         const a = (outer[i] >> 24) * (255 - inside) / 255;
         p.* = (a << 24) | fg;
     }
-    return networkArgb(alloc, px);
+    return networkArgb(gpa, px);
 }
 
 const IconPart = enum { outer, hole, corner };
 
 /// One part of the symbolic icon as a white coverage mask, on its 16-unit grid.
-fn iconMask(alloc: std.mem.Allocator, size: i32, part: IconPart) ![]u32 {
+fn iconMask(gpa: std.mem.Allocator, size: i32, part: IconPart) ![]u32 {
     const n: usize = @intCast(size);
-    const px = try alloc.alloc(u32, n * n);
+    const px = try gpa.alloc(u32, n * n);
     @memset(px, 0);
     var c = render.Canvas.init(px, @intCast(size), @intCast(size));
     const u = @as(f64, @floatFromInt(size)) / 16.0;
@@ -270,8 +271,8 @@ fn iconMask(alloc: std.mem.Allocator, size: i32, part: IconPart) ![]u32 {
 }
 
 /// 0xAARRGGBB pixels as network-order ARGB bytes.
-fn networkArgb(alloc: std.mem.Allocator, px: []const u32) ![]u8 {
-    const out = try alloc.alloc(u8, px.len * 4);
+fn networkArgb(gpa: std.mem.Allocator, px: []const u32) ![]u8 {
+    const out = try gpa.alloc(u8, px.len * 4);
     for (px, 0..) |p, i| {
         out[i * 4] = @truncate(p >> 24);
         out[i * 4 + 1] = @truncate(p >> 16);
@@ -286,13 +287,13 @@ fn testCall(path: []const u8, iface: []const u8, member: []const u8, body: []con
 }
 
 test "tray answers with the declared types, and errors for unknown objects" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const fds = try @import("../sys.zig").socketPair();
-    var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
+    var host = dbus.Connection{ .fd = fds[0], .alloc = gpa };
     defer host.deinit();
-    var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
+    var ours = dbus.Connection{ .fd = fds[1], .alloc = gpa };
     defer ours.deinit();
-    var tray = Tray{ .alloc = alloc, .bus = &ours, .icons = &.{} };
+    var tray = Tray{ .alloc = gpa, .bus = &ours, .icons = &.{} };
 
     const Want = struct { prop: []const u8, sig: []const u8 };
     for ([_]Want{
@@ -301,14 +302,14 @@ test "tray answers with the declared types, and errors for unknown objects" {
         .{ .prop = "IconPixmap", .sig = "a(iiay)" },
         .{ .prop = "Menu", .sig = "o" },
     }) |w| {
-        var m = dbus.Marshal.init(alloc);
+        var m = dbus.Marshal.init(gpa);
         defer m.deinit();
         try m.putString(sni_iface);
         try m.putString(w.prop);
         var call = testCall(sni_path, props_iface, "Get", m.buf.items);
         _ = try tray.handleMessage(&call);
         var reply = try host.readMessage();
-        defer reply.deinit(alloc);
+        defer reply.deinit(gpa);
         try std.testing.expectEqual(dbus.MessageType.method_return, reply.type);
         var r = reply.reader();
         try std.testing.expectEqualStrings(w.sig, try r.readSignature());
@@ -318,13 +319,13 @@ test "tray answers with the declared types, and errors for unknown objects" {
 
     // GetAll is a valid a{sv} the reader can walk to the end
     {
-        var m = dbus.Marshal.init(alloc);
+        var m = dbus.Marshal.init(gpa);
         defer m.deinit();
         try m.putString(sni_iface);
         var call = testCall(sni_path, props_iface, "GetAll", m.buf.items);
         _ = try tray.handleMessage(&call);
         var reply = try host.readMessage();
-        defer reply.deinit(alloc);
+        defer reply.deinit(gpa);
         var r = reply.reader();
         var it = try r.readDictSV();
         var n: usize = 0;
@@ -334,21 +335,21 @@ test "tray answers with the declared types, and errors for unknown objects" {
 
     // unknown property and unknown object path both get an error reply
     {
-        var m = dbus.Marshal.init(alloc);
+        var m = dbus.Marshal.init(gpa);
         defer m.deinit();
         try m.putString(sni_iface);
         try m.putString("Nope");
         var call = testCall(sni_path, props_iface, "Get", m.buf.items);
         _ = try tray.handleMessage(&call);
         var reply = try host.readMessage();
-        defer reply.deinit(alloc);
+        defer reply.deinit(gpa);
         try std.testing.expectEqualStrings("org.freedesktop.DBus.Error.UnknownProperty", reply.error_name.?);
     }
     {
         var call = testCall("/not/here", "org.example", "Do", &.{});
         _ = try tray.handleMessage(&call);
         var reply = try host.readMessage();
-        defer reply.deinit(alloc);
+        defer reply.deinit(gpa);
         try std.testing.expectEqual(dbus.MessageType.@"error", reply.type);
         try std.testing.expectEqual(@as(?u32, 77), reply.reply_serial);
         try std.testing.expectEqualStrings("org.freedesktop.DBus.Error.UnknownObject", reply.error_name.?);
@@ -356,13 +357,13 @@ test "tray answers with the declared types, and errors for unknown objects" {
 }
 
 test "menu items map to their actions, Recent captures included" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const fds = try @import("../sys.zig").socketPair();
-    var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
+    var host = dbus.Connection{ .fd = fds[0], .alloc = gpa };
     defer host.deinit();
-    var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
+    var ours = dbus.Connection{ .fd = fds[1], .alloc = gpa };
     defer ours.deinit();
-    var tray = Tray{ .alloc = alloc, .bus = &ours, .icons = &.{} };
+    var tray = Tray{ .alloc = gpa, .bus = &ours, .icons = &.{} };
     for ([_]struct { id: i32, want: MenuAction }{
         .{ .id = 1, .want = .capture },
         .{ .id = 10, .want = .capture_text },
@@ -373,7 +374,7 @@ test "menu items map to their actions, Recent captures included" {
         .{ .id = 9, .want = .capture_timer },
         .{ .id = 99, .want = .none },
     }) |c| {
-        var m = dbus.Marshal.init(alloc);
+        var m = dbus.Marshal.init(gpa);
         defer m.deinit();
         try m.putI32(c.id);
         try m.putString("clicked");
@@ -383,7 +384,7 @@ test "menu items map to their actions, Recent captures included" {
         var call = testCall(menu_path, menu_iface, "Event", m.buf.items);
         try std.testing.expectEqual(c.want, try tray.handleMessage(&call));
         var reply = try host.readMessage();
-        reply.deinit(alloc);
+        reply.deinit(gpa);
     }
     var found = false;
     for (Tray.menu_items) |item| found = found or std.mem.eql(u8, item.label, "Recent captures…");
@@ -391,22 +392,22 @@ test "menu items map to their actions, Recent captures included" {
 }
 
 test "the menu answers its properties and errors for unknown ones" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const fds = try @import("../sys.zig").socketPair();
-    var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
+    var host = dbus.Connection{ .fd = fds[0], .alloc = gpa };
     defer host.deinit();
-    var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
+    var ours = dbus.Connection{ .fd = fds[1], .alloc = gpa };
     defer ours.deinit();
-    var tray = Tray{ .alloc = alloc, .bus = &ours, .icons = &.{} };
+    var tray = Tray{ .alloc = gpa, .bus = &ours, .icons = &.{} };
     for ([_][]const u8{ "Version", "Nope" }) |prop| {
-        var m = dbus.Marshal.init(alloc);
+        var m = dbus.Marshal.init(gpa);
         defer m.deinit();
         try m.putString(menu_iface);
         try m.putString(prop);
         var call = testCall(menu_path, props_iface, "Get", m.buf.items);
         _ = try tray.handleMessage(&call);
         var reply = try host.readMessage();
-        defer reply.deinit(alloc);
+        defer reply.deinit(gpa);
         if (std.mem.eql(u8, prop, "Version")) {
             var r = reply.reader();
             try std.testing.expectEqual(@as(u32, 3), (try r.readVariant()).u32_);

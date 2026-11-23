@@ -104,6 +104,8 @@ pub fn extension(path: []const u8) []const u8 {
 
 const testing = std.testing;
 
+const testutil = @import("../testutil.zig");
+
 test "names read shotlet-date-time, zero-padded" {
     var buf: [64]u8 = undefined;
     try testing.expectEqualStrings("shotlet-20260701-140501", try format(&buf, clock.breakDown(1782914701)));
@@ -115,9 +117,9 @@ test "names read shotlet-date-time, zero-padded" {
 
 test "saved names never overwrite" {
     const gpa = testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-test");
+    defer tmp.deinit();
+    const dir = tmp.path;
 
     const a = try writeUnique(gpa, dir, "shot", ".png", "one");
     defer gpa.free(a);
@@ -144,9 +146,9 @@ test "saved names never overwrite" {
 
 test "a copy with the same bytes is reused, a different one is not overwritten" {
     const gpa = testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-test");
+    defer tmp.deinit();
+    const dir = tmp.path;
 
     const a = try writeOrReuse(gpa, dir, "drag", ".png", "first capture");
     defer gpa.free(a);
@@ -164,9 +166,9 @@ test "a copy with the same bytes is reused, a different one is not overwritten" 
 
 test "a chosen name gets its extension without replacing a file" {
     const gpa = testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-test");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-test");
+    defer tmp.deinit();
+    const dir = tmp.path;
 
     const as_typed = try completeChosen(gpa, try std.fmt.allocPrint(gpa, "{s}/x.PNG", .{dir}), ".png");
     defer gpa.free(as_typed);

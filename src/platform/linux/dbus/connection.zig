@@ -2,6 +2,7 @@
 //! replies, wait for replies, and the org.freedesktop.DBus helpers.
 
 const std = @import("std");
+const log = std.log.scoped(.dbus);
 const sys = @import("../sys.zig");
 const Marshal = @import("marshal.zig").Marshal;
 const message = @import("message.zig");
@@ -26,8 +27,8 @@ pub const Property = struct {
         return self.reply.reader();
     }
 
-    pub fn deinit(self: *Property, alloc: std.mem.Allocator) void {
-        self.reply.deinit(alloc);
+    pub fn deinit(self: *Property, gpa: std.mem.Allocator) void {
+        self.reply.deinit(gpa);
     }
 };
 
@@ -64,7 +65,7 @@ pub const Connection = struct {
     /// `addr_env` is the value of DBUS_SESSION_BUS_ADDRESS: a `;`-separated
     /// list tried in order. Supports unix:path= and unix:abstract=, with
     /// percent-escaped values.
-    pub fn connectSession(alloc: std.mem.Allocator, addr_env: []const u8) !Connection {
+    pub fn connectSession(gpa: std.mem.Allocator, addr_env: []const u8) !Connection {
         var buf: [2048]u8 = undefined;
         var list: [8]address.Address = undefined;
         const addrs = try address.parseAddresses(addr_env, &buf, &list);
@@ -77,7 +78,7 @@ pub const Connection = struct {
                 last_err = err;
                 continue;
             };
-            return fromFd(alloc, fd);
+            return fromFd(gpa, fd);
         }
         return last_err;
     }
@@ -91,8 +92,8 @@ pub const Connection = struct {
 
     /// Authenticate and say Hello over an already connected socket. Takes
     /// ownership of fd (closed on error).
-    pub fn fromFd(alloc: std.mem.Allocator, fd: sys.fd_t) !Connection {
-        var self = Connection{ .fd = fd, .alloc = alloc };
+    pub fn fromFd(gpa: std.mem.Allocator, fd: sys.fd_t) !Connection {
+        var self = Connection{ .fd = fd, .alloc = gpa };
         errdefer self.deinit();
         self.unix_fd_ok = try auth.authenticate(fd, default_reply_timeout_ms);
         try self.hello();
@@ -248,7 +249,7 @@ pub const Connection = struct {
         var r = msg.reader();
         const has_text = msg.signature != null and std.mem.startsWith(u8, msg.signature.?, "s");
         const text = if (has_text) r.readString() catch "" else "";
-        std.log.info("dbus {s}: {s} ({s})", .{ what, name, text });
+        log.info("dbus {s}: {s} ({s})", .{ what, name, text });
         return errors.toError(errors.classify(name));
     }
 
@@ -275,7 +276,7 @@ pub const Connection = struct {
         while (true) {
             var msg = (self.readMessageDeadline(deadline_ms) catch |err| {
                 if (transport.isFatal(err)) return err;
-                std.log.warn("dropped malformed bus message: {t}", .{err});
+                log.warn("dropped malformed bus message: {t}", .{err});
                 continue;
             }) orelse return null;
             if (match(ctx, &msg)) return msg;

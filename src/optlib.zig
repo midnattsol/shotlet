@@ -1,6 +1,6 @@
-//! Optional native libraries (FFmpeg, Tesseract, libwebp, libturbojpeg),
-//! opened at run time through api.libs so Shotlet keeps zero build
-//! dependencies. One way for all of them: a symbol table `Api` (a struct
+//! Optional native libraries (FFmpeg, Tesseract, libwebp, libturbojpeg;
+//! in the Linux backend PipeWire, libxkbcommon and fontconfig), opened at
+//! run time through api.libs so Shotlet keeps zero build dependencies. One way for all of them: a symbol table `Api` (a struct
 //! of C function pointers named as the symbols) bound from one library
 //! with `bind`, loaded once from any thread with `Once` (or `Lib` for the
 //! plain one-library case), and a reason in `missing()` when it is not
@@ -29,6 +29,12 @@ pub const Error = error{ NotFound, MissingSymbol };
 /// by name. On failure `why` says what is missing ("libtesseract not
 /// found", "libavcodec lacks avcodec_open2").
 pub fn bind(comptime Api: type, comptime base: []const u8, versions: []const []const u8, why: *[]const u8) Error!Table(Api) {
+    return bindPrefixed(Api, base, "", versions, why);
+}
+
+/// `bind`, each field of `Api` named `prefix` ++ field in the library
+/// (`pw_` for libpipewire's `pw_init` as field `init`).
+pub fn bindPrefixed(comptime Api: type, comptime base: []const u8, comptime prefix: []const u8, versions: []const []const u8, why: *[]const u8) Error!Table(Api) {
     var lib = libs.open(base, versions) orelse {
         why.* = "lib" ++ base ++ " not found";
         return error.NotFound;
@@ -36,9 +42,9 @@ pub fn bind(comptime Api: type, comptime base: []const u8, versions: []const []c
     var api: Api = undefined;
     const info = @typeInfo(Api).@"struct";
     inline for (info.field_names, info.field_types) |name, T| {
-        @field(api, name) = lib.lookup(T, name) orelse {
+        @field(api, name) = lib.lookup(T, prefix ++ name) orelse {
             lib.close();
-            why.* = "lib" ++ base ++ " lacks " ++ name;
+            why.* = "lib" ++ base ++ " lacks " ++ prefix ++ name;
             return error.MissingSymbol;
         };
     }
@@ -77,6 +83,11 @@ pub fn Once(comptime T: type, comptime load: fn (why: *[]const u8) anyerror!T) t
             return get() != null;
         }
 
+        /// Loaded already (without trying to load it).
+        pub fn loaded() bool {
+            return state.load(.acquire) == .ok;
+        }
+
         /// Why it is missing (loads it first); empty when it is there.
         pub fn missing() []const u8 {
             return if (get() == null) why else "";
@@ -112,6 +123,12 @@ test "symbols bind by field name, and a missing one names itself" {
     const Bad = struct { shotlet_no_such_symbol: *const fn () callconv(.c) void };
     try std.testing.expectError(error.MissingSymbol, bind(Bad, "c", &.{"6"}, &why));
     try std.testing.expectEqualStrings("libc lacks shotlet_no_such_symbol", why);
+    // with a prefix: `len` is strlen
+    var p = bindPrefixed(struct { len: *const fn ([*:0]const u8) callconv(.c) usize }, "c", "str", &.{"6"}, &why) catch return error.SkipZigTest;
+    defer p.close();
+    try std.testing.expectEqual(@as(usize, 2), p.api.len("ab"));
+    try std.testing.expectError(error.MissingSymbol, bindPrefixed(Bad, "c", "x_", &.{"6"}, &why));
+    try std.testing.expectEqualStrings("libc lacks x_shotlet_no_such_symbol", why);
 }
 
 test "Once loads a single time across threads and keeps a failure" {

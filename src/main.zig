@@ -4,12 +4,14 @@ const front = @import("cli/front.zig");
 const out = @import("cli/out.zig");
 const env_mod = @import("app/env.zig");
 const Env = env_mod.Env;
-const launch = @import("ui/tools/launch.zig");
 const desktop = @import("platform/api.zig").desktop;
 const proc = @import("platform/api.zig").proc;
 const switches = @import("platform/api/switches.zig");
 
 const is_debug = @import("builtin").mode == .debug;
+
+/// Log lines name their subsystem (src/logfmt.zig).
+pub const std_options: std.Options = .{ .logFn = @import("logfmt.zig").logFn };
 
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
@@ -38,7 +40,6 @@ pub fn main(init: std.process.Init) !void {
         error.NoHome => out.fail(.failure, "HOME is not set to an absolute path", .{}),
         else => out.failWith(err),
     };
-    launch.env = env;
     try @import("app/dispatch.zig").run(gpa, env, parsed);
 }
 
@@ -83,5 +84,6 @@ test {
     _ = @import("uri.zig");
     _ = @import("geom.zig");
     _ = @import("optlib.zig");
+    _ = @import("logfmt.zig");
     _ = @import("testutil.zig");
 }

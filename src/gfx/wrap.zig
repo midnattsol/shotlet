@@ -113,14 +113,14 @@ fn trimSpaces(s: []const u8, start: usize, end: usize) usize {
 /// where possible, measuring with `measure(ctx, s[a..b])`. Appends to
 /// `out`; an empty paragraph gives one empty line.
 pub fn wrap(
-    alloc: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     s: []const u8,
     max_w: f64,
     ctx: anytype,
     comptime measure: fn (@TypeOf(ctx), []const u8) f64,
     out: *std.ArrayList(Line),
 ) !void {
-    if (s.len == 0) return out.append(alloc, .{ .start = 0, .end = 0, .vis_end = 0 });
+    if (s.len == 0) return out.append(gpa, .{ .start = 0, .end = 0, .vis_end = 0 });
     var start: usize = 0;
     // end of a word too wide for a line, being cut into pieces
     var long_end: ?usize = null;
@@ -130,7 +130,7 @@ pub fn wrap(
                 const vis_le = trimSpaces(s, start, le);
                 const cut = fitGraphemes(s, start, vis_le, max_w, ctx, measure);
                 if (cut < vis_le) {
-                    try out.append(alloc, .{ .start = start, .end = cut, .vis_end = cut });
+                    try out.append(gpa, .{ .start = start, .end = cut, .vis_end = cut });
                     start = cut;
                     continue;
                 }
@@ -151,18 +151,18 @@ pub fn wrap(
                 continue;
             }
             if (last_fit) |lf| {
-                try out.append(alloc, .{ .start = start, .end = lf, .vis_end = trimSpaces(s, start, lf) });
+                try out.append(gpa, .{ .start = start, .end = lf, .vis_end = trimSpaces(s, start, lf) });
                 start = lf;
             } else {
                 // one word wider than the line: as many graphemes as fit
                 const cut = fitGraphemes(s, start, vis, max_w, ctx, measure);
-                try out.append(alloc, .{ .start = start, .end = cut, .vis_end = cut });
+                try out.append(gpa, .{ .start = start, .end = cut, .vis_end = cut });
                 start = cut;
                 long_end = e;
             }
             continue :outer;
         }
-        try out.append(alloc, .{ .start = start, .end = s.len, .vis_end = trimSpaces(s, start, s.len) });
+        try out.append(gpa, .{ .start = start, .end = s.len, .vis_end = trimSpaces(s, start, s.len) });
         break;
     }
 }
@@ -211,13 +211,13 @@ fn mono(_: void, s: []const u8) f64 {
 }
 
 fn expectLines(s: []const u8, max_w: f64, expected: []const []const u8) !void {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var out: std.ArrayList(Line) = .empty;
-    defer out.deinit(alloc);
-    try wrap(alloc, s, max_w, {}, mono, &out);
+    defer out.deinit(gpa);
+    try wrap(gpa, s, max_w, {}, mono, &out);
     var got: std.ArrayList([]const u8) = .empty;
-    defer got.deinit(alloc);
-    for (out.items) |l| try got.append(alloc, s[l.start..l.end]);
+    defer got.deinit(gpa);
+    for (out.items) |l| try got.append(gpa, s[l.start..l.end]);
     std.testing.expectEqual(expected.len, got.items.len) catch |e| {
         for (got.items) |g| std.debug.print("line: '{s}'\n", .{g});
         return e;
@@ -259,13 +259,13 @@ test "long words break between graphemes" {
     // a family emoji (ZWJ sequence) is one grapheme
     try expectLines("\u{1F468}\u{200D}\u{1F469}x", 15, &.{ "\u{1F468}\u{200D}\u{1F469}", "x" });
     // a huge word is cut quickly and exactly
-    const alloc = std.testing.allocator;
-    const big = try alloc.alloc(u8, 20000);
-    defer alloc.free(big);
+    const gpa = std.testing.allocator;
+    const big = try gpa.alloc(u8, 20000);
+    defer gpa.free(big);
     @memset(big, 'x');
     var out: std.ArrayList(Line) = .empty;
-    defer out.deinit(alloc);
-    try wrap(alloc, big, 105, {}, mono, &out);
+    defer out.deinit(gpa);
+    try wrap(gpa, big, 105, {}, mono, &out);
     try std.testing.expectEqual(@as(usize, 2000), out.items.len);
     for (out.items) |l| try std.testing.expectEqual(@as(usize, 10), l.end - l.start);
 }

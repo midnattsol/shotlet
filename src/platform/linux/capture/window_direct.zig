@@ -8,6 +8,7 @@
 //!   back to selecting an area.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("../dbus.zig");
 const kde = @import("../kde.zig");
 const direct = @import("direct.zig");
@@ -22,7 +23,7 @@ pub fn run(gpa: std.mem.Allocator, env: env_mod.Env, req: mode.Request) !bool {
     var bus = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer bus.deinit();
     const f = (try kwinPick(gpa, &bus)) orelse return false;
-    std.log.info("window capture: KWin gave {d}x{d}", .{ f.width, f.height });
+    log.info("window capture: KWin gave {d}x{d}", .{ f.width, f.height });
     var r = req;
     r.mode = .window;
     try shot.run(gpa, env, .{ .image = .{ .width = f.width, .height = f.height, .pixels = f.pixels }, .req = r }, null, 0);

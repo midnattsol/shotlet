@@ -4,6 +4,7 @@
 //! meanwhile; cancelling leaves it exactly as it was.
 
 const std = @import("std");
+const log = std.log.scoped(.desktop);
 const dbus = @import("../dbus.zig");
 const portal = @import("../portal.zig");
 const sys = @import("../sys.zig");
@@ -14,7 +15,7 @@ const types = @import("../../api/desktop.zig");
 pub fn askSavePath(gpa: std.mem.Allocator, bus: *dbus.Connection, opts: types.SaveOptions, over: ?*window.Window) !types.Choice {
     var buf: [256]u8 = undefined;
     const parent: []const u8 = if (over) |win| win.parentHandle(&buf) catch |err| blk: {
-        std.log.info("save as: no parent for the dialog ({t})", .{err});
+        log.info("save as: no parent for the dialog ({t})", .{err});
         break :blk "";
     } else "";
     defer if (over) |win| win.unexport();

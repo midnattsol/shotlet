@@ -54,13 +54,13 @@ pub fn copyFile(gpa: std.mem.Allocator, src: []const u8, dst: []const u8) !void 
 /// Ask where (the desktop's save dialog, as a screenshot's Save As does:
 /// deliver.askTarget) and copy the recording there; the new path, or null
 /// when cancelled.
-pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, session: *desktop.Session, src: []const u8) !?[]u8 {
+pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, bus: *desktop.Bus, src: []const u8) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
     const cfg = config.load(gpa, env.home);
     const dir = try settings_mod.outputDir(gpa, &cfg.record, env.home, &dir_buf);
     const slash = std.mem.lastIndexOfScalar(u8, src, '/') orelse return error.BadPath;
     const opts: desktop.SaveOptions = .{ .title = "Save Recording", .current_name = src[slash + 1 ..], .current_folder = dir };
-    const path = switch (try deliver.askTarget(gpa, session, opts, filename.extension(src), null)) {
+    const path = switch (try deliver.askTarget(gpa, bus, opts, filename.extension(src), null)) {
         .path => |p| p,
         .cancelled => return null,
         .unavailable => return error.NoFileChooser,
@@ -74,16 +74,17 @@ pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, session: *desktop.Sessio
     return path;
 }
 
+const testutil = @import("../testutil.zig");
+
 test "copyFile copies and never overwrites" {
     const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-files");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-files");
+    defer tmp.deinit();
     var a: [256]u8 = undefined;
     var b: [256]u8 = undefined;
-    const pa = try std.fmt.bufPrint(&a, "{s}/a.mp4", .{dir});
-    const pb = try std.fmt.bufPrint(&b, "{s}/b.mp4", .{dir});
-    try sys.writeFile(pa, "video bytes");
+    const pa = try tmp.join(&a, "a.mp4");
+    const pb = try tmp.join(&b, "b.mp4");
+    try tmp.write("a.mp4", "video bytes");
     try copyFile(gpa, pa, pb);
     const got = try sys.readFileAlloc(gpa, pb, 64);
     defer gpa.free(got);

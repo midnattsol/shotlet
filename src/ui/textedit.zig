@@ -99,20 +99,20 @@ pub const TextEdit = struct {
 
     /// Insert typed or pasted text at the caret. Control characters are
     /// dropped except newlines; CRLF becomes LF.
-    pub fn insert(self: *TextEdit, alloc: std.mem.Allocator, buf: *std.ArrayList(u8), s: []const u8) !void {
+    pub fn insert(self: *TextEdit, gpa: std.mem.Allocator, buf: *std.ArrayList(u8), s: []const u8) !void {
         _ = self.deleteSelection(buf);
         var i: usize = 0;
         while (i < s.len) : (i += 1) {
             const c = s[i];
             if (c == '\r') {
                 if (i + 1 < s.len and s[i + 1] == '\n') continue;
-                try buf.insert(alloc, self.caret, '\n');
+                try buf.insert(gpa, self.caret, '\n');
             } else if (c == '\t') {
-                try buf.insert(alloc, self.caret, ' ');
+                try buf.insert(gpa, self.caret, ' ');
             } else if (c < 0x20 and c != '\n' or c == 0x7F) {
                 continue;
             } else {
-                try buf.insert(alloc, self.caret, c);
+                try buf.insert(gpa, self.caret, c);
             }
             self.caret += 1;
         }
@@ -221,11 +221,11 @@ fn advanceChars(s: []const u8, from: usize, n: usize, limit: usize) usize {
 }
 
 test "insert, backspace and delete are UTF-8 aware" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(alloc);
+    defer buf.deinit(gpa);
     var te: TextEdit = .{};
-    try te.insert(alloc, &buf, "año");
+    try te.insert(gpa, &buf, "año");
     try std.testing.expectEqualStrings("año", buf.items);
     try std.testing.expectEqual(@as(usize, 4), te.caret);
     te.left(buf.items);
@@ -233,7 +233,7 @@ test "insert, backspace and delete are UTF-8 aware" {
     try std.testing.expectEqual(@as(usize, 1), te.caret);
     te.delete(&buf);
     try std.testing.expectEqualStrings("ao", buf.items);
-    try te.insert(alloc, &buf, "ñ");
+    try te.insert(gpa, &buf, "ñ");
     te.backspace(&buf);
     te.backspace(&buf);
     try std.testing.expectEqualStrings("o", buf.items);
@@ -245,20 +245,20 @@ test "insert, backspace and delete are UTF-8 aware" {
 }
 
 test "control characters are filtered, CRLF normalised" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(alloc);
+    defer buf.deinit(gpa);
     var te: TextEdit = .{};
-    try te.insert(alloc, &buf, "a\r\nb\x07\tc\rd");
+    try te.insert(gpa, &buf, "a\r\nb\x07\tc\rd");
     try std.testing.expectEqualStrings("a\nb c\nd", buf.items);
 }
 
 test "word and line movement" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(alloc);
+    defer buf.deinit(gpa);
     var te: TextEdit = .{};
-    try te.insert(alloc, &buf, "hello big world\nsecond line\nxy");
+    try te.insert(gpa, &buf, "hello big world\nsecond line\nxy");
     const s = buf.items;
     te.caret = 0;
     te.wordRight(s);
@@ -288,11 +288,11 @@ test "word and line movement" {
 }
 
 test "selection: shift-moves, replace by typing, delete, words, select all" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(alloc);
+    defer buf.deinit(gpa);
     var te: TextEdit = .{};
-    try te.insert(alloc, &buf, "hello wide world");
+    try te.insert(gpa, &buf, "hello wide world");
     te.move(buf.items, .word_left, true); // select "world"
     try std.testing.expectEqualStrings("world", te.selectedText(buf.items));
     te.move(buf.items, .word_left, true);
@@ -303,7 +303,7 @@ test "selection: shift-moves, replace by typing, delete, words, select all" {
     try std.testing.expectEqual(@as(?[2]usize, null), te.selection());
     // typing replaces a selection
     te.move(buf.items, .word_right, true);
-    try te.insert(alloc, &buf, "big");
+    try te.insert(gpa, &buf, "big");
     try std.testing.expectEqualStrings("hello big world", buf.items);
     te.selectWord(buf.items, 1);
     try std.testing.expectEqualStrings("hello", te.selectedText(buf.items));
@@ -313,7 +313,7 @@ test "selection: shift-moves, replace by typing, delete, words, select all" {
     te.delete(&buf);
     try std.testing.expectEqual(@as(usize, 0), buf.items.len);
     // shift+home on the second line selects only that line's start
-    try te.insert(alloc, &buf, "ab\ncdé");
+    try te.insert(gpa, &buf, "ab\ncdé");
     te.move(buf.items, .home, true);
     try std.testing.expectEqualStrings("cdé", te.selectedText(buf.items));
     te.move(buf.items, .doc_start, true);

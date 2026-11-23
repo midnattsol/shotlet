@@ -19,6 +19,7 @@ comptime {
     _ = @import("material.zig");
     _ = @import("menukit.zig");
     _ = @import("motion.zig");
+    _ = @import("notice.zig");
     _ = @import("press.zig");
     _ = @import("rect_list.zig");
     _ = @import("region_pick.zig");

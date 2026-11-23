@@ -32,18 +32,18 @@ pub fn isFatal(err: anyerror) bool {
 pub const default_reply_timeout_ms: i64 = 25_000;
 
 pub fn sendMessage(
-    conn: *Connection,
+    bus: *Connection,
     mtype: MessageType,
     serial: u32,
     fields: HeaderFields,
     body: []const u8,
     reply_serial: ?u32,
 ) !void {
-    try sendMessageFds(conn, mtype, serial, fields, body, reply_serial, &.{});
+    try sendMessageFds(bus, mtype, serial, fields, body, reply_serial, &.{});
 }
 
 pub fn sendMessageFds(
-    conn: *Connection,
+    bus: *Connection,
     mtype: MessageType,
     serial: u32,
     fields: HeaderFields,
@@ -51,15 +51,15 @@ pub fn sendMessageFds(
     reply_serial: ?u32,
     fds: []const sys.fd_t,
 ) !void {
-    var m = Marshal.init(conn.alloc);
+    var m = Marshal.init(bus.alloc);
     defer m.deinit();
     try message.encodeHeader(&m, mtype, serial, fields, body.len, reply_serial, fds.len);
     if (fds.len > 0) {
-        try sendHeaderWithFds(conn.fd, m.buf.items, fds);
+        try sendHeaderWithFds(bus.fd, m.buf.items, fds);
     } else {
-        try sys.writeAll(conn.fd, m.buf.items);
+        try sys.writeAll(bus.fd, m.buf.items);
     }
-    try sys.writeAll(conn.fd, body);
+    try sys.writeAll(bus.fd, body);
 }
 
 /// Write the header so that `fds` travel with its first bytes.
@@ -73,16 +73,16 @@ fn sendHeaderWithFds(fd: sys.fd_t, header: []const u8, fds: []const sys.fd_t) !v
     }
 }
 
-fn readExact(conn: *Connection, buf: []u8, deadline_ms: ?i64) !void {
+fn readExact(bus: *Connection, buf: []u8, deadline_ms: ?i64) !void {
     var off: usize = 0;
     while (off < buf.len) {
-        if (deadline_ms != null and !try sys.waitReadable(conn.fd, deadline_ms)) {
+        if (deadline_ms != null and !try sys.waitReadable(bus.fd, deadline_ms)) {
             // a message started arriving but stalled: the stream position
             // is now unknown, so the connection cannot be reused
             if (off > 0) return error.BadMessageFraming;
             return error.Timeout;
         }
-        const n = try sys.recvWithFds(conn.fd, buf[off..], &conn.in_fds, conn.alloc);
+        const n = try sys.recvWithFds(bus.fd, buf[off..], &bus.in_fds, bus.alloc);
         if (n == 0) return error.Disconnected;
         off += n;
     }
@@ -90,12 +90,12 @@ fn readExact(conn: *Connection, buf: []u8, deadline_ms: ?i64) !void {
 
 /// Read and throw away `len` bytes (keeps the stream in sync after a
 /// message we refuse to keep).
-fn discard(conn: *Connection, len: usize, deadline_ms: ?i64) !void {
+fn discard(bus: *Connection, len: usize, deadline_ms: ?i64) !void {
     var scratch: [4096]u8 = undefined;
     var left = len;
     while (left > 0) {
         const n = @min(left, scratch.len);
-        readExact(conn, scratch[0..n], deadline_ms) catch |err| switch (err) {
+        readExact(bus, scratch[0..n], deadline_ms) catch |err| switch (err) {
             error.Timeout => return error.BadMessageFraming,
             else => return err,
         };
@@ -106,20 +106,20 @@ fn discard(conn: *Connection, len: usize, deadline_ms: ?i64) !void {
 /// Read the next complete message, or null if none starts arriving
 /// before `deadline_ms` (monotonic). Malformed messages are consumed
 /// whole and reported as a non-fatal error (see isFatal).
-pub fn readMessageDeadline(conn: *Connection, deadline_ms: ?i64) !?Message {
+pub fn readMessageDeadline(bus: *Connection, deadline_ms: ?i64) !?Message {
     var fixed: [16]u8 = undefined;
-    readExact(conn, &fixed, deadline_ms) catch |err| switch (err) {
+    readExact(bus, &fixed, deadline_ms) catch |err| switch (err) {
         error.Timeout => return null,
         else => return err,
     };
     // once a message has begun, finish reading it within a fixed bound
     const body_deadline = sys.monoMs() + default_reply_timeout_ms;
     const hdr = try message.FixedHeader.parse(&fixed);
-    try rejectUnsupported(conn, hdr, body_deadline);
+    try rejectUnsupported(bus, hdr, body_deadline);
 
-    const raw = try conn.alloc.alloc(u8, hdr.restLen());
-    errdefer conn.alloc.free(raw);
-    try readExact(conn, raw, body_deadline);
+    const raw = try bus.alloc.alloc(u8, hdr.restLen());
+    errdefer bus.alloc.free(raw);
+    try readExact(bus, raw, body_deadline);
 
     var msg = Message{
         .type = hdr.mtype,
@@ -130,82 +130,82 @@ pub fn readMessageDeadline(conn: *Connection, deadline_ms: ?i64) !?Message {
     errdefer for (msg.fds[0..msg.n_fds]) |fd| {
         if (fd >= 0) sys.close(fd);
     };
-    try parseHeaderFields(conn, &msg, raw[0..hdr.fields_len]);
+    try parseHeaderFields(bus, &msg, raw[0..hdr.fields_len]);
     return msg;
 }
 
 /// Consume and refuse oversized or big-endian messages (closing any fds
 /// that came with them). Hopelessly oversized ones are fatal.
-fn rejectUnsupported(conn: *Connection, hdr: message.FixedHeader, deadline_ms: i64) !void {
+fn rejectUnsupported(bus: *Connection, hdr: message.FixedHeader, deadline_ms: i64) !void {
     // spec maximum is 128 MiB; cap well below to bound allocations
     if (hdr.body_len > 32 * 1024 * 1024 or hdr.fields_len > 1024 * 1024) {
         if (hdr.body_len > 128 * 1024 * 1024 or hdr.fields_len > 64 * 1024 * 1024) return error.BadMessageFraming;
-        try discard(conn, hdr.restLen(), deadline_ms);
-        dropFds(conn, 0);
+        try discard(bus, hdr.restLen(), deadline_ms);
+        dropFds(bus, 0);
         return error.MessageTooLarge;
     }
     if (hdr.endian == .big) {
-        try discard(conn, hdr.restLen(), deadline_ms);
-        dropFds(conn, 0);
+        try discard(bus, hdr.restLen(), deadline_ms);
+        dropFds(bus, 0);
         return error.BigEndianUnsupported;
     }
 }
 
 /// Close `count` fds from the front of the received queue (fds that
 /// arrived with a message we drop). count 0 closes everything queued.
-fn dropFds(conn: *Connection, count: usize) void {
-    const n = if (count == 0) conn.in_fds.items.len else @min(count, conn.in_fds.items.len);
-    for (conn.in_fds.items[0..n]) |fd| sys.close(fd);
-    removeFrontFds(conn, n);
+fn dropFds(bus: *Connection, count: usize) void {
+    const n = if (count == 0) bus.in_fds.items.len else @min(count, bus.in_fds.items.len);
+    for (bus.in_fds.items[0..n]) |fd| sys.close(fd);
+    removeFrontFds(bus, n);
 }
 
-fn removeFrontFds(conn: *Connection, n: usize) void {
-    std.mem.copyForwards(sys.fd_t, conn.in_fds.items[0..], conn.in_fds.items[n..]);
-    conn.in_fds.shrinkRetainingCapacity(conn.in_fds.items.len - n);
+fn removeFrontFds(bus: *Connection, n: usize) void {
+    std.mem.copyForwards(sys.fd_t, bus.in_fds.items[0..], bus.in_fds.items[n..]);
+    bus.in_fds.shrinkRetainingCapacity(bus.in_fds.items.len - n);
 }
 
 /// Decode the header fields into `msg` and give it the fds it announced.
-pub fn parseHeaderFields(conn: *Connection, msg: *Message, fields: []const u8) !void {
+pub fn parseHeaderFields(bus: *Connection, msg: *Message, fields: []const u8) !void {
     // fds are claimed even after a malformed field so they cannot be stranded
     const parsed = message.parseHeaderFields(msg, fields);
-    if (parsed.fd_count) |count| try claimFds(conn, msg, count);
+    if (parsed.fd_count) |count| try claimFds(bus, msg, count);
     if (parsed.err) |e| return e;
     if (msg.type == .invalid) return error.BadMessageType;
 }
 
 /// Move `count` queued fds into `msg`.
-fn claimFds(conn: *Connection, msg: *Message, count: u32) !void {
+fn claimFds(bus: *Connection, msg: *Message, count: u32) !void {
     // fds attached to this message have been collected by the recv
     // calls that consumed its bytes; they belong to it whatever
     // happens next, so surplus or orphaned ones are closed here
     if (count > msg.fds.len) {
-        dropFds(conn, count);
+        dropFds(bus, count);
         return error.TooManyFds;
     }
-    if (conn.in_fds.items.len < count) {
-        dropFds(conn, 0);
+    if (bus.in_fds.items.len < count) {
+        dropFds(bus, 0);
         return error.MissingFds;
     }
-    for (0..count) |i| msg.fds[i] = conn.in_fds.items[i];
+    for (0..count) |i| msg.fds[i] = bus.in_fds.items[i];
     msg.n_fds = @intCast(count);
-    removeFrontFds(conn, count);
+    removeFrontFds(bus, count);
 }
 
-fn testPair(alloc: std.mem.Allocator) ![2]Connection {
+fn testPair(gpa: std.mem.Allocator) ![2]Connection {
     const fds = try sys.socketPair();
     return .{
-        .{ .fd = fds[0], .alloc = alloc },
-        .{ .fd = fds[1], .alloc = alloc },
+        .{ .fd = fds[0], .alloc = gpa },
+        .{ .fd = fds[1], .alloc = gpa },
     };
 }
 
 test "readMessage parses header fields and claims fds" {
-    const alloc = std.testing.allocator;
-    var pair = try testPair(alloc);
+    const gpa = std.testing.allocator;
+    var pair = try testPair(gpa);
     defer pair[0].deinit();
     defer pair[1].deinit();
 
-    var m = Marshal.init(alloc);
+    var m = Marshal.init(gpa);
     defer m.deinit();
     try m.putString("hello");
     try m.putU32(7);
@@ -221,7 +221,7 @@ test "readMessage parses header fields and claims fds" {
     sys.close(pipe[1]); // the receiver holds its own copy now
 
     var msg = try pair[1].readMessage();
-    defer msg.deinit(alloc);
+    defer msg.deinit(gpa);
     try std.testing.expectEqual(MessageType.signal, msg.type);
     try std.testing.expectEqual(@as(u32, 42), msg.serial);
     try std.testing.expectEqual(@as(?u32, 9), msg.reply_serial);
@@ -243,8 +243,8 @@ test "readMessage parses header fields and claims fds" {
 }
 
 test "too many fds are closed and the stream stays usable" {
-    const alloc = std.testing.allocator;
-    var pair = try testPair(alloc);
+    const gpa = std.testing.allocator;
+    var pair = try testPair(gpa);
     defer pair[0].deinit();
     defer pair[1].deinit();
 
@@ -262,13 +262,13 @@ test "too many fds are closed and the stream stays usable" {
     try std.testing.expectEqual(@as(usize, 0), try sys.read(pipe[0], &b));
 
     var next = try pair[1].readMessage();
-    defer next.deinit(alloc);
+    defer next.deinit(gpa);
     try std.testing.expectEqual(@as(u32, 2), next.serial);
 }
 
 test "readMessageDeadline times out and drops malformed headers" {
-    const alloc = std.testing.allocator;
-    var pair = try testPair(alloc);
+    const gpa = std.testing.allocator;
+    var pair = try testPair(gpa);
     defer pair[0].deinit();
     defer pair[1].deinit();
 
@@ -277,7 +277,7 @@ test "readMessageDeadline times out and drops malformed headers" {
     try std.testing.expect(sys.monoMs() - t0 >= 25);
 
     // header field PATH declared as 'u' instead of 'o'
-    var m = Marshal.init(alloc);
+    var m = Marshal.init(gpa);
     defer m.deinit();
     try m.putByte('l');
     try m.putByte(4);
@@ -299,7 +299,7 @@ test "readMessageDeadline times out and drops malformed headers" {
     try std.testing.expectError(error.BadHeaderField, err);
     try std.testing.expect(!isFatal(error.BadHeaderField));
     var ok = try pair[1].readMessage();
-    defer ok.deinit(alloc);
+    defer ok.deinit(gpa);
     try std.testing.expectEqualStrings("/ok", ok.path.?);
 }
 
@@ -330,12 +330,12 @@ fn fuzzOne(data: []const u8, sig: []const u8) void {
         _ = r.readString() catch {};
     }
     {
-        var conn = Connection{ .fd = -1, .alloc = std.testing.allocator };
+        var bus = Connection{ .fd = -1, .alloc = std.testing.allocator };
         defer {
-            conn.in_fds.deinit(conn.alloc);
+            bus.in_fds.deinit(bus.alloc);
         }
         var msg = Message{ .type = .signal, .serial = 1 };
-        parseHeaderFields(&conn, &msg, data) catch {};
+        parseHeaderFields(&bus, &msg, data) catch {};
     }
 }
 

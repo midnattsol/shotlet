@@ -2,6 +2,7 @@
 //! for the floating thumbnail alone) and start the quick-access process.
 
 const std = @import("std");
+const log = std.log.scoped(.history);
 const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
@@ -60,7 +61,7 @@ pub fn keep(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: W
 /// meta and the annotations. finishEntry() adds the rest.
 pub fn keepEntry(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: What) ?Kept {
     return keepInner(gpa, env, cfg, what) catch |err| {
-        std.log.warn("could not keep the capture: {t}", .{err});
+        log.warn("could not keep the capture: {t}", .{err});
         return null;
     };
 }
@@ -70,12 +71,12 @@ pub fn keepEntry(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, wh
 pub fn finishEntry(gpa: std.mem.Allocator, cfg: *const config.Config, k: *const Kept, what: What) void {
     if (what.source != null and what.doc != null) {
         const src = encodeCrop(gpa, what.source.?, sourceCrop(what.doc.?)) catch |err| {
-            std.log.warn("could not keep the capture's source: {t}", .{err});
+            log.warn("could not keep the capture's source: {t}", .{err});
             return;
         };
         defer gpa.free(src);
         history.replaceFile(k.root(), k.id.slice(), "source.png", src) catch |err|
-            std.log.warn("could not keep the capture's source: {t}", .{err});
+            log.warn("could not keep the capture's source: {t}", .{err});
     }
     prune(gpa, cfg, k.root());
 }
@@ -202,30 +203,30 @@ pub fn sourceCrop(d: *const doc_mod.Document) shapes.Rect {
 pub const Pixels = struct { pixels: []u32, width: u32, height: u32 };
 
 /// Scale down to fit max_w x max_h (never up), area-filtered.
-pub fn thumbnail(alloc: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, max_w: u32, max_h: u32) !Pixels {
+pub fn thumbnail(gpa: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, max_w: u32, max_h: u32) !Pixels {
     const fx = @as(f64, @floatFromInt(max_w)) / @as(f64, @floatFromInt(@max(1, sw)));
     const fy = @as(f64, @floatFromInt(max_h)) / @as(f64, @floatFromInt(@max(1, sh)));
     const f = @min(1.0, @min(fx, fy));
     const dw: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sw)) * f))));
     const dh: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(sh)) * f))));
-    const out = try alloc.alloc(u32, @as(usize, dw) * dh);
-    errdefer alloc.free(out);
-    try resample.scale(alloc, src, sw, sh, out, dw, dh);
+    const out = try gpa.alloc(u32, @as(usize, dw) * dh);
+    errdefer gpa.free(out);
+    try resample.scale(gpa, src, sw, sh, out, dw, dh);
     return .{ .pixels = out, .width = dw, .height = dh };
 }
 
 test "thumbnails fit the box and average colours" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var src: [8 * 4]u32 = undefined;
-    for (&src, 0..) |*p, i| p.* = if (i % 2 == 0) 0xFF000000 else 0xFFFFFFFF;
-    const t = try thumbnail(alloc, &src, 8, 4, 4, 4);
-    defer alloc.free(t.pixels);
+    @import("../testutil.zig").checker(&src, 8);
+    const t = try thumbnail(gpa, &src, 8, 4, 4, 4);
+    defer gpa.free(t.pixels);
     try std.testing.expectEqual(@as(u32, 4), t.width);
     try std.testing.expectEqual(@as(u32, 2), t.height);
-    // black and white columns average to grey
+    // black and white average to grey
     try std.testing.expectEqual(@as(u32, 0xFF808080), t.pixels[0]);
     // never scaled up
-    const same = try thumbnail(alloc, &src, 8, 4, 100, 100);
-    defer alloc.free(same.pixels);
+    const same = try thumbnail(gpa, &src, 8, 4, 100, 100);
+    defer gpa.free(same.pixels);
     try std.testing.expectEqual(@as(u32, 8), same.width);
 }

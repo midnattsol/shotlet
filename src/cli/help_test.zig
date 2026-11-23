@@ -47,6 +47,8 @@ fn isBlank(s: []const u8) bool {
     return std.mem.indexOfNone(u8, s, " ") == null;
 }
 
+const testutil = @import("../testutil.zig");
+
 test "the overview groups the user-facing commands" {
     var buf: std.Io.Writer.Allocating = .init(t.allocator);
     defer buf.deinit();
@@ -58,7 +60,7 @@ test "the overview groups the user-facing commands" {
     };
     for (help.groups) |g| {
         var hb: [64]u8 = undefined;
-        try t.expect(std.mem.indexOf(u8, s, try std.fmt.bufPrint(&hb, "\n{s}:\n", .{g.title()})) != null);
+        try testutil.expectContains(s, try std.fmt.bufPrint(&hb, "\n{s}:\n", .{g.title()}));
     }
     for (&commands.all) |*c| {
         var lb: [64]u8 = undefined;
@@ -67,7 +69,7 @@ test "the overview groups the user-facing commands" {
         const needle = try std.fmt.bufPrint(&nb, "\n  {s}  ", .{label});
         try t.expectEqual(!c.internal(), std.mem.indexOf(u8, s, needle) != null);
     }
-    try t.expect(std.mem.indexOf(u8, s, "\x1b") == null);
+    try testutil.expectNotContains(s, "\x1b");
 }
 
 fn expectCommandHelp(chain: parse.Chain) !void {
@@ -80,13 +82,13 @@ fn expectCommandHelp(chain: parse.Chain) !void {
         return err;
     };
     try t.expect(std.mem.startsWith(u8, s, "Usage: shotlet"));
-    try t.expect(std.mem.indexOf(u8, s, "\nOptions:\n") != null);
+    try testutil.expectContains(s, "\nOptions:\n");
     // one line per example, its comment beside it
     const ex = std.mem.indexOf(u8, s, "\nExamples:\n") orelse return error.NoExamples;
     var lines = std.mem.splitScalar(u8, std.mem.trimEnd(u8, s[ex + 11 ..], "\n"), '\n');
     while (lines.next()) |l| try t.expect(std.mem.startsWith(u8, l, "  shotlet"));
     // plumbing stays out of the help
-    try t.expect(std.mem.indexOf(u8, s, "--from-shell") == null);
+    try testutil.expectNotContains(s, "--from-shell");
     for (chain.leaf().?.subs) |*sub| {
         var c = chain;
         c.push(sub);
@@ -109,5 +111,5 @@ test "bold headings only when asked" {
     var buf: std.Io.Writer.Allocating = .init(t.allocator);
     defer buf.deinit();
     try help.command(&buf.writer, .{ .bold = true }, .of(commands.find("record").?));
-    try t.expect(std.mem.indexOf(u8, buf.written(), "\x1b[1mOptions:\x1b[0m") != null);
+    try testutil.expectContains(buf.written(), "\x1b[1mOptions:\x1b[0m");
 }

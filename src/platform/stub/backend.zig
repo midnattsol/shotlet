@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const Env = @import("../../app/env.zig").Env;
+const DevCommand = @import("../api/devtools.zig").DevCommand;
 
 pub const sys = @import("sys.zig");
 pub const window = @import("window.zig");
@@ -18,9 +19,8 @@ pub const proc = @import("proc.zig");
 pub const fonts = @import("fonts.zig");
 pub const ocr = @import("ocr.zig");
 
-/// Development commands (`shotlet test-window` ...); false when `cmd` is
-/// none of them.
-pub fn devtools(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]const u8) error{Unavailable}!bool {
-    _ = .{ gpa, env, cmd, args };
-    return false;
+/// Development commands (`shotlet test-window` ...).
+pub fn devtools(gpa: std.mem.Allocator, env: Env, cmd: DevCommand) error{Unavailable}!void {
+    _ = .{ gpa, env, cmd };
+    return error.Unavailable;
 }

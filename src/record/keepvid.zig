@@ -9,6 +9,7 @@
 //! The video itself stays where it was written (the Videos folder).
 
 const std = @import("std");
+const log = std.log.scoped(.recording);
 const history = @import("../app/history.zig");
 const kvfile = @import("../app/kvfile.zig");
 const keep = @import("../app/keep.zig");
@@ -89,7 +90,7 @@ pub const What = struct {
 /// Store the recording; null (logged) when nothing was stored.
 pub fn store(gpa: std.mem.Allocator, env: env_mod.Env, cfg: *const config.Config, what: What) ?keep.Kept {
     return storeInner(gpa, env, cfg, what) catch |err| {
-        std.log.warn("could not keep the recording: {t}", .{err});
+        log.warn("could not keep the recording: {t}", .{err});
         return null;
     };
 }

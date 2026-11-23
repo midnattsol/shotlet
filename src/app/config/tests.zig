@@ -194,7 +194,11 @@ test "older files: quick_access is written anew as thumbnail, hint_shown left al
     var h = try TmpDir.home();
     defer h.deinit();
     try h.write(".config/shotlet/config", "quick_access=false\nhint_shown=true\nscreencast_token=x\nbeautify=true\n");
+    const stateflag = @import("../stateflag.zig");
+    try testing.expect(!stateflag.isSet(h.path, .editor_hint));
     var cfg = config.load(testing.allocator, h.path);
+    // the hint shown becomes the state flag
+    try testing.expect(stateflag.isSet(h.path, .editor_hint));
     try testing.expectEqual(config.Thumbnail.never, cfg.thumbnail);
     cfg.notify = false;
     try config.save(testing.allocator, h.path, &cfg);

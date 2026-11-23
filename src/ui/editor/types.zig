@@ -139,19 +139,19 @@ pub const Pane = struct {
     /// backdrops know when to look again
     gen: u64 = 1,
 
-    pub fn release(self: *Pane, alloc: std.mem.Allocator) void {
-        alloc.free(self.viewc);
+    pub fn release(self: *Pane, gpa: std.mem.Allocator) void {
+        gpa.free(self.viewc);
         self.viewc = &.{};
-        alloc.free(self.viewc_dim);
+        gpa.free(self.viewc_dim);
         self.viewc_dim = &.{};
-        alloc.free(self.stroke_mask);
+        gpa.free(self.stroke_mask);
         self.stroke_mask = &.{};
-        alloc.free(self.live_cov);
+        gpa.free(self.live_cov);
         self.live_cov = &.{};
-        alloc.free(self.bcache);
+        gpa.free(self.bcache);
         self.bcache = &.{};
         self.bcache_valid = false;
         self.last_frame = &.{};
-        for (&self.backdrops) |*b| b.release(alloc);
+        for (&self.backdrops) |*b| b.release(gpa);
     }
 };

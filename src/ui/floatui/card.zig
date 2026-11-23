@@ -20,8 +20,7 @@ pub const Image = struct { px: []const u32, w: u32, h: u32 };
 
 /// The opaque `card` with corners rounded to `radius` and the shadow `sh`
 /// (null: none) at scale `k`, onto `dst` with its top-left corner at `at`.
-pub fn place(gpa: std.mem.Allocator, dst: Surface, card: Image, at: [2]i32, radius: f64, sh: ?theme.Shadow, k: f64) void {
-    _ = gpa; // the shadows' cache has an allocator of its own
+pub fn place(dst: Surface, card: Image, at: [2]i32, radius: f64, sh: ?theme.Shadow, k: f64) void {
     if (sh) |s| {
         const r: Rect = .{ .x = at[0], .y = at[1], .w = @intCast(card.w), .h = @intCast(card.h) };
         material.shadowStraight(shadow_alloc, dst.px, dst.w, dst.h, r, radius, s, k, 1, shadowCache(.{ .w = card.w, .h = card.h, .radius = radius, .sh = s, .k = k }));
@@ -69,7 +68,7 @@ pub fn compositeFaded(gpa: std.mem.Allocator, dst: Surface, card: Image, at: [2]
     const layer = try gpa.alloc(u32, @as(usize, lw) * lh);
     defer gpa.free(layer);
     @memset(layer, 0);
-    place(gpa, .{ .px = layer, .w = lw, .h = lh }, card, .{ -fr.x, -fr.y }, radius, sh, k);
+    place(.{ .px = layer, .w = lw, .h = lh }, card, .{ -fr.x, -fr.y }, radius, sh, k);
     pixels.fadeAlpha(layer, alpha);
     pixels.blitOver(dst.px, dst.w, dst.h, layer, lw, lh, at[0] + fr.x, at[1] + fr.y);
 }
@@ -189,11 +188,10 @@ pub fn dragIcon(gpa: std.mem.Allocator, src: Image, w: u32, h: u32, k: i32) ![]u
 const testing = std.testing;
 
 test "a placed card keeps its corners clear and casts a shadow below" {
-    const gpa = testing.allocator;
     var dst: [60 * 60]u32 = @splat(0);
     const card: [30 * 20]u32 = @splat(0xFF336699);
     const sh: theme.Shadow = .{ .color = 0x80000000, .blur = 8, .dy = 3 };
-    place(gpa, .{ .px = &dst, .w = 60, .h = 60 }, .{ .px = &card, .w = 30, .h = 20 }, .{ 15, 15 }, 6, sh, 1);
+    place(.{ .px = &dst, .w = 60, .h = 60 }, .{ .px = &card, .w = 30, .h = 20 }, .{ 15, 15 }, 6, sh, 1);
     try testing.expectEqual(@as(u32, 0xFF336699), dst[25 * 60 + 30]);
     try testing.expect(dst[15 * 60 + 15] != 0xFF336699); // the corner is rounded
     try testing.expect(dst[37 * 60 + 30] >> 24 > 0); // the shadow under it

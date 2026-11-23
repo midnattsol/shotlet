@@ -74,17 +74,17 @@ pub fn waitReadable(fd: fd_t, deadline_ms: ?i64) !bool {
 /// Read `fd` until EOF, `max` bytes or the deadline (monotonic ms; none:
 /// wait as long as it takes), whichever comes first. Caller owns the
 /// bytes. To fail on more than `max`, ask for max + 1 and check the length.
-pub fn readBounded(alloc: std.mem.Allocator, fd: fd_t, max: usize, deadline_ms: ?i64) ![]u8 {
+pub fn readBounded(gpa: std.mem.Allocator, fd: fd_t, max: usize, deadline_ms: ?i64) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(alloc);
+    errdefer out.deinit(gpa);
     var buf: [64 * 1024]u8 = undefined;
     while (out.items.len < max) {
         if (!try waitReadable(fd, deadline_ms)) break; // timed out
         const n = try read(fd, buf[0..@min(buf.len, max - out.items.len)]);
         if (n == 0) break;
-        try out.appendSlice(alloc, buf[0..n]);
+        try out.appendSlice(gpa, buf[0..n]);
     }
-    return out.toOwnedSlice(alloc);
+    return out.toOwnedSlice(gpa);
 }
 
 /// Fill `buf` from `fd`: error.ShortRead at EOF first, error.Timeout once
@@ -184,19 +184,19 @@ pub fn unmapFile(d: []const u8) void {
 }
 
 test "bounded and exact reads stop at EOF, the limit and the deadline" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const fds = try pipe();
     defer close(fds[0]);
     try writeAll(fds[1], "abcdef");
-    const head = try readBounded(alloc, fds[0], 2, time.monoMs() + 1000);
-    defer alloc.free(head);
+    const head = try readBounded(gpa, fds[0], 2, time.monoMs() + 1000);
+    defer gpa.free(head);
     try std.testing.expectEqualStrings("ab", head);
     var three: [3]u8 = undefined;
     try readExact(fds[0], &three, time.monoMs() + 1000);
     try std.testing.expectEqualStrings("cde", &three);
     // the writer stays open: only the deadline ends these
-    const rest = try readBounded(alloc, fds[0], 100, time.monoMs() + 50);
-    defer alloc.free(rest);
+    const rest = try readBounded(gpa, fds[0], 100, time.monoMs() + 50);
+    defer gpa.free(rest);
     try std.testing.expectEqualStrings("f", rest);
     try std.testing.expectError(error.Timeout, readExact(fds[0], &three, time.monoMs() + 20));
     close(fds[1]);

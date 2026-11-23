@@ -173,7 +173,7 @@ pub const UserDir = enum {
 /// (localized, e.g. "Imágenes"), then ~/Pictures or ~/Videos. A value
 /// equal to $HOME means "disabled" per the spec, so it falls through to
 /// the default rather than saving into $HOME.
-pub fn userDir(alloc: std.mem.Allocator, buf: []u8, home: []const u8, which: UserDir) ![]u8 {
+pub fn userDir(gpa: std.mem.Allocator, buf: []u8, home: []const u8, which: UserDir) ![]u8 {
     const exported = switch (which) {
         .pictures => xdg.pictures_dir,
         .videos => xdg.videos_dir,
@@ -186,8 +186,8 @@ pub fn userDir(alloc: std.mem.Allocator, buf: []u8, home: []const u8, which: Use
     var cfg_home_buf: PathBuf = undefined;
     const cfg_home = try configHome(&cfg_home_buf, home);
     const dirs_path = try std.fmt.bufPrint(&path_buf, "{s}/user-dirs.dirs", .{cfg_home});
-    if (sys.readFileAlloc(alloc, dirs_path, 64 * 1024)) |data| {
-        defer alloc.free(data);
+    if (sys.readFileAlloc(gpa, dirs_path, 64 * 1024)) |data| {
+        defer gpa.free(data);
         if (parseUserDir(data, which.variable(), home, buf)) |p| return p;
     } else |_| {}
     return std.fmt.bufPrint(buf, "{s}/{s}", .{ home, which.fallback() });
@@ -226,6 +226,8 @@ pub fn parseUserDir(data: []const u8, name: []const u8, home: []const u8, buf: [
     return null;
 }
 
+const testutil = @import("../testutil.zig");
+
 test "user-dirs parsing" {
     var buf: [256]u8 = undefined;
     const data =
@@ -249,9 +251,8 @@ test "home expansion" {
 }
 
 test "state, cache and config paths follow the XDG variables" {
-    const saved = xdg;
-    defer xdg = saved;
-    xdg = .{ .cache_home = "/c" };
+    const saved = testutil.useXdg(.{ .cache_home = "/c" });
+    defer saved.restore();
     var buf: PathBuf = undefined;
     try std.testing.expectEqualStrings("/h/.local/state/shotlet/last-area", try statePath(&buf, "/h", "last-area"));
     try std.testing.expectEqualStrings("/c/shotlet/drop", try cachePath(&buf, "/h", "drop"));
@@ -260,9 +261,8 @@ test "state, cache and config paths follow the XDG variables" {
 }
 
 test "a user directory equal to $HOME counts as unset" {
-    const saved = xdg;
-    defer xdg = saved;
-    xdg = .{ .videos_dir = "/h/", .config_home = "/nonexistent-shotlet" };
+    const saved = testutil.useXdg(.{ .videos_dir = "/h/", .config_home = "/nonexistent-shotlet" });
+    defer saved.restore();
     var buf: PathBuf = undefined;
     try std.testing.expectEqualStrings("/h/Videos", try userDir(std.testing.allocator, &buf, "/h", .videos));
     xdg.pictures_dir = "/data/pics";

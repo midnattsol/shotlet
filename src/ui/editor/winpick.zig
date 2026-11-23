@@ -6,6 +6,7 @@
 //! are) none of this shows.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const shapes_mod = @import("../shapes.zig");
 const ui = @import("../editor_ui.zig");
@@ -63,7 +64,7 @@ pub fn clickSelect(ed: *Editor) bool {
     if (i >= ed.capmode.windows.len) return false;
     const r = Rect.intersect(ed.capmode.windows[i], ed.doc.imageRect()) orelse return false;
     ed.doc.sel = r;
-    std.log.info("window clicked: {d}x{d} at {d},{d}", .{ r.w, r.h, r.x, r.y });
+    log.info("window clicked: {d}x{d} at {d},{d}", .{ r.w, r.h, r.x, r.y });
     return true;
 }
 

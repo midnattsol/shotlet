@@ -25,8 +25,8 @@ pub const Document = struct {
     /// changes beyond the shapes (a crop) are marked to be found again
     last_mark: u32 = 0,
 
-    pub fn init(alloc: std.mem.Allocator, width: u32, height: u32) Document {
-        return .{ .alloc = alloc, .width = width, .height = height };
+    pub fn init(gpa: std.mem.Allocator, width: u32, height: u32) Document {
+        return .{ .alloc = gpa, .width = width, .height = height };
     }
 
     pub fn deinit(self: *Document) void {
@@ -196,13 +196,13 @@ pub const Document = struct {
     }
 };
 
-fn freeShapes(alloc: std.mem.Allocator, list: []Shape) void {
-    for (list) |*s| s.deinit(alloc);
+fn freeShapes(gpa: std.mem.Allocator, list: []Shape) void {
+    for (list) |*s| s.deinit(gpa);
 }
 
-fn freeSnapshot(alloc: std.mem.Allocator, snap: Document.Snap) void {
-    freeShapes(alloc, snap.shapes);
-    alloc.free(snap.shapes);
+fn freeSnapshot(gpa: std.mem.Allocator, snap: Document.Snap) void {
+    freeShapes(gpa, snap.shapes);
+    gpa.free(snap.shapes);
 }
 
 // the frame around an export (beautify.zig)
@@ -228,8 +228,8 @@ comptime {
 const testing = std.testing;
 
 test "export is exactly the image without a selection" {
-    const alloc = testing.allocator;
-    var d = Document.init(alloc, 300, 200);
+    const gpa = testing.allocator;
+    var d = Document.init(gpa, 300, 200);
     defer d.deinit();
     try testing.expect(d.exportRect().eql(.{ .x = 0, .y = 0, .w = 300, .h = 200 }));
     // a selection entirely off the image falls back to the whole image
@@ -238,8 +238,8 @@ test "export is exactly the image without a selection" {
 }
 
 test "export intersects a selection hanging off the image" {
-    const alloc = testing.allocator;
-    var d = Document.init(alloc, 300, 200);
+    const gpa = testing.allocator;
+    var d = Document.init(gpa, 300, 200);
     defer d.deinit();
     d.sel = .{ .x = 250, .y = -20, .w = 100, .h = 70 };
     try testing.expect(d.exportRect().eql(.{ .x = 250, .y = 0, .w = 50, .h = 50 }));
@@ -249,8 +249,8 @@ test "export intersects a selection hanging off the image" {
 }
 
 test "undo and redo cover add, move, recolour, delete, duplicate and z-order" {
-    const alloc = testing.allocator;
-    var d = Document.init(alloc, 100, 100);
+    const gpa = testing.allocator;
+    var d = Document.init(gpa, 100, 100);
     defer d.deinit();
     try d.checkpoint();
     _ = try d.add(.{ .tool = .rect, .color = 1, .thickness = 2, .p1 = .{ .x = 10, .y = 10 } });
@@ -295,8 +295,8 @@ test "undo and redo cover add, move, recolour, delete, duplicate and z-order" {
 }
 
 test "hit picks the topmost shape" {
-    const alloc = testing.allocator;
-    var d = Document.init(alloc, 100, 100);
+    const gpa = testing.allocator;
+    var d = Document.init(gpa, 100, 100);
     defer d.deinit();
     _ = try d.add(.{ .tool = .redact, .color = 1, .thickness = 2, .p1 = .{ .x = 50, .y = 50 } });
     _ = try d.add(.{ .tool = .redact, .color = 2, .thickness = 2, .p0 = .{ .x = 20, .y = 20 }, .p1 = .{ .x = 60, .y = 60 } });
@@ -306,8 +306,8 @@ test "hit picks the topmost shape" {
 }
 
 test "keyboard selection moves stay inside the image" {
-    const alloc = testing.allocator;
-    var d = Document.init(alloc, 100, 80);
+    const gpa = testing.allocator;
+    var d = Document.init(gpa, 100, 80);
     defer d.deinit();
     d.sel = .{ .x = 10, .y = 10, .w = 20, .h = 20 };
     d.moveSelection(-50, 0);
@@ -317,12 +317,12 @@ test "keyboard selection moves stay inside the image" {
 }
 
 test "undo covers a text box's width" {
-    const alloc = testing.allocator;
-    var d = Document.init(alloc, 100, 100);
+    const gpa = testing.allocator;
+    var d = Document.init(gpa, 100, 100);
     defer d.deinit();
     try d.checkpoint();
     const i = try d.add(.{ .tool = .text, .color = 1, .thickness = 2 });
-    try d.shapes.items[i].str.appendSlice(alloc, "hello world");
+    try d.shapes.items[i].str.appendSlice(gpa, "hello world");
     try d.checkpoint();
     d.shapes.items[i].box_w = 40;
     try testing.expect(try d.undo());
@@ -332,8 +332,8 @@ test "undo covers a text box's width" {
 }
 
 test "a marked change is named again by the undo and redo crossing it" {
-    const alloc = testing.allocator;
-    var d = Document.init(alloc, 100, 100);
+    const gpa = testing.allocator;
+    var d = Document.init(gpa, 100, 100);
     defer d.deinit();
     try d.checkpoint();
     _ = try d.add(.{ .tool = .rect, .color = 1, .thickness = 2 });

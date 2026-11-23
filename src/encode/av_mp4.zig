@@ -4,6 +4,7 @@
 //! Video only: recordings with sound use the ffmpeg program.
 
 const std = @import("std");
+const log = std.log.scoped(.recording);
 const av = @import("av.zig");
 const yuv = @import("yuv.zig");
 
@@ -57,7 +58,7 @@ pub const Mp4 = struct {
                 self.encoder_name = name;
                 return;
             } else |err| {
-                std.log.info("recording: {s} did not open ({t})", .{ name, err });
+                log.info("{s} did not open ({t})", .{ name, err });
                 av.codec.avcodec_free_context(&ctx);
             }
         }
@@ -177,7 +178,7 @@ pub const Mp4 = struct {
 fn check(rc: c_int, what: []const u8) !void {
     if (rc >= 0) return;
     var buf: [128]u8 = @splat(0);
-    std.log.info("recording: libav {s}: {s}", .{ what, av.errName(rc, &buf) });
+    log.info("libav {s}: {s}", .{ what, av.errName(rc, &buf) });
     return error.Libav;
 }
 

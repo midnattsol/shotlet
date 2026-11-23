@@ -362,8 +362,8 @@ pub fn of(p: Prefs) Theme {
 }
 
 /// Ask the desktop for its appearance, waiting at most `timeout_ms`.
-pub fn readPrefs(session: *desktop.Session, timeout_ms: i64) Prefs {
-    return desktop.readAppearance(session, timeout_ms);
+pub fn readPrefs(bus: *desktop.Bus, timeout_ms: i64) Prefs {
+    return desktop.readAppearance(bus, timeout_ms);
 }
 
 /// The desktop's appearance, asked over a session of its own (waiting at
@@ -372,9 +372,9 @@ pub fn readPrefs(session: *desktop.Session, timeout_ms: i64) Prefs {
 /// `env` is the app's Env (app/env.zig), as desktop.connect takes it.
 pub fn loadPrefs(gpa: std.mem.Allocator, env: anytype, timeout_ms: i64) Prefs {
     const p: Prefs = blk: {
-        var conn = desktop.connect(gpa, env) catch break :blk .{};
-        defer conn.deinit();
-        break :blk readPrefs(&conn, timeout_ms);
+        var bus = desktop.connect(gpa, env) catch break :blk .{};
+        defer bus.deinit();
+        break :blk readPrefs(&bus, timeout_ms);
     };
     motion_mod.enabled = p.animations;
     return p;
@@ -386,8 +386,8 @@ pub fn load(gpa: std.mem.Allocator, env: anytype, timeout_ms: i64) Theme {
 }
 
 /// Follow appearance changes (desktop.pump folds them into a Prefs).
-pub fn watch(session: *desktop.Session) !void {
-    return desktop.watchAppearance(session);
+pub fn watch(bus: *desktop.Bus) !void {
+    return desktop.watchAppearance(bus);
 }
 
 pub const withAlpha = color.withAlpha;

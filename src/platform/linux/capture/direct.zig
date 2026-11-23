@@ -15,6 +15,7 @@
 //! streams.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const capture = @import("../../../app/capture.zig");
 const geom = @import("../../../geom.zig");
 const dbus = @import("../dbus.zig");
@@ -161,7 +162,7 @@ const Client = struct {
             .ext_image_copy_capture => cl.grabExt(o) catch |err| {
                 // a compositor may offer both and fail one: try screencopy
                 if (cl.screencopy == 0) return err;
-                std.log.info("direct capture: ext-image-copy-capture failed ({t}); wlr-screencopy", .{err});
+                log.info("direct capture: ext-image-copy-capture failed ({t}); wlr-screencopy", .{err});
                 return try cl.grabScreencopy(o);
             },
             .wlr_screencopy => try cl.grabScreencopy(o),
@@ -296,10 +297,10 @@ pub fn captureAll(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []co
     for (cl.outputs[0..cl.n_outputs]) |*o| {
         frames[n] = (try cl.grab(o, method, bus)) orelse return .{ .unavailable = kwin.refused };
         parts[n] = .{ .pixels = frames[n].pixels, .width = frames[n].width, .height = frames[n].height, .logical = logicalOf(o) };
-        std.log.debug("direct capture: {s} {d}x{d} at {any}", .{ o.name(), frames[n].width, frames[n].height, parts[n].logical });
+        log.debug("direct capture: {s} {d}x{d} at {any}", .{ o.name(), frames[n].width, frames[n].height, parts[n].logical });
         n += 1;
     }
-    std.log.info("direct capture: {d} outputs with {s}", .{ n, method.label() });
+    log.info("direct capture: {d} outputs with {s}", .{ n, method.label() });
     return .{ .captured = .{ .cap = try capture.stitch(gpa, parts[0..n]), .method = method } };
 }
 

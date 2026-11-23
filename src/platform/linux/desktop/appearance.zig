@@ -116,9 +116,9 @@ fn applyValue(prefs: *Prefs, which: Key, r: *dbus.Reader) !void {
 }
 
 test "portal values fold into prefs" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     // color-scheme as ReadOne returns it: v(u)
-    var m = dbus.Marshal.init(alloc);
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putSignature("u");
     try m.putU32(2);
@@ -128,7 +128,7 @@ test "portal values fold into prefs" {
     try std.testing.expect(!p.dark);
 
     // accent-color, double-wrapped like Read: v(v((ddd)))
-    var m2 = dbus.Marshal.init(alloc);
+    var m2 = dbus.Marshal.init(gpa);
     defer m2.deinit();
     try m2.putSignature("v");
     try m2.putSignature("(ddd)");

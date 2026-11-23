@@ -10,8 +10,8 @@ pub const Face = types.Face;
 pub const Db = struct {
     alloc: std.mem.Allocator,
 
-    pub fn init(alloc: std.mem.Allocator) Db {
-        return .{ .alloc = alloc };
+    pub fn init(gpa: std.mem.Allocator) Db {
+        return .{ .alloc = gpa };
     }
     pub fn deinit(self: *Db) void {
         self.* = undefined;

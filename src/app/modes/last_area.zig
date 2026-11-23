@@ -9,6 +9,7 @@
 //! a selection made with one set of monitors is never applied to another.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const capture = @import("../capture.zig");
 const statefile = @import("../statefile.zig");
 const Rect = @import("../../geom.zig").Rect;
@@ -66,7 +67,7 @@ pub fn load(gpa: std.mem.Allocator, home: []const u8, key: u64) ?Rect {
 }
 
 pub fn save(gpa: std.mem.Allocator, home: []const u8, key: u64, r: Rect) void {
-    saveInner(gpa, home, key, r) catch |err| std.log.warn("could not remember the selection: {t}", .{err});
+    saveInner(gpa, home, key, r) catch |err| log.warn("could not remember the selection: {t}", .{err});
 }
 
 fn saveInner(gpa: std.mem.Allocator, home: []const u8, key: u64, r: Rect) !void {

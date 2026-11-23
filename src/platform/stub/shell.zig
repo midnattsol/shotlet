@@ -26,8 +26,8 @@ pub fn applies() bool {
     return false;
 }
 /// The integration runs.
-pub fn active(s: *desktop.Session) bool {
-    _ = s;
+pub fn active(bus: *desktop.Bus) bool {
+    _ = bus;
     return false;
 }
 /// applies() and active(), on a session of its own.
@@ -35,16 +35,16 @@ pub fn activeNow(gpa: std.mem.Allocator, env: Env) bool {
     _ = .{ gpa, env };
     return false;
 }
-pub fn state(gpa: std.mem.Allocator, env: Env, s: ?*desktop.Session) State {
-    _ = .{ gpa, env, s };
+pub fn state(gpa: std.mem.Allocator, env: Env, bus: ?*desktop.Bus) State {
+    _ = .{ gpa, env, bus };
     return .unsupported;
 }
-pub fn install(gpa: std.mem.Allocator, env: Env, s: ?*desktop.Session) State {
-    _ = .{ gpa, env, s };
+pub fn install(gpa: std.mem.Allocator, env: Env, bus: ?*desktop.Bus) State {
+    _ = .{ gpa, env, bus };
     return .unsupported;
 }
-pub fn captureInfo(gpa: std.mem.Allocator, s: *desktop.Session) CaptureInfo {
-    _ = .{ gpa, s };
+pub fn captureInfo(gpa: std.mem.Allocator, bus: *desktop.Bus) CaptureInfo {
+    _ = .{ gpa, bus };
     return .{};
 }
 /// A line for Settings about the last install.
@@ -52,13 +52,13 @@ pub fn note() ?[]const u8 {
     return null;
 }
 /// Ask it to take a capture in `req`'s mode (it starts another shotlet).
-pub fn requestCapture(gpa: std.mem.Allocator, s: *desktop.Session, req: mode.Request) Handoff {
-    _ = .{ gpa, s, req };
+pub fn requestCapture(gpa: std.mem.Allocator, bus: *desktop.Bus, req: mode.Request) Handoff {
+    _ = .{ gpa, bus, req };
     return .unavailable;
 }
 /// Put our window titled `title` at x, y (logical); false when it cannot.
-pub fn place(gpa: std.mem.Allocator, s: *desktop.Session, title: []const u8, x: i32, y: i32) bool {
-    _ = .{ gpa, s, title, x, y };
+pub fn place(gpa: std.mem.Allocator, bus: *desktop.Bus, title: []const u8, x: i32, y: i32) bool {
+    _ = .{ gpa, bus, title, x, y };
     return false;
 }
 /// The capture it handed over.
@@ -75,8 +75,8 @@ pub fn runCli(gpa: std.mem.Allocator, env: Env, cmd: Cli) error{Unavailable}!voi
     return error.Unavailable;
 }
 /// Where its shortcut settings are (into `buf`), when it runs.
-pub fn shortcutStore(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, buf: []u8) ?[]const u8 {
-    _ = .{ gpa, env, s, buf };
+pub fn shortcutStore(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, buf: []u8) ?[]const u8 {
+    _ = .{ gpa, env, bus, buf };
     return null;
 }
 /// The first shortcut bound to shortcut `name` (mode.shortcuts) as

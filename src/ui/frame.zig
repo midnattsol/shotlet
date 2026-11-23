@@ -132,7 +132,7 @@ pub const Frame = struct {
         @memcpy(px, self.shade[0..px.len]);
         const p: i32 = @intCast(padPx(win));
         const content: floatui.Image = .{ .px = self.content, .w = self.cw, .h = self.ch };
-        floatui.place(win.alloc, .{ .px = px, .w = win.width, .h = win.height }, content, .{ p, p }, rad, null, k);
+        floatui.place(.{ .px = px, .w = win.width, .h = win.height }, content, .{ p, p }, rad, null, k);
         try floatwin.presentStraight(win, px);
     }
 

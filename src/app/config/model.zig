@@ -97,7 +97,8 @@ pub const Config = struct {
     beautify_corners: bool = true,
     beautify_shadow: bool = true,
     /// the editor's first-run hint was shown: only read from older
-    /// files (it is a state flag now, stateflag.zig)
+    /// files, and turned into the state flag by config.load
+    /// (stateflag.zig)
     hint_shown: bool = false,
     /// the floating thumbnail with more actions: after which results
     thumbnail: Thumbnail = .after_save,

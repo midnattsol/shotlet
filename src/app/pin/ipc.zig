@@ -3,6 +3,7 @@
 //! (named after its process), each answering "close".
 
 const std = @import("std");
+const log = std.log.scoped(.pin);
 const env_mod = @import("../env.zig");
 const ipc = @import("../ipc.zig");
 const sys = @import("../../platform/api.zig").sys;
@@ -22,7 +23,7 @@ pub const Listener = struct {
         var pbuf: ipc.PathBuf = undefined;
         const path = std.fmt.bufPrint(&pbuf, "{s}/{d}.sock", .{ dir, sys.processId() }) catch return .{};
         const server = ipc.Server.listen(path) catch |err| {
-            std.log.warn("pin: Close All Pins will not reach this pin: {t}", .{err});
+            log.warn("Close All Pins will not reach this pin: {t}", .{err});
             return .{};
         };
         return .{ .server = server, .fd = server.fd };

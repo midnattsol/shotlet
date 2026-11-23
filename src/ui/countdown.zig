@@ -37,7 +37,7 @@ fn draw(win: *window.Window, th: theme.Theme, left: u32) !void {
     fui.textCentered(&cv, .ofSize(bw, bh), 60 * k, o.fg, text.Style.semibold.num(), s);
     const px = try win.backBuffer();
     @memset(px, 0);
-    fui.place(win.alloc, .{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, radius * k, null, k);
+    fui.place(.{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, radius * k, null, k);
     fui.fadeAlpha(px, opacity);
     try floatwin.presentStraight(win, px);
 }

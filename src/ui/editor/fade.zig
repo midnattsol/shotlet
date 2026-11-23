@@ -92,10 +92,10 @@ const Frames = struct {
         return f;
     }
 
-    fn deinit(f: *Frames, alloc: std.mem.Allocator) void {
+    fn deinit(f: *Frames, gpa: std.mem.Allocator) void {
         for (&f.from, &f.plain) |a, b| {
-            alloc.free(a);
-            alloc.free(b);
+            gpa.free(a);
+            gpa.free(b);
         }
     }
 };

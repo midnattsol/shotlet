@@ -10,6 +10,7 @@ const surface = @import("surface.zig");
 const Window = window.Window;
 const Key = window.Key;
 const Rect = window.Rect;
+const geom = @import("../../../geom.zig");
 
 pub const TextInput = struct {
     /// zwp_text_input_v3; 0 without the protocol
@@ -94,7 +95,7 @@ fn sendState(w: *Window, reenable: bool) !void {
         }
         if (ti.rect) |rc| {
             const f = @as(f64, @floatFromInt(w.surfaces[ti.surface].scale120)) / 120.0;
-            const lr = logicalRect(rc, f);
+            const lr = geom.physicalToLogical(rc, f);
             try c.request(ti.id, wl.zwp_text_input_v3.set_cursor_rectangle, &.{
                 .{ .int = lr.x }, .{ .int = lr.y }, .{ .int = lr.w }, .{ .int = lr.h },
             });
@@ -106,16 +107,6 @@ fn sendState(w: *Window, reenable: bool) !void {
     }
     try c.request(ti.id, wl.zwp_text_input_v3.commit, &.{});
     try c.flush();
-}
-
-fn logicalRect(rc: Rect, f: f64) Rect {
-    const d = if (f > 0) f else 1.0;
-    return .{
-        .x = @intFromFloat(@floor(@as(f64, @floatFromInt(rc.x)) / d)),
-        .y = @intFromFloat(@floor(@as(f64, @floatFromInt(rc.y)) / d)),
-        .w = @max(1, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(rc.w)) / d)))),
-        .h = @max(1, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(rc.h)) / d)))),
-    };
 }
 
 /// zwp_text_input_v3 events.
@@ -193,11 +184,6 @@ test "utf8 chunking never splits a character" {
     // malformed continuation run still makes progress
     const junk: [20]u8 = @splat(0x80);
     try t.expect(utf8Chunk(&junk, 16) > 0);
-}
-
-test "caret rectangle converts to logical coordinates" {
-    const r = logicalRect(.{ .x = 301, .y = 50, .w = 3, .h = 41 }, 2.0);
-    try std.testing.expectEqual(Rect{ .x = 150, .y = 25, .w = 2, .h = 21 }, r);
 }
 
 fn testWireString(buf: []u8, s: []const u8) []const u8 {

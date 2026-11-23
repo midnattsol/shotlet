@@ -5,6 +5,7 @@
 //! surface, render, dump, export, quit).
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
@@ -40,7 +41,7 @@ pub fn step(ed: *Editor) !void {
     if (end < src.len) end += 1;
     ed.script.pos = end;
     if (cmd.len == 0) return;
-    runCommand(ed, cmd) catch |e| std.log.warn("script '{s}': {t}", .{ cmd, e });
+    runCommand(ed, cmd) catch |e| log.warn("script '{s}': {t}", .{ cmd, e });
     ed.needs_render = true;
 }
 
@@ -134,7 +135,7 @@ fn scribble(ed: *Editor, arg: []const u8) !void {
     }
     const t1 = session.nowMs();
     try buttonXY(ed, .left, false, 0, 0);
-    std.log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, session.nowMs() - t1 });
+    log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, session.nowMs() - t1 });
 }
 
 /// scroll V, or scroll v120:N for a high-resolution wheel.

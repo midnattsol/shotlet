@@ -6,6 +6,9 @@
 //! takes a tiny see-through window for a moment, as wl-paste does.
 
 const std = @import("std");
+const log = std.log.scoped(.drop);
+/// `shotlet pin` from the clipboard is the pin's
+const pin_log = std.log.scoped(.pin);
 const env_mod = @import("env.zig");
 const relaunch = @import("relaunch.zig");
 const report = @import("report.zig");
@@ -49,7 +52,7 @@ pub fn readPng(gpa: std.mem.Allocator, env: Env) ![]u8 {
 /// screen too: a shortcut has no terminal) and ends with status 1.
 pub fn pinClipboard(gpa: std.mem.Allocator, env: Env) !void {
     const data = readPng(gpa, env) catch |err| {
-        std.log.warn("pin: no image from the clipboard ({t})", .{err});
+        pin_log.warn("no image from the clipboard ({t})", .{err});
         switch (err) {
             error.NoImageOnClipboard => report.problem(env, "No image on the clipboard", "Copy an image, then pin it"),
             else => report.failed(env, "Couldn\u{2019}t read the clipboard", err),
@@ -76,11 +79,11 @@ pub fn takeDrop(gpa: std.mem.Allocator, env: Env, win: *window.Window) void {
         uri.firstFilePath(&buf, d.data) orelse return
     else
         savedDrop(gpa, env, d.data, &buf) catch |err| {
-            std.log.warn("drop: cannot keep the image: {t}", .{err});
+            log.warn("cannot keep the image: {t}", .{err});
             report.failed(env, "Couldn\u{2019}t open the dropped image", err);
             return;
         };
-    std.log.info("drop: opening {s}", .{path});
+    log.info("opening {s}", .{path});
     relaunch.editFile(env, path);
 }
 

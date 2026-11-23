@@ -3,6 +3,7 @@
 //! grown to the right and down while the menu needs more room.
 
 const std = @import("std");
+const log = std.log.scoped(.pin);
 const env_mod = @import("../env.zig");
 const png = @import("../../gfx/png.zig");
 const theme = @import("../../ui/theme.zig");
@@ -22,7 +23,7 @@ const Rect = @import("../../ui/shapes.zig").Rect;
 
 /// the room a card's shadow (theme card_shadow: its blur, and its fall
 /// below) takes around it, logical pixels
-pub const shadow_room = 32;
+pub const shadow_room = theme.card_room;
 /// shadow room around the picture, logical pixels
 pub const pad = shadow_room;
 /// the room the menu's shadow takes around the menu
@@ -223,7 +224,7 @@ pub const Pin = struct {
         // as a popup would (some compositors drop the focus of a surface
         // that grows)
         if (p.layer) p.win.setLayerKeyboard(0, .exclusive) catch {};
-        std.log.info("pin: menu open", .{});
+        log.info("menu open", .{});
     }
 
     pub fn closeMenu(p: *Pin, now: i64) void {
@@ -231,7 +232,7 @@ pub const Pin = struct {
         p.menu.hide(now);
         p.dirty = true;
         if (p.layer) p.win.setLayerKeyboard(0, .on_demand) catch {};
-        std.log.info("pin: menu closed", .{});
+        log.info("menu closed", .{});
     }
 
     /// Once the menu has faded out, the surface gives its room back.
@@ -245,7 +246,7 @@ pub const Pin = struct {
         if (o == p.opacity) return;
         p.opacity = o;
         p.dirty = true;
-        std.log.info("pin: opacity {s}", .{o.label()});
+        log.info("opacity {s}", .{o.label()});
     }
 
     pub fn setZoom(p: *Pin, z: f64) void {

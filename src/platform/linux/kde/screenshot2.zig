@@ -3,6 +3,7 @@
 //! refusal reasons, and the image KWin writes into a pipe.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const kde = @import("../kde.zig");
@@ -52,7 +53,7 @@ pub fn reply(gpa: std.mem.Allocator, bus: *dbus.Connection, serial: u32, read_fd
             error.Busy, error.NotFound, error.DBusError => "KWin ScreenShot2 failed",
             else => return err,
         };
-        std.log.info("direct capture: {s}", .{refused});
+        log.info("direct capture: {s}", .{refused});
         return null;
     };
     defer msg.deinit(bus.alloc);

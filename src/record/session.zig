@@ -3,6 +3,7 @@
 //! (keeping it in the history, with the thumbnail) or discard it.
 
 const std = @import("std");
+const log = std.log.scoped(.recording);
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const config = @import("../app/config.zig");
@@ -27,7 +28,7 @@ pub const Request = struct {
 pub const Recording = struct {
     gpa: std.mem.Allocator,
     env: Env,
-    bus: *desktop.Session,
+    bus: *desktop.Bus,
     set: settings_mod.Settings,
     source: source_mod.Source,
     engine: *engine_mod.Engine,
@@ -35,7 +36,7 @@ pub const Recording = struct {
 
     pub const Begin = union(enum) { ok: Recording, cancelled, failed: anyerror };
 
-    pub fn begin(gpa: std.mem.Allocator, env: Env, bus: *desktop.Session, cfg: *config.Config, set: settings_mod.Settings, req: Request) Begin {
+    pub fn begin(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config, set: settings_mod.Settings, req: Request) Begin {
         var src = switch (source_mod.open(gpa, bus, env.home, cfg, .{ .area = req.area, .clicks = set.clicks, .keys = set.keys })) {
             .ok => |s| s,
             .cancelled => return .cancelled,
@@ -63,7 +64,7 @@ pub const Recording = struct {
             gpa.free(path);
             return .{ .failed = e };
         };
-        std.log.info("recording: {s} into {s}", .{ src.label(), path });
+        log.info("{s} into {s}", .{ src.label(), path });
         return .{ .ok = .{ .gpa = gpa, .env = env, .bus = bus, .set = set, .source = src, .engine = eng, .path = path } };
     }
 
@@ -76,7 +77,7 @@ pub const Recording = struct {
         defer self.release();
         const done = try self.engine.stop();
         const size = sys.fileSize(self.path) catch 0;
-        std.log.info("recording: saved {s} ({d}x{d}, {d} frames, {d} ms, {d} KiB, {s})", .{ self.path, done.width, done.height, done.frames, done.duration_ms, size / 1024, done.backend.label() });
+        log.info("saved {s} ({d}x{d}, {d} frames, {d} ms, {d} KiB, {s})", .{ self.path, done.width, done.height, done.frames, done.duration_ms, size / 1024, done.backend.label() });
         var lbuf: [2048]u8 = undefined;
         return keepvid.store(self.gpa, self.env, cfg, .{
             .info = .{
@@ -98,7 +99,7 @@ pub const Recording = struct {
 
     pub fn discard(self: *Recording) void {
         self.engine.discard();
-        std.log.info("recording: discarded", .{});
+        log.info("discarded", .{});
         self.release();
     }
 

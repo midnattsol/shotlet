@@ -53,12 +53,12 @@ pub fn resolveExplicit(cps: []const u21, para: u1, types: []Class, levels: []u8)
 
 /// BD9: index of the matching PDI for every isolate initiator that has
 /// one, and which PDIs are matched.
-fn matchIsolates(a: std.mem.Allocator, types: []const Class, match: []u32, matched_pdi: []bool) !void {
+fn matchIsolates(gpa: std.mem.Allocator, types: []const Class, match: []u32, matched_pdi: []bool) !void {
     var stack: std.ArrayList(u32) = .empty;
-    defer stack.deinit(a);
+    defer stack.deinit(gpa);
     for (types, 0..) |t, i| {
         if (classes.isIsolateInit(t)) {
-            try stack.append(a, @intCast(i));
+            try stack.append(gpa, @intCast(i));
         } else if (t == .PDI) {
             if (stack.pop()) |o| {
                 match[o] = @intCast(i);

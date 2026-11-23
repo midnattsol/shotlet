@@ -2,6 +2,7 @@
 //! and NUL-terminated path buffers.
 
 const std = @import("std");
+const log = std.log.scoped(.sys);
 const linux = std.os.linux;
 
 pub const fd_t = i32;
@@ -31,7 +32,7 @@ pub fn check(rc: usize) !usize {
         .ROFS => error.ReadOnlyFileSystem,
         .NAMETOOLONG => error.NameTooLong,
         else => {
-            std.log.err("syscall failed: {t}", .{e});
+            log.err("syscall failed: {t}", .{e});
             return error.SyscallFailed;
         },
     };

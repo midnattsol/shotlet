@@ -17,8 +17,8 @@ pub const LocalTime = struct {
 
 /// Break `utc` (epoch seconds) into local time for the zone named by
 /// `tz_env` (the TZ variable; null means /etc/localtime).
-pub fn localTime(alloc: std.mem.Allocator, tz_env: ?[]const u8, utc: i64) LocalTime {
-    return breakDown(utc + utcOffset(alloc, tz_env, utc));
+pub fn localTime(gpa: std.mem.Allocator, tz_env: ?[]const u8, utc: i64) LocalTime {
+    return breakDown(utc + utcOffset(gpa, tz_env, utc));
 }
 
 pub fn breakDown(t: i64) LocalTime {
@@ -39,34 +39,34 @@ pub fn breakDown(t: i64) LocalTime {
 
 /// Seconds east of UTC in effect at `utc`. Falls back to 0 (UTC) when no
 /// zone information can be read.
-pub fn utcOffset(alloc: std.mem.Allocator, tz_env: ?[]const u8, utc: i64) i32 {
-    const tz = tz_env orelse return fileOffset(alloc, "/etc/localtime", utc) orelse 0;
+pub fn utcOffset(gpa: std.mem.Allocator, tz_env: ?[]const u8, utc: i64) i32 {
+    const tz = tz_env orelse return fileOffset(gpa, "/etc/localtime", utc) orelse 0;
     if (tz.len == 0) return 0; // TZ="" means UTC
     var name = tz;
     if (name[0] == ':') name = name[1..];
-    if (name.len > 0 and name[0] == '/') return fileOffset(alloc, name, utc) orelse 0;
+    if (name.len > 0 and name[0] == '/') return fileOffset(gpa, name, utc) orelse 0;
     // a zone name, unless it climbs out of the database
     if (name.len > 0 and std.mem.indexOf(u8, name, "..") == null) {
         var buf: [512]u8 = undefined;
         if (std.fmt.bufPrint(&buf, "/usr/share/zoneinfo/{s}", .{name})) |path| {
-            if (fileOffset(alloc, path, utc)) |off| return off;
+            if (fileOffset(gpa, path, utc)) |off| return off;
         } else |_| {}
     }
     if (Rule.parse(tz)) |rule| return rule.offsetAt(utc);
     return 0;
 }
 
-fn fileOffset(alloc: std.mem.Allocator, path: []const u8, utc: i64) ?i32 {
-    const data = sys.readFileAlloc(alloc, path, 1024 * 1024) catch return null;
-    defer alloc.free(data);
-    return tzifOffset(alloc, data, utc);
+fn fileOffset(gpa: std.mem.Allocator, path: []const u8, utc: i64) ?i32 {
+    const data = sys.readFileAlloc(gpa, path, 1024 * 1024) catch return null;
+    defer gpa.free(data);
+    return tzifOffset(gpa, data, utc);
 }
 
 /// Offset from TZif bytes: the last transition at or before `utc`, or the
 /// footer rule beyond the table.
-pub fn tzifOffset(alloc: std.mem.Allocator, data: []const u8, utc: i64) ?i32 {
+pub fn tzifOffset(gpa: std.mem.Allocator, data: []const u8, utc: i64) ?i32 {
     var reader = std.Io.Reader.fixed(data);
-    var tz = std.tz.Tz.parse(alloc, &reader) catch return null;
+    var tz = std.tz.Tz.parse(gpa, &reader) catch return null;
     defer tz.deinit();
 
     const ts = tz.transitions;
@@ -282,15 +282,15 @@ test "POSIX TZ rules" {
 }
 
 test "TZif from the system database agrees with its rule" {
-    const alloc = std.testing.allocator;
-    const data = sys.readFileAlloc(alloc, "/usr/share/zoneinfo/Europe/Berlin", 1024 * 1024) catch return error.SkipZigTest;
-    defer alloc.free(data);
-    try std.testing.expectEqual(@as(?i32, 3600), tzifOffset(alloc, data, 1768478400));
-    try std.testing.expectEqual(@as(?i32, 7200), tzifOffset(alloc, data, 1782907200));
+    const gpa = std.testing.allocator;
+    const data = sys.readFileAlloc(gpa, "/usr/share/zoneinfo/Europe/Berlin", 1024 * 1024) catch return error.SkipZigTest;
+    defer gpa.free(data);
+    try std.testing.expectEqual(@as(?i32, 3600), tzifOffset(gpa, data, 1768478400));
+    try std.testing.expectEqual(@as(?i32, 7200), tzifOffset(gpa, data, 1782907200));
     // far beyond any table: the footer rule decides
-    try std.testing.expectEqual(@as(?i32, 7200), tzifOffset(alloc, data, 4102488000 + 182 * 86400));
-    try std.testing.expectEqual(@as(i32, 7200), utcOffset(alloc, "Europe/Berlin", 1782907200));
-    try std.testing.expectEqual(@as(i32, 7200), utcOffset(alloc, ":Europe/Berlin", 1782907200));
+    try std.testing.expectEqual(@as(?i32, 7200), tzifOffset(gpa, data, 4102488000 + 182 * 86400));
+    try std.testing.expectEqual(@as(i32, 7200), utcOffset(gpa, "Europe/Berlin", 1782907200));
+    try std.testing.expectEqual(@as(i32, 7200), utcOffset(gpa, ":Europe/Berlin", 1782907200));
 }
 
 test "civil dates" {

@@ -38,20 +38,20 @@ pub fn mkdirAll(path: []const u8, mode: u32) void {
 
 /// Create a fresh private directory `<TMPDIR or /tmp>/<prefix>-<random>`.
 /// Used by tests so parallel or repeated runs never share state.
-pub fn makeTempDir(alloc: std.mem.Allocator, base: []const u8, prefix: []const u8) ![]u8 {
+pub fn makeTempDir(gpa: std.mem.Allocator, base: []const u8, prefix: []const u8) ![]u8 {
     var attempt: usize = 0;
     while (attempt < 16) : (attempt += 1) {
         var rnd: [8]u8 = undefined;
         time.getRandom(&rnd);
-        const path = try std.fmt.allocPrint(alloc, "{s}/{s}-{x}", .{ base, prefix, std.mem.readInt(u64, &rnd, .little) });
+        const path = try std.fmt.allocPrint(gpa, "{s}/{s}-{x}", .{ base, prefix, std.mem.readInt(u64, &rnd, .little) });
         var buf: [common.path_max]u8 = undefined;
         const p = pathZ(&buf, path) catch |err| {
-            alloc.free(path);
+            gpa.free(path);
             return err;
         };
         const rc = linux.mkdirat(linux.AT.FDCWD, p.ptr, 0o700);
         if (linux.errno(rc) == .SUCCESS) return path;
-        alloc.free(path);
+        gpa.free(path);
         if (linux.errno(rc) != .EXIST) return error.CannotCreateTempDir;
     }
     return error.CannotCreateTempDir;
@@ -159,12 +159,12 @@ fn removeTreeDepth(path: []const u8, depth: usize) void {
 /// directory. Caller frees with freeNames.
 pub const DirEntry = struct { name: []u8, is_dir: bool };
 
-pub fn listDir(alloc: std.mem.Allocator, path: []const u8) ![]DirEntry {
+pub fn listDir(gpa: std.mem.Allocator, path: []const u8) ![]DirEntry {
     const dfd = try openDir(path);
     defer io.close(dfd);
     var out: std.ArrayList(DirEntry) = .empty;
-    errdefer freeNames(alloc, out.items);
-    errdefer out.deinit(alloc);
+    errdefer freeNames(gpa, out.items);
+    errdefer out.deinit(gpa);
     var buf: [8192]u8 align(8) = undefined;
     while (true) {
         const n = linux.getdents64(dfd, &buf, buf.len);
@@ -172,25 +172,26 @@ pub fn listDir(alloc: std.mem.Allocator, path: []const u8) ![]DirEntry {
         if (n == 0) break;
         var off: usize = 0;
         while (nextDirent(buf[0..n], &off)) |e| {
-            const copy = try alloc.dupe(u8, e.name);
-            out.append(alloc, .{ .name = copy, .is_dir = e.is_dir }) catch |err| {
-                alloc.free(copy);
+            const copy = try gpa.dupe(u8, e.name);
+            out.append(gpa, .{ .name = copy, .is_dir = e.is_dir }) catch |err| {
+                gpa.free(copy);
                 return err;
             };
         }
     }
-    return out.toOwnedSlice(alloc);
+    return out.toOwnedSlice(gpa);
 }
 
-pub fn freeNames(alloc: std.mem.Allocator, list: []const DirEntry) void {
-    for (list) |e| alloc.free(e.name);
+pub fn freeNames(gpa: std.mem.Allocator, list: []const DirEntry) void {
+    for (list) |e| gpa.free(e.name);
 }
+
+const testutil = @import("../../../testutil.zig");
 
 test "eachEntry reports every entry with its kind" {
-    const alloc = std.testing.allocator;
-    const dir = try makeTempDir(alloc, "/tmp", "shotlet-each");
-    defer alloc.free(dir);
-    defer removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-each");
+    defer tmp.deinit();
+    const dir = tmp.path;
     var a: [256]u8 = undefined;
     mkdirMode(try std.fmt.bufPrint(&a, "{s}/sub", .{dir}), 0o700);
     try fs.writeFile(try std.fmt.bufPrint(&a, "{s}/file", .{dir}), "x");

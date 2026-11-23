@@ -232,8 +232,8 @@ fn skipSignature(sig: []const u8, idx: *usize, depth: u32) !void {
 }
 
 test "dict marshal/read roundtrip" {
-    const alloc = std.testing.allocator;
-    var m = Marshal.init(alloc);
+    const gpa = std.testing.allocator;
+    var m = Marshal.init(gpa);
     defer m.deinit();
     const arr = try m.beginArray(8);
     try m.beginStruct();
@@ -256,8 +256,8 @@ test "dict marshal/read roundtrip" {
 }
 
 test "reader skips unknown variant types" {
-    const alloc = std.testing.allocator;
-    var m = Marshal.init(alloc);
+    const gpa = std.testing.allocator;
+    var m = Marshal.init(gpa);
     defer m.deinit();
     const arr = try m.beginArray(8);
     try m.beginStruct();

@@ -8,6 +8,7 @@
 //! - Window, Scroll, Timer: that capture starts anew in a fresh shotlet.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const capture = @import("../capture.zig");
 const relaunch = @import("../relaunch.zig");
 const mode_flow = @import("../modes/flow.zig");
@@ -19,7 +20,7 @@ const Editor = editor_mod.Editor;
 /// Ease the editor out and close its window: nothing of it stays on
 /// screen for what comes next.
 fn leave(ed: *Editor, win: anytype) void {
-    ed.fadeOut() catch |err| std.log.debug("editor fade: {t}", .{err});
+    ed.fadeOut() catch |err| log.debug("editor fade: {t}", .{err});
     win.closeWindow();
 }
 
@@ -33,7 +34,7 @@ pub fn screen(c: mode_flow.Ctx, ed: *Editor, cap: *capture.Capture) !void {
 /// the GNOME extension (clicks and keys can be shown).
 pub fn record(c: mode_flow.Ctx, ed: *Editor, cap: *const capture.Capture, overlays: bool) !void {
     leave(ed, c.win);
-    std.log.info("capture mode: record, the picker on this capture", .{});
+    log.info("capture mode: record, the picker on this capture", .{});
     try record_cli.pickOnCapture(c.gpa, c.env, cap, overlays);
 }
 
