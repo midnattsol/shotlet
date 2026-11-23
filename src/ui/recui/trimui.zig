@@ -8,7 +8,7 @@ const std = @import("std");
 const env_mod = @import("../../app/env.zig");
 const config = @import("../../app/config.zig");
 const history = @import("../../app/history.zig");
-const keep = @import("../../app/keep.zig");
+const relaunch = @import("../../app/relaunch.zig");
 const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const text = @import("../../gfx/text.zig");
@@ -172,11 +172,7 @@ pub fn exportRange(gpa: std.mem.Allocator, env: Env, info: *const keepvid.Info, 
     out.frames = @intCast(@divTrunc(out.duration_ms * info.fps, 1000));
     out.strip = "";
     if (keepvid.store(gpa, env, &cfg, .{ .info = out, .first = first, .first_w = info.width, .first_h = info.height, .strip = &strip })) |k| {
-        var rb: [1100]u8 = undefined;
-        var ib: [40]u8 = undefined;
-        const rz = std.fmt.bufPrintSentinel(&rb, "{s}", .{k.root()}, 0) catch return;
-        const iz = std.fmt.bufPrintSentinel(&ib, "{s}", .{k.id.slice()}, 0) catch return;
-        if (cfg.showsThumbnail(true)) keep.spawnSelf(env, &.{ "quick-video", rz.ptr, iz.ptr });
+        if (cfg.showsThumbnail(true)) relaunch.quickVideo(env, k.root(), k.id.slice());
     }
 }
 

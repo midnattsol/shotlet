@@ -113,9 +113,9 @@ fn loop(q: *Quick) !void {
         try q.win.flush();
         var fds = [_]sys.pollfd{
             .{ .fd = q.win.pollFd(), .events = sys.POLL.IN, .revents = 0 },
-            .{ .fd = q.listen_fd, .events = sys.POLL.IN, .revents = 0 },
+            .{ .fd = q.server.fd, .events = sys.POLL.IN, .revents = 0 },
         };
-        const nfds: usize = if (q.listen_fd >= 0) 2 else 1;
+        const nfds: usize = if (q.server.fd >= 0) 2 else 1;
         _ = try sys.poll(fds[0..nfds], q.win.pollTimeoutMs(q.nextWakeMs()));
         while (try q.win.nextEventTimeout(0)) |ev| q.onEvent(ev);
         if (nfds == 2 and fds[1].revents != 0) q.acceptClients();

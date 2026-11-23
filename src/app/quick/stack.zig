@@ -65,9 +65,6 @@ pub const Quick = struct {
     cards: std.ArrayList(Card) = .empty,
     /// the hand-off socket (quick_ipc.zig)
     server: ipc.Server = .{},
-    /// server.fd, which quick.zig polls
-    // TODO(wave 3b): remove once quick.zig polls q.server.fd
-    listen_fd: sys.fd_t = -1,
     layer: bool = false,
     /// GNOME without the extension: say how to keep it above
     hint: bool = false,
@@ -134,13 +131,11 @@ pub const Quick = struct {
             if (err != error.AddressInUse) std.log.warn("quick access: no hand-off socket: {t}", .{err});
             return false;
         };
-        self.listen_fd = self.server.fd;
         return true;
     }
 
     pub fn stopListening(self: *Quick) void {
         self.server.close();
-        self.listen_fd = -1;
     }
 
     /// Show the entries newcomers hand over, answering "ok" to each.

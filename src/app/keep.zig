@@ -214,12 +214,6 @@ pub fn thumbnail(alloc: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, m
     return .{ .pixels = out, .width = dw, .height = dh };
 }
 
-// TODO(wave 3b): remove once ui/recui/trimui.zig uses relaunch.quickVideo.
-/// Run `shotlet ARGS...` detached; use app/relaunch.zig.
-pub fn spawnSelf(env: Env, args: []const [*:0]const u8) void {
-    proc.spawnSelf(env.envp, args, null);
-}
-
 test "thumbnails fit the box and average colours" {
     const alloc = std.testing.allocator;
     var src: [8 * 4]u32 = undefined;
