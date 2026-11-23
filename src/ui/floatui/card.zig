@@ -1,8 +1,8 @@
 //! Cards on the see-through floating windows: an opaque card placed with
 //! rounded corners and a theme shadow (its mask cached across frames),
-//! the same faded as a whole, a
-//! picture fitted into a card (and cached per size), and dragging a file
-//! out of a card. Straight alpha throughout (see ui/floatui.zig).
+//! the same faded as a whole, a picture fitted into a card (and cached
+//! per size), and dragging a file out of a card. Straight alpha
+//! throughout (see ui/floatui.zig).
 
 const std = @import("std");
 const effects = @import("../../gfx/effects.zig");
