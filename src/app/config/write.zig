@@ -6,6 +6,7 @@ const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
 const env = @import("../env.zig");
 const parse = @import("parse.zig");
+const keys = @import("keys.zig");
 const location = @import("location.zig");
 const model = @import("model.zig");
 const Config = model.Config;
@@ -48,7 +49,7 @@ pub fn mergeContent(alloc: std.mem.Allocator, old: []const u8, changes: []const 
     var lines = std.mem.splitScalar(u8, old, '\n');
     while (lines.next()) |line| {
         if (lines.index == null and line.len == 0) break; // trailing newline
-        if (parse.parseLine(line)) |kv| {
+        if (keys.parseLine(line)) |kv| {
             if (isLegacyKey(kv.key) or replaced(kv.key, changes)) continue;
             if (findChange(changes, kv.key)) |ci| {
                 if (!done[ci]) {
@@ -72,9 +73,13 @@ fn isLegacyKey(key: []const u8) bool {
     return false;
 }
 
-/// An older file's `bind_<action>` whose `shortcut_<action>` is being
-/// written (config/parse.zig reads the old one only without the new).
+/// An older file's key whose replacement is being written: a
+/// `bind_<action>` for `shortcut_<action>` (config/parse.zig reads the old
+/// one only without the new), a parse.superseded key for its new one.
 fn replaced(key: []const u8, changes: []const Change) bool {
+    for (parse.superseded) |s| {
+        if (std.mem.eql(u8, key, s.old) and findChange(changes, s.new) != null) return true;
+    }
     if (!std.mem.startsWith(u8, key, parse.legacy_prefix)) return false;
     const action = key[parse.legacy_prefix.len..];
     for (changes) |ch| {
@@ -123,6 +128,15 @@ test "single-monitor restore tokens are dropped" {
     var cfg = Config{};
     parse.applyValue(&cfg, "screencast_token", "old");
     try std.testing.expect(cfg.scToken() == null);
+}
+
+test "a thumbnail written anew drops the quick_access switch it replaced" {
+    const alloc = std.testing.allocator;
+    const out = try mergeContent(alloc, "quick_access=false\nnotify=true\n", &.{
+        .{ .key = "thumbnail", .value = "never" },
+    });
+    defer alloc.free(out);
+    try std.testing.expectEqualStrings("notify=true\nthumbnail=never\n", out);
 }
 
 test "a bind written anew drops the older file's line for it" {

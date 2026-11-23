@@ -1,12 +1,21 @@
-//! The configuration model: the Config struct, its keys (fixed settings
-//! plus one "shortcut_<action>" per editor action) and how each key's value
-//! is serialized, plus the per-key hash baseline save() compares against.
+//! The configuration model: the Config struct (the one settings model of
+//! the one config file: core settings, the capture modes, recording), its
+//! keys (the fixed ones from keys.zig tables, plus one "shortcut_<action>"
+//! per editor action) and how each key's value is serialized, plus the
+//! per-key hash baseline save() compares against.
 
 const std = @import("std");
 const binds = @import("../binds.zig");
 const Action = binds.Action;
 const n_actions = binds.n_actions;
 const Bind = binds.Bind;
+const keys = @import("keys.zig");
+const modes = @import("modes.zig");
+const record = @import("record.zig");
+
+pub const After = modes.After;
+pub const Modes = modes.Modes;
+pub const Record = record.Record;
 
 /// When the floating thumbnail shows up.
 pub const Thumbnail = enum {
@@ -59,11 +68,7 @@ pub const loupe_zoom_default: u8 = 8;
 
 /// The zoom level nearest `v`.
 pub fn nearestZoom(v: i64) u8 {
-    var best = loupe_zooms[0];
-    for (loupe_zooms) |z| {
-        if (@abs(v - z) < @abs(v - best)) best = z;
-    }
-    return best;
+    return @intCast(keys.nearest(&zoom_choices, v));
 }
 
 pub const Config = struct {
@@ -91,7 +96,8 @@ pub const Config = struct {
     beautify_padding: u2 = 2,
     beautify_corners: bool = true,
     beautify_shadow: bool = true,
-    /// the editor's first-run hint was shown
+    /// the editor's first-run hint was shown: only read from older
+    /// files (it is a state flag now, stateflag.zig)
     hint_shown: bool = false,
     /// the floating thumbnail with more actions: after which results
     thumbnail: Thumbnail = .after_save,
@@ -107,6 +113,10 @@ pub const Config = struct {
     /// loupe_zooms)
     loupe: Loupe = .hold,
     loupe_zoom: u8 = loupe_zoom_default,
+    /// the capture modes (modes.zig)
+    modes: Modes = .{},
+    /// recording (record.zig)
+    record: Record = .{},
     /// hash of every key's value as last loaded or saved; save() writes
     /// only keys whose value differs. All zero (a Config not read from
     /// disk) means every key is written.
@@ -146,85 +156,72 @@ pub const Config = struct {
 
 // --- keys ---
 
-pub const n_fixed_keys = 19;
-/// `loupe`'s number among the keys
-pub const loupe_key = 17;
+const zoom_choices = blk: {
+    var out: [loupe_zooms.len]i64 = undefined;
+    for (loupe_zooms, 0..) |z, i| out[i] = z;
+    break :blk out;
+};
+
+/// The core settings' keys, in the order a fresh file lists them.
+const core_keys = [_]keys.Key{
+    .{ .name = "notify", .field = "notify", .kind = .flag },
+    .{ .name = "copy_on_save", .field = "copy_on_save", .kind = .flag },
+    .{ .name = "default_thickness", .field = "default_thickness", .kind = .{ .int = .{ .min = 1, .max = 32 } } },
+    .{ .name = "default_color", .field = "default_color", .kind = .{ .int = .{ .min = 0, .max = 7 } } },
+    .{ .name = "save_dir", .field = "save_dir", .kind = .{ .text = "save_dir_len" } },
+    // tokens from before multi-monitor capture ("screencast_token") restore
+    // a single-monitor selection forever, so they are not read any more
+    .{ .name = "screencast_restore_token", .field = "sc_token", .kind = .{ .text = "sc_token_len" } },
+    // "beautify" (the last capture's frame carried over to the next) is
+    // not read any more: the frame is per capture unless "always"
+    .{ .name = "beautify_always", .field = "beautify_always", .kind = .flag },
+    .{ .name = "beautify_background", .field = "beautify_background", .kind = .{ .int = .{ .min = 0, .max = 255 } } },
+    .{ .name = "beautify_padding", .field = "beautify_padding", .kind = .{ .names = &padding_names } },
+    .{ .name = "beautify_corners", .field = "beautify_corners", .kind = .flag },
+    .{ .name = "beautify_shadow", .field = "beautify_shadow", .kind = .flag },
+    // the first-run hint is a state flag now (stateflag.zig)
+    .{ .name = "hint_shown", .field = "hint_shown", .kind = .flag, .read_only = true },
+    // "quick_access=false" from before still reads as never (parse.zig)
+    .{ .name = "thumbnail", .field = "thumbnail", .kind = .tag },
+    .{ .name = "quick_access_seconds", .field = "quick_access_seconds", .kind = .{ .int = .{ .min = 1, .max = 3600 } } },
+    .{ .name = "history", .field = "history", .kind = .flag },
+    .{ .name = "history_max", .field = "history_max", .kind = .{ .int = .{ .min = 1, .max = 10000 } } },
+    .{ .name = "history_max_mb", .field = "history_max_mb", .kind = .{ .int = .{ .min = 1, .max = 1 << 20 } } },
+    .{ .name = "loupe", .field = "loupe", .kind = .tag },
+    .{ .name = "loupe_zoom", .field = "loupe_zoom", .kind = .{ .nearest = &zoom_choices } },
+};
+
+/// Every fixed key of the file: the core settings, then the modes' and
+/// the recording's sections.
+pub const fixed_keys = core_keys ++ keys.within("modes", &modes.table) ++ keys.within("record", &record.table);
+pub const Fixed = keys.Section(Config, &fixed_keys);
+
+pub const n_fixed_keys = fixed_keys.len;
 /// an editor action's key: this, then the action's name
 pub const bind_prefix = "shortcut_";
 pub const n_keys = n_fixed_keys + n_actions;
 
-const fixed_key_names = [n_fixed_keys][]const u8{
-    "notify",
-    "copy_on_save",
-    "default_thickness",
-    "default_color",
-    "save_dir",
-    // tokens from before multi-monitor capture ("screencast_token") restore
-    // a single-monitor selection forever, so they are not read any more
-    "screencast_restore_token",
-    // "beautify" (the last capture's frame carried over to the next) is
-    // not read any more: the frame is per capture unless "always"
-    "beautify_always",
-    "beautify_background",
-    "beautify_padding",
-    "beautify_corners",
-    "beautify_shadow",
-    "hint_shown",
-    // "quick_access=false" from before still reads as never
-    "thumbnail",
-    "quick_access_seconds",
-    "history",
-    "history_max",
-    "history_max_mb",
-    "loupe",
-    "loupe_zoom",
-};
-
 pub const padding_names = [4][]const u8{ "none", "small", "medium", "large" };
 
 /// Name of key `k` ("notify", ..., "shortcut_pen", ...).
-pub fn keyName(k: usize, buf: []u8) []const u8 {
-    if (k < n_fixed_keys) return fixed_key_names[k];
+pub fn keyName(k: usize) []const u8 {
+    if (k < n_fixed_keys) return Fixed.name(k);
     const names = comptime @typeInfo(Action).@"enum".field_names;
     inline for (names, 0..) |fld_name, i| {
         if (k - n_fixed_keys == i) return bind_prefix ++ fld_name;
     }
-    _ = buf;
     unreachable;
 }
 
-fn boolText(v: bool) []const u8 {
-    return if (v) "true" else "false";
-}
-
-fn intText(buf: []u8, v: anytype) []const u8 {
-    return std.fmt.bufPrint(buf, "{d}", .{v}) catch unreachable;
+/// Whether save() writes key `k` (superseded keys are only read).
+pub fn writable(k: usize) bool {
+    return k >= n_fixed_keys or Fixed.writable(k);
 }
 
 /// Serialized value of key `k` in `cfg`.
 pub fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
-    return switch (k) {
-        0 => boolText(cfg.notify),
-        1 => boolText(cfg.copy_on_save),
-        2 => intText(buf, cfg.default_thickness),
-        3 => intText(buf, cfg.default_color),
-        4 => cfg.saveDir() orelse "",
-        5 => cfg.scToken() orelse "",
-        6 => boolText(cfg.beautify_always),
-        7 => intText(buf, cfg.beautify_background),
-        8 => padding_names[cfg.beautify_padding],
-        9 => boolText(cfg.beautify_corners),
-        10 => boolText(cfg.beautify_shadow),
-        11 => boolText(cfg.hint_shown),
-        12 => @tagName(cfg.thumbnail),
-        13 => intText(buf, cfg.quick_access_seconds),
-        14 => boolText(cfg.history),
-        15 => intText(buf, cfg.history_max),
-        16 => intText(buf, cfg.history_max_mb),
-        loupe_key => @tagName(cfg.loupe),
-        18 => intText(buf, cfg.loupe_zoom),
-        else => formatBind(cfg.binds[k - n_fixed_keys], buf),
-    };
+    if (k < n_fixed_keys) return Fixed.format(cfg, k, buf);
+    return formatBind(cfg.binds[k - n_fixed_keys], buf);
 }
 
 /// "Ctrl+Shift+Z" (app/accel.zig's notation), or "none".
@@ -245,8 +242,12 @@ pub fn rememberBase(cfg: *Config) void {
 }
 
 test "the keys' numbering" {
-    var buf: [32]u8 = undefined;
-    try std.testing.expectEqualStrings("loupe", keyName(loupe_key, &buf));
+    try std.testing.expectEqualStrings("loupe", keyName(Fixed.index("loupe")));
+    try std.testing.expectEqualStrings("record_dir", keyName(Fixed.index("record_dir")));
+    try std.testing.expectEqualStrings("shortcut_pen", keyName(n_fixed_keys + @as(usize, @backingInt(Action.pen))));
+    try std.testing.expect(!writable(Fixed.index("hint_shown")) and writable(Fixed.index("notify")));
+    // every key has its own name
+    for (0..n_keys) |a| for (a + 1..n_keys) |b| try std.testing.expect(!std.mem.eql(u8, keyName(a), keyName(b)));
 }
 
 test "the magnifier's zoom snaps to a level" {

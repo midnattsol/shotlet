@@ -4,9 +4,15 @@
 //! the keys the caller changed are replaced, so two processes (the editor
 //! storing a ScreenCast token, the Settings window) never undo each other.
 //!
-//! Facade over config/: model (the Config struct and its keys), parse
-//! (reading the file), write (merging changes into it), location (the
-//! file's path and the move from cliptux).
+//! One settings model for the one file: Config holds the core settings,
+//! the capture modes (Config.modes) and recording (Config.record); load
+//! reads them all, save writes back what changed.
+//!
+//! Facade over config/: model (the Config struct and its keys), keys (how
+//! a key is read and written: the line and bool parsers, the key tables),
+//! modes and record (those sections), parse (reading the file, older
+//! spellings), write (merging changes into it), location (the file's path
+//! and the move from cliptux).
 
 const std = @import("std");
 const sys = @import("../platform/api.zig").sys;
@@ -15,6 +21,7 @@ const model = @import("config/model.zig");
 const parse = @import("config/parse.zig");
 const write = @import("config/write.zig");
 const location = @import("config/location.zig");
+const keys = @import("config/keys.zig");
 
 // editor actions, their key bindings and key names (binds.zig)
 const binds = @import("binds.zig");
@@ -27,12 +34,14 @@ pub const bindName = binds.bindName;
 pub const Config = model.Config;
 pub const Thumbnail = model.Thumbnail;
 pub const Loupe = model.Loupe;
+pub const After = model.After;
+pub const Modes = model.Modes;
+pub const Record = model.Record;
 pub const loupe_zooms = model.loupe_zooms;
 pub const loupe_zoom_default = model.loupe_zoom_default;
 pub const n_keys = model.n_keys;
 pub const padding_names = model.padding_names;
-pub const parseLine = parse.parseLine;
-pub const Change = write.Change;
+pub const parseBool = keys.parseBool;
 
 const configFile = location.configFile;
 const migrateFrom = location.migrateFrom;
@@ -43,13 +52,18 @@ comptime {
     _ = parse;
     _ = write;
     _ = location;
+    _ = keys;
     _ = @import("config/legacy_keys.zig");
+    _ = @import("config/tests.zig");
 }
 
 // --- load ---
 
+/// The whole configuration: every section (core, modes, record) with its
+/// defaults for what the file does not set. The one way to read the file:
+/// a configuration left by cliptux is carried over first.
 pub fn load(alloc: std.mem.Allocator, home: []const u8) Config {
-    var dir_buf: [1024]u8 = undefined;
+    var dir_buf: env.PathBuf = undefined;
     const dir = env.configDir(&dir_buf, home) catch return .{};
     location.migrateLegacy(home, dir);
     return loadDir(alloc, dir);
@@ -57,7 +71,9 @@ pub fn load(alloc: std.mem.Allocator, home: []const u8) Config {
 
 fn loadDir(alloc: std.mem.Allocator, dir: []const u8) Config {
     var cfg = Config{};
-    const migrated = parse.readInto(alloc, dir, &cfg);
+    var path_buf: env.PathBuf = undefined;
+    const path = configFile(dir, &path_buf) catch return cfg;
+    const migrated = parse.readInto(alloc, path, &cfg);
     // missing keys get their defaults as baseline: unchanged, never written
     model.rememberBase(&cfg);
     // values read from an older file's spelling are written anew at the
@@ -72,40 +88,42 @@ fn loadDir(alloc: std.mem.Allocator, dir: []const u8) Config {
 
 /// Persist the keys of `cfg` that changed since it was loaded (or saved),
 /// merged into the current file: keys changed meanwhile by another process
-/// are kept. A Config that was never loaded writes every key.
+/// are kept. A Config that was never loaded writes every key. This is the
+/// one way settings are written: load, change fields, save.
 pub fn save(alloc: std.mem.Allocator, home: []const u8, cfg: *Config) !void {
-    var dir_buf: [1024]u8 = undefined;
+    var dir_buf: env.PathBuf = undefined;
     const dir = try env.configDir(&dir_buf, home);
     try saveDir(alloc, dir, cfg);
 }
 
+/// Take `cfg`'s current values as the baseline: a save afterwards writes
+/// only what changes from here on (and no key changed in memory before).
+pub fn rebase(cfg: *Config) void {
+    model.rememberBase(cfg);
+}
+
 fn saveDir(alloc: std.mem.Allocator, dir: []const u8, cfg: *Config) !void {
     const fresh = std.mem.allEqual(u64, &cfg.base, 0);
-    var changes: [n_keys]Change = undefined;
+    var changes: [n_keys]write.Change = undefined;
     var vbufs: [n_keys][64]u8 = undefined;
-    var kbufs: [n_keys][32]u8 = undefined;
     var n: usize = 0;
     for (0..n_keys) |k| {
+        if (!model.writable(k)) continue;
         const v = model.formatValue(cfg, k, &vbufs[k]);
         if (!fresh and model.valueHash(v) == cfg.base[k]) continue;
-        changes[n] = .{ .key = model.keyName(k, &kbufs[k]), .value = v };
+        changes[n] = .{ .key = model.keyName(k), .value = v };
         n += 1;
     }
     if (n > 0) try updateDir(alloc, dir, changes[0..n]);
     model.rememberBase(cfg);
 }
 
-/// Set the given keys in the config file, leaving every other line as it
-/// is. Values must be single-line; CR/LF are dropped.
-pub fn update(alloc: std.mem.Allocator, home: []const u8, changes: []const Change) !void {
-    var dir_buf: [1024]u8 = undefined;
-    const dir = try env.configDir(&dir_buf, home);
-    try updateDir(alloc, dir, changes);
-}
-
-/// Persist a new ScreenCast restore token without touching other settings.
+/// Persist a new ScreenCast restore token without touching other settings
+/// (the capture that got it holds no Config to save).
 pub fn saveScreencastToken(alloc: std.mem.Allocator, home: []const u8, token: []const u8) !void {
-    try update(alloc, home, &.{.{ .key = "screencast_restore_token", .value = token }});
+    var dir_buf: env.PathBuf = undefined;
+    const dir = try env.configDir(&dir_buf, home);
+    try updateDir(alloc, dir, &.{.{ .key = "screencast_restore_token", .value = token }});
 }
 
 fn testDir() ![]u8 {
