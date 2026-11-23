@@ -70,7 +70,8 @@ pub fn step(ed: *Editor) !bool {
         .first => try firstFrames(ed),
         .preparing => try waitPrepared(ed),
     }
-    return o.phase != .ready;
+    // (Escape on the shell's frozen frame closes it before any frame)
+    return o.phase != .ready or !ed.running;
 }
 
 /// The editor drew a full frame on every surface: the opening's last
