@@ -1,6 +1,9 @@
 # Headless wlroots (sway, labwc) and KDE (KWin) sessions for Shotlet's
 # container e2e suite (tools/container/run.sh). Nothing here talks to the
-# host's display: every session is started inside the container.
+# host's display: every session is started inside the container. The
+# image holds no Shotlet code: run.sh mounts the binaries, tools/container
+# (/opt/shotlet/ctr) and the shared helpers, tools/e2e-common
+# (/opt/shotlet/common), into each run.
 FROM debian:trixie
 
 ARG DEBIAN_FRONTEND=noninteractive
