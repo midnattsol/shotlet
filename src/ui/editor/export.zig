@@ -6,8 +6,8 @@ const editor = @import("../editor.zig");
 const png = @import("../../gfx/png.zig");
 const sys = @import("../../platform/api.zig").sys;
 const doc_mod = @import("../doc.zig");
+const deliver = @import("../../app/deliver.zig");
 const tools = @import("../tools/mod.zig");
-const session = @import("session.zig");
 const history = @import("history.zig");
 const commands = @import("commands.zig");
 
@@ -21,10 +21,7 @@ fn exportPixels(ed: *Editor) !doc_mod.Exported {
 pub fn exportPng(ed: *Editor) ![]u8 {
     const exported = try exportPixels(ed);
     defer ed.alloc.free(exported.pixels);
-    // RGBA only for a transparent beautify background; everything else
-    // stays RGB as before
-    const see_through = ed.beautify.enabled and ed.beautify.background().transparent();
-    return png.encodeWith(ed.alloc, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through or ed.keep_alpha) .auto else .never });
+    return deliver.encodePng(ed.alloc, exported, ed.beautify, ed.keep_alpha);
 }
 
 pub fn copyToClipboard(ed: *Editor) !void {
@@ -32,18 +29,12 @@ pub fn copyToClipboard(ed: *Editor) !void {
     ed.win.setClipboardImage(exported.pixels, exported.width, exported.height) catch |err| {
         ed.alloc.free(exported.pixels);
         std.log.warn("copy failed: {t}", .{err});
-        showCopyNotice(ed, .failed, 2400);
+        ed.tools.toast.show(.problem, "Copy failed", 2400);
+        ed.needs_render = true;
         return;
     };
     // like Flameshot, GNOME and CleanShot's overlay: copying finishes
     commands.finish(ed, .copied);
-}
-
-/// Show `notice` for `duration_ms`.
-fn showCopyNotice(ed: *Editor, notice: editor.CopyNotice, duration_ms: i64) void {
-    ed.copy_notice = notice;
-    ed.copy_notice_hide_at_ms = session.nowMs() + duration_ms;
-    ed.needs_render = true;
 }
 
 // --- dev hooks: frame dumps ---
@@ -69,12 +60,12 @@ pub fn dumpFrame(ed: *Editor, path: []const u8) void {
     if (ed.pn().last_frame.len == 0) return;
     const data = png.encode(ed.alloc, ed.pn().last_frame, ed.pn().width, ed.pn().height) catch return;
     defer ed.alloc.free(data);
-    sys.writeFile(path, data) catch |e| std.log.warn("dump {s}: {t}", .{ path, e });
+    sys.writeAtomic(path, data, 0o600) catch |e| std.log.warn("dump {s}: {t}", .{ path, e });
 }
 
 /// The export as a PNG at `path`.
 pub fn dumpExport(ed: *Editor, path: []const u8) void {
     const data = exportPng(ed) catch return;
     defer ed.alloc.free(data);
-    sys.writeFile(path, data) catch |e| std.log.warn("dump {s}: {t}", .{ path, e });
+    sys.writeAtomic(path, data, 0o600) catch |e| std.log.warn("dump {s}: {t}", .{ path, e });
 }

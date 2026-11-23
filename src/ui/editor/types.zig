@@ -35,10 +35,6 @@ pub const Action = enum {
     }
 };
 
-/// A failed copy says so; a copy that worked closes the editor (the
-/// thumbnail, or nothing, is its feedback).
-pub const CopyNotice = enum { none, failed };
-
 pub const Result = struct {
     action: Action,
     /// encoded PNG of the selected region; null when action == .cancel

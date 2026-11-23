@@ -7,7 +7,7 @@ const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const config = @import("../app/config.zig");
 const keep = @import("../app/keep.zig");
-const shot = @import("../app/shot.zig");
+const filename = @import("../app/filename.zig");
 const sys = @import("../platform/api.zig").sys;
 const ffmpeg = @import("../encode/ffmpeg_proc.zig");
 const proc = @import("../platform/api.zig").proc;
@@ -117,10 +117,8 @@ fn outputPath(gpa: std.mem.Allocator, env: Env, set: *const settings_mod.Setting
     const dir = try settings_mod.outputDir(gpa, set, env.home, &dir_buf);
     sys.mkdirAll(dir, 0o755);
     var name_buf: [64]u8 = undefined;
-    const base = try shot.baseName(gpa, env, &name_buf);
+    const base = try filename.baseNameNow(gpa, env, &name_buf);
     const ext: []const u8 = if (set.format == .gif) ".gif" else ".mp4";
     // reserve the name (the encoder then writes over the empty file)
-    const p = try shot.writeUnique(gpa, dir, base, ext, "");
-    defer gpa.free(p);
-    return gpa.dupeSentinel(u8, p, 0);
+    return filename.reserveUnique(gpa, dir, base, ext);
 }

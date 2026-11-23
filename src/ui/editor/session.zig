@@ -32,7 +32,6 @@ pub fn run(ed: *Editor) !editor.Result {
             ed.action = .cancel;
             break;
         }
-        hideCopyNoticeWhenDue(ed, now);
         const scripted = script.pending(ed);
         pollBus(ed);
         try pumpEvents(ed, waitMs(ed, now, scripted));
@@ -47,13 +46,6 @@ pub fn run(ed: *Editor) !editor.Result {
     if (switches.get().editor_dump) |prefix| exporter.dumpAtExit(ed, prefix);
     if (!ed.action.exports()) return .{ .action = ed.action };
     return .{ .action = ed.action, .png_data = try exporter.exportPng(ed) };
-}
-
-fn hideCopyNoticeWhenDue(ed: *Editor, now: i64) void {
-    if (ed.copy_notice_hide_at_ms == 0 or now < ed.copy_notice_hide_at_ms) return;
-    ed.copy_notice = .none;
-    ed.copy_notice_hide_at_ms = 0;
-    ed.needs_render = true;
 }
 
 /// How long to wait for input: transitions draw a frame per refresh, a

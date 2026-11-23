@@ -1,6 +1,6 @@
 //! Capture-and-edit flow: acquisition (the shell integration, else the
 //! platform's capture seam: api.capture.screens), then copy/save/save-as
-//! handling around the editor (files in shot/save.zig).
+//! handling around the editor (saving in deliver.zig).
 
 const std = @import("std");
 const platform = @import("../platform/api.zig");
@@ -17,7 +17,7 @@ const annot = @import("annot.zig");
 const modes = @import("modes/mode.zig");
 const mode_flow = @import("modes/flow.zig");
 const last_area = @import("modes/last_area.zig");
-const save = @import("shot/save.zig");
+const deliver = @import("deliver.zig");
 const handoff = @import("shot/handoff.zig");
 const next = @import("shot/next.zig");
 const window = @import("../platform/api.zig").window;
@@ -26,13 +26,9 @@ const open_tool = @import("../ui/tools/open.zig");
 const launch = @import("../ui/tools/launch.zig");
 const Env = env_mod.Env;
 
-pub const baseName = save.baseName;
-pub const savePng = save.savePng;
-pub const writeUnique = save.writeUnique;
-pub const saveAs = save.saveAs;
-
 comptime {
-    _ = save;
+    _ = deliver;
+    _ = @import("filename.zig");
 }
 
 fn warmupCapture() void {
@@ -289,25 +285,13 @@ const Finish = struct {
         if (f.win.hasClipboard()) try f.win.serveClipboard();
     }
 
-    /// Save (`quick`: to the screenshots folder) or Save As. False when
-    /// the file chooser was cancelled or writing failed (the editor says
-    /// why). Save writes before the editor closes, so a failure keeps it.
+    /// Save (`quick`: to the screenshots folder) or Save As, then copy
+    /// and notify as deliver.zig says. False when the file chooser was
+    /// cancelled or writing failed (the editor says why). Save writes
+    /// before the editor closes, so a failure keeps it.
     fn saved(f: Finish, quick: bool, data: []const u8) !bool {
-        const gpa = f.gpa;
-        if (f.cfg.copy_on_save) {
-            const copy = try gpa.dupe(u8, data);
-            f.win.setClipboardPng(copy) catch |err| {
-                gpa.free(copy);
-                std.log.warn("copy-on-save failed: {t}", .{err});
-            };
-        }
         const path = f.write(quick, data) orelse return false;
-        defer gpa.free(path);
-        // the thumbnail says it already
-        if (f.cfg.notify and !f.cfg.showsThumbnail(true)) {
-            var buf: [512]u8 = undefined;
-            desktop.notify(gpa, f.conn, "Shotlet", std.fmt.bufPrint(&buf, "Saved to {s}", .{path}) catch "Saved");
-        }
+        defer f.gpa.free(path);
         f.close(data, path);
         if (f.win.hasClipboard()) try f.win.serveClipboard();
         return true;
@@ -316,18 +300,23 @@ const Finish = struct {
     /// The file written (owned); null when the chooser was cancelled or
     /// writing failed, which the editor (still open) shows.
     fn write(f: Finish, quick: bool, data: []const u8) ?[]u8 {
-        return f.writeFile(quick, data) catch |err| {
+        const c: deliver.Ctx = .{
+            .gpa = f.gpa,
+            .env = f.env,
+            .cfg = f.cfg,
+            .bus = f.conn,
+            .win = f.win,
+            .over = f.win,
+            .thumbnail_shows = f.cfg.showsThumbnail(true),
+            .who = "editor",
+        };
+        return deliver.savePng(c, data, if (quick) .folder else .ask) catch |err| {
             std.log.warn("could not save: {t}", .{err});
             var buf: [160]u8 = undefined;
-            f.ed.tools.toast.show(.problem, save.failureText(&buf, err), 6000);
+            f.ed.tools.toast.show(.problem, deliver.failureText(&buf, err), 6000);
             f.ed.needs_render = true;
             return null;
         };
-    }
-
-    fn writeFile(f: Finish, quick: bool, data: []const u8) !?[]u8 {
-        if (quick) return try savePng(f.gpa, f.env, f.cfg, data);
-        return save.saveAs(f.gpa, f.env, f.conn, f.cfg, data, f.win);
     }
 
     /// The editor fades out and closes; `data` (what was copied or

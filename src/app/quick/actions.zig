@@ -7,9 +7,8 @@ const transfer = @import("../../ui/transfer.zig");
 const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
-const keep = @import("../keep.zig");
-const clock = @import("../clock.zig");
-const shot = @import("../shot.zig");
+const deliver = @import("../deliver.zig");
+const filename = @import("../filename.zig");
 const shell = @import("../../platform/api.zig").shell;
 const sys = @import("../../platform/api.zig").sys;
 const fui = @import("../../ui/floatui.zig");
@@ -43,35 +42,35 @@ pub fn imagePath(self: *Quick, i: usize, buf: []u8) ![]u8 {
     return history.entryPath(buf, c.kept.root(), c.kept.id.slice(), "image.png");
 }
 
+/// Card i's capture, for deliver.zig.
+fn entry(self: *Quick, i: usize) deliver.Entry {
+    const c = &self.cards.items[i];
+    return .{ .root = c.kept.root(), .id = c.kept.id.slice(), .meta = &c.meta };
+}
+
+/// Saving from a card is saving from the editor; the card itself says
+/// "Saved" (no notification).
+fn ctx(self: *Quick) deliver.Ctx {
+    return .{ .gpa = self.gpa, .env = self.env, .cfg = &self.cfg, .bus = self.bus_(), .win = &self.win, .thumbnail_shows = true, .who = "quick access" };
+}
+
 fn actInner(self: *Quick, i: usize, a: Action) !void {
     const c = &self.cards.items[i];
     c.menu = false;
     self.dirty = true;
-    var pbuf: [1200]u8 = undefined;
     switch (a) {
         .copy => {
-            const data = try sys.readFileAlloc(self.gpa, try imagePath(self, i, &pbuf), 512 * 1024 * 1024);
-            self.win.setClipboardPng(data) catch |err| {
-                self.gpa.free(data);
-                return err;
-            };
-            std.log.info("quick access: copied {s}", .{c.kept.id.slice()});
+            try entry(self, i).copy(ctx(self));
             notice(self, i, "Copied");
         },
-        .save, .save_as => try save(self, i, a == .save_as),
+        .save, .save_as => if (try entry(self, i).save(ctx(self), if (a == .save_as) .ask else .folder)) notice(self, i, "Saved"),
         .annotate => {
             if (!c.editable) return;
-            const root = try self.gpa.dupeSentinel(u8, c.kept.root(), 0);
-            defer self.gpa.free(root);
-            const id = try self.gpa.dupeSentinel(u8, c.kept.id.slice(), 0);
-            defer self.gpa.free(id);
-            keep.spawnSelf(self.env, &.{ "edit", root.ptr, id.ptr });
+            try entry(self, i).edit(self.gpa, self.env);
             self.remove(i);
         },
         .pin => {
-            const p = try self.gpa.dupeSentinel(u8, try imagePath(self, i, &pbuf), 0);
-            defer self.gpa.free(p);
-            keep.spawnPin(self.env, p, c.meta.at);
+            try entry(self, i).pin(self.gpa, self.env);
             self.remove(i);
         },
         .show_in_files => {
@@ -85,29 +84,6 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
             c.life.leave(sys.monoMs());
         },
     }
-}
-
-/// Save card i (to the save folder, or where the chooser says) and
-/// remember where in its meta.
-fn save(self: *Quick, i: usize, ask: bool) !void {
-    var pbuf: [1200]u8 = undefined;
-    const data = try sys.readFileAlloc(self.gpa, try imagePath(self, i, &pbuf), 512 * 1024 * 1024);
-    defer self.gpa.free(data);
-    const saved: ?[]u8 = if (!ask)
-        try shot.savePng(self.gpa, self.env, &self.cfg, data)
-    else blk: {
-        const b = self.bus_() orelse return error.NoBus;
-        break :blk try shot.saveAs(self.gpa, self.env, b, &self.cfg, data, null);
-    };
-    const path = saved orelse return; // chooser cancelled
-    defer self.gpa.free(path);
-    const card = &self.cards.items[i];
-    self.gpa.free(card.meta.saved);
-    card.meta.saved = &.{};
-    card.meta.saved = try self.gpa.dupe(u8, path);
-    history.writeMeta(self.gpa, card.kept.root(), card.kept.id.slice(), &card.meta) catch {};
-    std.log.info("quick access: saved to {s}", .{path});
-    notice(self, i, "Saved");
 }
 
 /// What control `c` of card i does.
@@ -151,8 +127,7 @@ fn enableGnome(self: *Quick) void {
 
 pub fn startDrag(self: *Quick, i: usize) !void {
     const c = &self.cards.items[i];
-    var pbuf: [1200]u8 = undefined;
-    const data = try sys.readFileAlloc(self.gpa, try imagePath(self, i, &pbuf), 512 * 1024 * 1024);
+    const data = try history.readFile(self.gpa, c.kept.root(), c.kept.id.slice(), .image);
     errdefer self.gpa.free(data);
     var file_buf: [1200]u8 = undefined;
     const file = try dragFile(self, c, data, &file_buf);
@@ -170,7 +145,8 @@ pub fn startDrag(self: *Quick, i: usize) !void {
 }
 
 /// A file for apps that take paths: the saved one, else a copy with a
-/// readable name in the cache.
+/// readable name in the cache (a capture taken in the same second gets
+/// its own copy; dragging the same one again reuses it).
 fn dragFile(self: *Quick, c: *const stack.Card, data: []const u8, file_buf: []u8) ![]const u8 {
     if (c.meta.saved.len > 0 and (sys.fileSize(c.meta.saved) catch null) != null) return c.meta.saved;
     var dir_buf: [1024]u8 = undefined;
@@ -178,10 +154,13 @@ fn dragFile(self: *Quick, c: *const stack.Card, data: []const u8, file_buf: []u8
     var drag_dir_buf: [1100]u8 = undefined;
     const drag_dir = try std.fmt.bufPrint(&drag_dir_buf, "{s}/drag", .{cache});
     sys.mkdirAll(drag_dir, 0o700);
-    const lt = clock.localTime(self.gpa, self.env.tz, @divFloor(c.meta.time_ms, 1000));
-    const p = try std.fmt.bufPrint(file_buf, "{s}/shotlet-{d:0>4}{d:0>2}{d:0>2}-{d:0>2}{d:0>2}{d:0>2}.png", .{ drag_dir, lt.year, lt.month, lt.day, lt.hour, lt.minute, lt.second });
-    try sys.writeFile(p, data);
-    return p;
+    var name_buf: [64]u8 = undefined;
+    const base = try filename.baseName(self.gpa, self.env, @divFloor(c.meta.time_ms, 1000), &name_buf);
+    const p = try filename.writeOrReuse(self.gpa, drag_dir, base, ".png", data);
+    defer self.gpa.free(p);
+    if (p.len > file_buf.len) return error.NameTooLong;
+    @memcpy(file_buf[0..p.len], p);
+    return file_buf[0..p.len];
 }
 
 /// A finished drag removes the card; a cancelled one keeps it.
