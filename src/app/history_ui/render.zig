@@ -33,8 +33,12 @@ const s = scale.px;
 const ff = scale.ff;
 
 pub fn render(self: *Panel) !void {
+    // the captures' ages ("2 minutes ago") move on by the minute
+    const minute = @divTrunc(sys.realtimeSec(), 60);
+    if (minute != self.drawn_minute) self.dirty = true;
     if (!self.dirty or !floatwin.canDraw(&self.win)) return;
     self.dirty = false;
+    self.drawn_minute = minute;
     const kk = self.k();
     const px = try self.win.backBuffer();
     const bw = self.win.width;

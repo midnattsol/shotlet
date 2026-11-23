@@ -57,6 +57,10 @@ const Quick = struct {
     /// "Copied", "Saved" over the card for a moment
     notice: Notice = .{},
     play_from: i64 = 0,
+    /// the strip picture shown last (a new one is a new frame)
+    shown_pic: ?u32 = null,
+    /// fading at the last tick (one more frame shows the end)
+    fading: bool = false,
     dirty: bool = true,
     drag: fui.DragOut = .{},
     done: bool = false,
@@ -81,12 +85,17 @@ const Quick = struct {
 
     /// The picture to show now: a strip picture while hovered.
     fn picture(self: *const Quick, now: i64) struct { px: []const u32, w: u32, h: u32 } {
-        if (self.hover != null and self.strip_n > 1) if (self.strip) |s| {
+        if (self.stripAt(now)) |i| if (self.strip) |s| {
             const pw = s.width / self.strip_n;
-            const i: u32 = @intCast(@mod(@divTrunc(now - self.play_from, frame_ms), self.strip_n));
             return .{ .px = stripPic(s, pw, i, &pic_buf), .w = pw, .h = s.height };
         };
         return .{ .px = self.thumb.pixels, .w = self.thumb.width, .h = self.thumb.height };
+    }
+
+    /// The strip picture playing at `now` (hovered), else null.
+    fn stripAt(self: *const Quick, now: i64) ?u32 {
+        if (self.hover == null or self.strip_n <= 1 or self.strip == null) return null;
+        return @intCast(@mod(@divTrunc(now - self.play_from, frame_ms), self.strip_n));
     }
 
     var pic_buf: [strip_max_px]u32 = undefined;
@@ -103,9 +112,12 @@ const Quick = struct {
 
     fn render(self: *Quick) !void {
         const now = sys.monoMs();
-        if (self.hover != null and self.strip_n > 1) self.dirty = true;
+        // the strip plays while hovered: a frame when its picture changes
+        const at = self.stripAt(now);
+        if (!std.meta.eql(at, self.shown_pic)) self.dirty = true;
         if (!self.dirty or !floatwin.canDraw(&self.win)) return;
         self.dirty = false;
+        self.shown_pic = at;
         const px = try self.win.backBuffer();
         @memset(px, 0);
         const pic = self.picture(now);
@@ -136,7 +148,8 @@ const Quick = struct {
 
     fn onEvent(self: *Quick, ev: window.InputEvent) void {
         switch (ev) {
-            .resize, .frame_done => self.dirty = true,
+            // (not on frame_done: a frame only when something changed)
+            .resize => self.dirty = true,
             .close => self.done = true,
             .pointer_motion => |m| {
                 if (self.layer) self.win.setLayerKeyboard(0, if (self.win.pointer_in) .on_demand else .none) catch {};
@@ -272,7 +285,10 @@ const Quick = struct {
             self.end_at = 0;
             self.life.leave(now);
         }
-        if (self.life.busy(now)) self.dirty = true;
+        // a frame per refresh while fading, and one at its end
+        const fading = self.life.busy(now);
+        if (fading or self.fading) self.dirty = true;
+        self.fading = fading;
         if (self.life.gone(now)) self.done = true;
         if (self.notice.expire(now)) self.dirty = true;
     }

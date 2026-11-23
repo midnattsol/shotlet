@@ -42,6 +42,8 @@ const Trim = struct {
     pic_buf: []u32 = &.{},
     done: bool = false,
     frame: frame_mod.Frame = .{},
+    /// the preview and the strip as last resampled
+    cache: draw.Cache = .{},
     /// the button pressed (it acts when released over it)
     pressed: press.Press(draw.Part) = .{},
     /// a press on no control: dragging from there moves the window,
@@ -64,6 +66,7 @@ const Trim = struct {
         }
         for (0..s.height) |y| @memcpy(self.pic_buf[y * pw ..][0..pw], s.pixels[y * s.width + best * pw ..][0..pw]);
         self.st.pic = self.pic_buf;
+        self.st.pic_index = best;
         self.st.pic_w = pw;
         self.st.pic_h = s.height;
     }
@@ -212,6 +215,7 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
     var t: Trim = .{ .gpa = gpa, .env = env, .root = root, .id = id, .info = info, .strip = null, .st = .{ .duration_ms = info.duration_ms, .start_ms = range.start_ms, .end_ms = range.end_ms, .pos_ms = range.start_ms, .th = th } };
     defer gpa.free(t.pic_buf);
     defer t.frame.deinit(gpa);
+    defer t.cache.deinit(gpa);
     var pbuf: [1200]u8 = undefined;
     if (sys.readFileAlloc(gpa, try history.entryPath(&pbuf, root, id, "strip.png"), 64 * 1024 * 1024)) |data| {
         defer gpa.free(data);
@@ -238,11 +242,17 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
     log.info("{s} ({d} ms)", .{ info.path, info.duration_ms });
     var dirty = true;
     while (!t.done) {
+        // a frame when something changed (not on frame_done: that would
+        // draw for ever), every 30 ms while playing
         if (try win.nextEventTimeout(win.pollTimeoutMs(if (t.st.playing) 30 else 200))) |ev| {
             try onEvent(&t, &win, ev);
-            dirty = true;
+            if (ev != .frame_done) dirty = true;
         }
-        while (win.queue.items.len > 0) try onEvent(&t, &win, try win.nextEvent());
+        while (win.queue.items.len > 0) {
+            const ev = try win.nextEvent();
+            try onEvent(&t, &win, ev);
+            if (ev != .frame_done) dirty = true;
+        }
         t.tick();
         if (dirty or t.st.playing) dirty = !try paint(&t, &win);
     }
@@ -296,7 +306,7 @@ fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
 fn paint(t: *Trim, win: *window.Window) !bool {
     if (win.frame_pending or win.width == 0) return false;
     var cv = try t.frame.begin(t.gpa, win);
-    draw.paint(t.gpa, &cv, scale.of(win.scale120), &t.st);
+    draw.paint(t.gpa, &cv, scale.of(win.scale120), &t.st, &t.cache);
     try t.frame.present(win, draw.edge(t.st.th));
     return true;
 }

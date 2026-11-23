@@ -15,7 +15,9 @@ const Control = layout.Control;
 
 pub fn onEvent(self: *Quick, ev: window.InputEvent) void {
     switch (ev) {
-        .resize, .frame_done => self.dirty = true,
+        // (not on frame_done: a frame only when something changed; the
+        // fades ask for theirs in tick)
+        .resize => self.dirty = true,
         .close => {
             const now = sys.monoMs();
             for (self.cards.items) |*c| c.life.leave(now);
@@ -28,7 +30,7 @@ pub fn onEvent(self: *Quick, ev: window.InputEvent) void {
             onButton(self, b.button, b.pressed, b.x, b.y);
             self.win.setCursor(cursorOf(self)) catch {};
         },
-        .pointer_axis => {},
+        .pointer_axis, .frame_done => {},
         .key => |k| if (k.pressed) {
             // a layer surface has the keyboard only while the pointer
             // is over it, but KWin keeps it focused after that: keys
@@ -136,7 +138,10 @@ pub fn tick(self: *Quick) void {
         if (!c.ending and (c.menu or (keep_alive and c.life.leaving == 0))) c.deadline_ms = @max(c.deadline_ms, now + 2000);
         if (now >= c.deadline_ms) c.life.leave(now);
         if (c.notice.expire(now)) self.dirty = true;
-        if (fading(c, now)) self.dirty = true;
+        // a frame per refresh while fading, and one at its end
+        const f = fading(c, now);
+        if (f or c.fading) self.dirty = true;
+        c.fading = f;
         if (c.life.gone(now)) {
             self.remove(i);
             continue;

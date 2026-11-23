@@ -52,6 +52,8 @@ pub const Card = struct {
     notice: Notice = .{},
     /// saved: it goes once "Saved" has shown, pointer or not
     ending: bool = false,
+    /// it was fading at the last tick (one more frame shows the end)
+    fading: bool = false,
 
     fn deinit(self: *Card, gpa: std.mem.Allocator) void {
         self.meta.deinit(gpa);

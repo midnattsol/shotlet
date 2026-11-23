@@ -88,6 +88,7 @@ pub fn pollOcr(self: *Panel) void {
     if (self.ocr_state.done.items.len == 0) return;
     for (self.ocr_state.done.items) |id| reloadMeta(self, id);
     self.ocr_state.done.clearRetainingCapacity();
+    self.dirty = true;
     if (self.search.items.len > 0) self.filter();
 }
 

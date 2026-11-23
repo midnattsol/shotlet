@@ -63,7 +63,9 @@ fn onMotion(self: *Panel, bx: f64, by: f64) void {
 pub fn onEvent(self: *Panel, ev: window.InputEvent) !bool {
     switch (ev) {
         .close => return false,
-        .resize, .frame_done => self.dirty = true,
+        // (not on frame_done: a frame only when something changed)
+        .resize => self.dirty = true,
+        .frame_done => {},
         .pointer_motion => |m| onMotion(self, m.x, m.y),
         .pointer_button => |b| {
             onMotion(self, b.x, b.y);

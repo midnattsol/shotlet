@@ -61,6 +61,8 @@ pub const Panel = struct {
     /// "Copied", "Saved" over the panel for a moment
     notice: Notice = .{},
     dirty: bool = true,
+    /// the minute the panel was drawn in (its relative times)
+    drawn_minute: i64 = 0,
     ocr_state: ocr_scan.Ocr = .{},
     /// the desktop's appearance (Opaque.of it for the panel's colours)
     th: theme.Theme = theme.of(.{}),

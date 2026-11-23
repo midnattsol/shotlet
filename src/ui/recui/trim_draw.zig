@@ -45,6 +45,8 @@ pub const State = struct {
     pic: []const u32 = &.{},
     pic_w: u32 = 0,
     pic_h: u32 = 0,
+    /// which strip picture `pic` is (a new one is resampled anew)
+    pic_index: usize = 0,
     strip_px: []const u32 = &.{},
     strip_w: u32 = 0,
     strip_h: u32 = 0,
@@ -90,11 +92,41 @@ pub fn edge(th: theme.Theme) u32 {
     return th.hairline;
 }
 
-pub fn paint(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const State) void {
+/// The preview and the strip at the window's size, resampled when the
+/// picture or the size changes, not every frame (dragging a handle or
+/// playing redraws them a lot).
+pub const Cache = struct {
+    preview: Block = .{},
+    strip: Block = .{},
+
+    const Block = struct {
+        px: []u32 = &.{},
+        key: [4]usize = @splat(0),
+
+        /// The block for `key`, null when it must be made anew (then
+        /// `px` is w x h, to fill).
+        fn get(b: *Block, gpa: std.mem.Allocator, key: [4]usize, w: u32, h: u32) !?[]const u32 {
+            if (b.px.len > 0 and std.mem.eql(usize, &b.key, &key)) return b.px;
+            gpa.free(b.px);
+            b.px = &.{};
+            b.px = try gpa.alloc(u32, @as(usize, w) * h);
+            b.key = key;
+            return null;
+        }
+    };
+
+    pub fn deinit(self: *Cache, gpa: std.mem.Allocator) void {
+        gpa.free(self.preview.px);
+        gpa.free(self.strip.px);
+        self.* = .{};
+    }
+};
+
+pub fn paint(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const State, cache: *Cache) void {
     const o = theme.Opaque.of(st.th);
     @memset(cv.px, o.panel);
-    paintPreview(gpa, cv, k, st);
-    paintStrip(gpa, cv, k, st, o);
+    paintPreview(gpa, cv, k, st, &cache.preview);
+    paintStrip(gpa, cv, k, st, o, &cache.strip);
     paintRow(cv, k, st, o);
 }
 
@@ -105,27 +137,29 @@ fn blit(cv: *render.Canvas, r: Rect, buf: []const u32, w: u32, h: u32) void {
 }
 
 /// The picture at the playhead, letterboxed (never cropped) on black.
-fn paintPreview(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const State) void {
+fn paintPreview(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const State, b: *Cache.Block) void {
     const r = scale.rect(preview, k);
     if (st.pic_w == 0) return;
     const w: u32 = @intCast(r.w);
     const h: u32 = @intCast(r.h);
-    const buf = gpa.alloc(u32, @as(usize, w) * h) catch return;
-    defer gpa.free(buf);
-    fui.drawImage(gpa, .{ .px = buf, .w = w, .h = h }, .{ .px = st.pic, .w = st.pic_w, .h = st.pic_h }, .contain, 0xFF000000);
-    for (buf) |*p| p.* |= 0xFF000000;
-    blit(cv, r, buf, w, h);
+    const made = (b.get(gpa, .{ st.pic_index, @intFromPtr(st.pic.ptr), w, h }, w, h) catch return) orelse blk: {
+        fui.drawImage(gpa, .{ .px = b.px, .w = w, .h = h }, .{ .px = st.pic, .w = st.pic_w, .h = st.pic_h }, .contain, 0xFF000000);
+        for (b.px) |*p| p.* |= 0xFF000000;
+        break :blk b.px;
+    };
+    blit(cv, r, made, w, h);
 }
 
-fn paintStrip(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const State, o: theme.Opaque) void {
+fn paintStrip(gpa: std.mem.Allocator, cv: *render.Canvas, k: f64, st: *const State, o: theme.Opaque, b: *Cache.Block) void {
     const r = scale.rect(strip, k);
     const w: u32 = @intCast(r.w);
     const h: u32 = @intCast(r.h);
     if (st.strip_w > 0) {
-        const buf = gpa.alloc(u32, @as(usize, w) * h) catch return;
-        defer gpa.free(buf);
-        resample.box(st.strip_px, st.strip_w, st.strip_w, st.strip_h, buf, w, h);
-        blit(cv, r, buf, w, h);
+        const made = (b.get(gpa, .{ @intFromPtr(st.strip_px.ptr), st.strip_w, w, h }, w, h) catch return) orelse blk: {
+            resample.box(st.strip_px, st.strip_w, st.strip_w, st.strip_h, b.px, w, h);
+            break :blk b.px;
+        };
+        blit(cv, r, made, w, h);
     } else cv.fillRect(r.x, r.y, r.w, r.h, o.field);
     const sx = px(xOf(st.start_ms, st.duration_ms), k);
     const ex = px(xOf(st.end_ms, st.duration_ms), k);
@@ -200,8 +234,38 @@ test "Save is drawn in the accent" {
     defer gpa.free(buf);
     var cv = render.Canvas.init(buf, width, height);
     const st: State = .{ .duration_ms = 4000, .start_ms = 0, .end_ms = 4000, .pos_ms = 0, .th = th };
-    paint(gpa, &cv, 1, &st);
+    var cache: Cache = .{};
+    defer cache.deinit(gpa);
+    paint(gpa, &cv, 1, &st, &cache);
     const r = partRect(.save);
     try std.testing.expectEqual(th.accent_fill, buf[@intCast((r.y + 3) * width + r.x + 8)]);
     try std.testing.expectEqual(theme.Opaque.of(th).panel, buf[2 * width + 2]);
+}
+
+test "the preview and the strip are resampled once, not every frame" {
+    const gpa = std.testing.allocator;
+    text.init(gpa);
+    defer text.deinit();
+    defer icons.deinit();
+    const buf = try gpa.alloc(u32, width * height);
+    defer gpa.free(buf);
+    var cv = render.Canvas.init(buf, width, height);
+    var pic: [16 * 9]u32 = @splat(0xFF336699);
+    var strip_px: [64 * 9]u32 = @splat(0xFF996633);
+    var st: State = .{ .duration_ms = 4000, .start_ms = 0, .end_ms = 4000, .pos_ms = 0, .pic = &pic, .pic_w = 16, .pic_h = 9, .strip_px = &strip_px, .strip_w = 64, .strip_h = 9 };
+    var cache: Cache = .{};
+    defer cache.deinit(gpa);
+    paint(gpa, &cv, 1, &st, &cache);
+    const made = .{ cache.preview.px.ptr, cache.strip.px.ptr };
+    // a handle dragged, the playhead moved: the same blocks
+    st.start_ms = 500;
+    st.pos_ms = 700;
+    paint(gpa, &cv, 1, &st, &cache);
+    try std.testing.expectEqual(made[0], cache.preview.px.ptr);
+    try std.testing.expectEqual(made[1], cache.strip.px.ptr);
+    // another strip picture: the preview anew, the strip kept
+    st.pic_index = 1;
+    paint(gpa, &cv, 1, &st, &cache);
+    try std.testing.expect(cache.preview.key[0] == 1);
+    try std.testing.expectEqual(made[1], cache.strip.px.ptr);
 }
