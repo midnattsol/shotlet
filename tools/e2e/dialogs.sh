@@ -5,12 +5,13 @@
 accent=$ACCENT accent_fill=$ACCENT_FILL
 
 # _button_on MON: an accent-coloured button (at least 40 px wide) on MON,
-# not a selected monitor tile's frame (tall); its centre in BX, BY
+# not a selected monitor tile's frame (tall) nor a sliver of something
+# else blue (an icon, a dialog fading in); its centre in BX, BY
 _button_on() {
     local h
     find_on "$1" "$ACCENT" 24 40 || return 1
     read -r BX BY _ h <<<"$VAL"
-    [ "$h" -le 100 ]
+    [ "$h" -ge 16 ] && [ "$h" -le 100 ]
 }
 # wait_button MON [SECONDS]: wait for that button on MON
 wait_button() {

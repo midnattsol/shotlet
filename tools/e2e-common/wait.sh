@@ -1,20 +1,17 @@
 # Waiting: the one poll loop, and the log waits built on it.
 
-_now_ms() { local t=${EPOCHREALTIME/[.,]/}; echo $((t / 1000)); }
-_secs_ms() { # SECS (N or N.M) in milliseconds
-    local i=${1%%.*} f=000
-    [ "$1" != "$i" ] && f=${1#*.}000
-    echo $((${i:-0} * 1000 + 10#${f:0:3}))
-}
-# wait_until SECS COMMAND...: until COMMAND succeeds, checking every 0.1 s
-# for SECS seconds (N or N.M); false when it never did
+# wait_until SECS COMMAND...: until COMMAND succeeds, trying it every
+# 0.1 s, SECS*10 times (SECS: N or N.M). A slow COMMAND (a screen grab
+# under load) stretches the wait rather than getting fewer tries.
 wait_until() {
-    local end
-    end=$(($(_now_ms) + $(_secs_ms "$1")))
+    local i=${1%%.*} f=0 n
+    [ "$1" != "$i" ] && f=${1#*.}0
+    n=$((${i:-0} * 10 + 10#${f:0:1}))
     shift
     while :; do
         "$@" && return 0
-        [ "$(_now_ms)" -ge "$end" ] && return 1
+        n=$((n - 1))
+        [ "$n" -le 0 ] && return 1
         sleep 0.1
     done
 }
