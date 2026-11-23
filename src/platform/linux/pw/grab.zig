@@ -90,11 +90,6 @@ fn connectCore(pre: *Pre, fd: i32) bool {
     return pre.core != null;
 }
 
-/// Discard a pre-established connection without grabbing.
-pub fn discard(pre: *Pre) void {
-    teardown(pre, &.{});
-}
-
 pub fn teardown(pre: *Pre, streams: []const ?*anyopaque) void {
     if (pre.loop != null) pw.api.thread_loop_stop(pre.loop);
     for (streams) |s| if (s != null) pw.api.stream_destroy(s);
@@ -201,20 +196,6 @@ fn collectFrames(ctxs: []Ctx, frames: []Frame, connect_ok: bool) !void {
 
 fn freePixels(ctxs: []const Ctx) void {
     for (ctxs) |*c| if (c.pixels) |p| std.heap.page_allocator.free(p);
-}
-
-/// Grab one frame using a pre-established connection; consumes it.
-pub fn grabPre(pre: *Pre, node_id: u32, timeout_sec: u32) !Frame {
-    var frame: [1]Frame = undefined;
-    try grabNodes(pre, &.{node_id}, &frame, timeout_sec * 1000);
-    return frame[0];
-}
-
-/// Grab a single frame from the portal-provided PipeWire stream.
-/// Takes ownership of `fd`. Blocks up to `timeout_sec`.
-pub fn grabFrame(fd: i32, node_id: u32, timeout_sec: u32) !Frame {
-    var pre = try preconnect(fd);
-    return grabPre(&pre, node_id, timeout_sec);
 }
 
 /// Grab one frame from each node over the portal fd (consumes fd).
