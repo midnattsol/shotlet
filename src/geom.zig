@@ -143,6 +143,11 @@ pub const Monitor = struct {
     /// portal reports it (stream `position` and `size`); null when unknown,
     /// as with --from or the Screenshot portal
     logical: ?Rect = null,
+    /// the compositor's scale for it (its physical pixels per logical
+    /// pixel), which the capture's image need not show it at (a mixed
+    /// layout is stitched at the sharpest density); 0 when unknown (the
+    /// portals, --from)
+    scale: f64 = 0,
 
     /// The monitor's pixels in the capture's image.
     pub fn pixelRect(m: Monitor) Rect {
@@ -182,6 +187,44 @@ pub fn layoutBounds(mons: []const Monitor) Rect {
     };
     const b = box orelse return .{ .x = 0, .y = 0, .w = 1, .h = 1 };
     return if (b.w <= 0) .{ .x = 0, .y = 0, .w = 1, .h = 1 } else b;
+}
+
+/// The smallest logical length that is a whole number of physical
+/// pixels at `scale`: 1 at whole scales, 2 at 1.5, 4 at 1.25 or 1.75,
+/// 3 at 4/3 (mutter's fractional scales keep a logical size whole).
+pub fn pixelStep(scale: f64) i32 {
+    var n: i32 = 1;
+    while (n <= 16) : (n += 1) {
+        const v = @as(f64, @floatFromInt(n)) * scale;
+        if (@abs(v - @round(v)) < 1e-3) return n;
+    }
+    return 1;
+}
+
+/// A logical region (on the monitor holding its centre) grown to whole
+/// physical pixels of that monitor: its edges, from the monitor's
+/// origin, on multiples of pixelStep. What the shell paints for a
+/// region then starts and ends on its pixels, with no half-pixel
+/// resampling (an odd logical edge at 1.5 is half a pixel in). The
+/// region unchanged when the monitor's scale is unknown.
+pub fn onWholePixels(mons: []const Monitor, r: Rect) Rect {
+    const c = r.center();
+    for (mons) |m| {
+        const l = m.logical orelse continue;
+        if (!l.contains(c.x, c.y) or m.scale <= 0) continue;
+        const n = pixelStep(m.scale);
+        if (n == 1) return r;
+        const x0 = l.x + @divFloor(r.x - l.x, n) * n;
+        const y0 = l.y + @divFloor(r.y - l.y, n) * n;
+        const x1 = l.x + @min(l.w, ceilTo(r.right() - l.x, n));
+        const y1 = l.y + @min(l.h, ceilTo(r.bottom() - l.y, n));
+        return Rect.fromEdges(@max(x0, l.x), @max(y0, l.y), x1, y1);
+    }
+    return r;
+}
+
+fn ceilTo(v: i32, n: i32) i32 {
+    return @divFloor(v + n - 1, n) * n;
 }
 
 fn scaleOf(m: Monitor, l: Rect) f64 {
@@ -362,9 +405,30 @@ test "a region maps onto a scaled monitor's frame pixels" {
 // the stitched capture keeps the sharpest density, 2, so the 1.5
 // monitor's part is 5120x2880 image pixels
 const owner = [_]Monitor{
-    .{ .x = 0, .y = 0, .w = 3456, .h = 2160, .logical = .{ .x = 0, .y = 0, .w = 1728, .h = 1080 } },
-    .{ .x = 3456, .y = 0, .w = 5120, .h = 2880, .logical = .{ .x = 1728, .y = 0, .w = 2560, .h = 1440 } },
+    .{ .x = 0, .y = 0, .w = 3456, .h = 2160, .logical = .{ .x = 0, .y = 0, .w = 1728, .h = 1080 }, .scale = 2 },
+    .{ .x = 3456, .y = 0, .w = 5120, .h = 2880, .logical = .{ .x = 1728, .y = 0, .w = 2560, .h = 1440 }, .scale = 1.5 },
 };
+
+test "a region grows to whole physical pixels of its monitor" {
+    try testing.expectEqual(@as(i32, 1), pixelStep(2));
+    try testing.expectEqual(@as(i32, 2), pixelStep(1.5));
+    try testing.expectEqual(@as(i32, 4), pixelStep(1.25));
+    try testing.expectEqual(@as(i32, 4), pixelStep(1.75));
+    try testing.expectEqual(@as(i32, 3), pixelStep(1.3333333730697632));
+    // odd edges at 1.5 (683 is 1024.5 px in): out to even ones
+    const r = onWholePixels(&owner, .{ .x = 1728 + 683, .y = 207, .w = 1841, .h = 921 });
+    try testing.expectEqual(Rect{ .x = 1728 + 682, .y = 206, .w = 1842, .h = 922 }, r);
+    try testing.expect(@mod(r.x - 1728, 2) == 0 and @mod(r.w, 2) == 0 and @mod(r.h, 2) == 0);
+    // even ones stay; on the 2 monitor anything stays
+    const even: Rect = .{ .x = 2410, .y = 206, .w = 1844, .h = 922 };
+    try testing.expectEqual(even, onWholePixels(&owner, even));
+    const two: Rect = .{ .x = 11, .y = 13, .w = 101, .h = 33 };
+    try testing.expectEqual(two, onWholePixels(&owner, two));
+    // never past the monitor's edge; unknown scale: unchanged
+    try testing.expectEqual(@as(i32, 1728 + 2560), onWholePixels(&owner, .{ .x = 4000, .y = 0, .w = 287, .h = 11 }).right());
+    const odd: Rect = .{ .x = 1, .y = 1, .w = 3, .h = 3 };
+    try testing.expectEqual(odd, onWholePixels(&mixed, odd));
+}
 
 test "a selection on the 1.5 monitor beside a 2 one maps to its logical region" {
     // the picked region (image pixels, odd width: half a logical pixel)

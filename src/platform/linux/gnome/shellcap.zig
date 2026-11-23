@@ -148,7 +148,7 @@ pub fn build(gpa: std.mem.Allocator, monitors: []const LogicalMonitor, pieces: [
             x1 = @max(x1, pm.x + pm.w);
             y1 = @max(y1, pm.y + pm.h);
         }
-        out.* = .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0, .logical = m.rect() };
+        out.* = .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0, .logical = m.rect(), .scale = m.scale };
     }
     gpa.free(cap.monitors);
     cap.monitors = mons;
@@ -281,8 +281,8 @@ test "pieces stitch into mixed-scale monitors" {
     try std.testing.expectEqual(@as(u32, 5120), cap.image.width);
     try std.testing.expectEqual(@as(u32, 1440), cap.image.height);
     try std.testing.expectEqual(@as(usize, 2), cap.monitors.len);
-    try std.testing.expectEqual(capture.Monitor{ .x = 0, .y = 0, .w = 2560, .h = 1440, .logical = .{ .x = 0, .y = 0, .w = 1280, .h = 720 } }, cap.monitors[0]);
-    try std.testing.expectEqual(capture.Monitor{ .x = 2560, .y = 0, .w = 2560, .h = 1440, .logical = .{ .x = 1280, .y = 0, .w = 1280, .h = 720 } }, cap.monitors[1]);
+    try std.testing.expectEqual(capture.Monitor{ .x = 0, .y = 0, .w = 2560, .h = 1440, .logical = .{ .x = 0, .y = 0, .w = 1280, .h = 720 }, .scale = 2 }, cap.monitors[0]);
+    try std.testing.expectEqual(capture.Monitor{ .x = 2560, .y = 0, .w = 2560, .h = 1440, .logical = .{ .x = 1280, .y = 0, .w = 1280, .h = 720 }, .scale = 1 }, cap.monitors[1]);
     const W = 5120;
     try std.testing.expectEqual(@as(u32, 0xFFFF0000), cap.image.pixels[719 * W + 10]);
     try std.testing.expectEqual(@as(u32, 0xFF00FF00), cap.image.pixels[720 * W + 10]);

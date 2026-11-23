@@ -270,12 +270,20 @@ stops_esc() {
 #                       physical pixel off: matched by the rows' profiles,
 #                       app/scroll/nearmatch.zig); then all of that
 #                       monitor, the control over it
-# scroll_hidpi also takes one monitor ("scroll_hidpi 0 1.5 2764
-# Meta-0=1.5" on a 3840x2160 row, "scroll_hidpi 0 2 2000 Meta-0=2" on a
-# 3456x2160 one) to tell the scale from the mix.
+# The region starts at physical x 1024 of the 1.5 monitor: 682.67
+# logical, an odd edge after rounding, half a pixel into the monitor;
+# the region asked of the shell grows to whole pixels (even logical
+# edges). scroll_hidpi also takes one monitor ("scroll_hidpi 0 1.5 1024
+# 2764 Meta-0=1.5" on a 3840x2160 row, "scroll_hidpi 0 2 1024 2000
+# Meta-0=2" on a 3456x2160 one) to tell the scale from the mix.
 scenario_modes_scroll_mixed() {
-    scroll_hidpi 1 1.5 2764 Meta-0=2 Meta-1=1.5! || return
+    scroll_hidpi 1 1.5 1024 2764 Meta-0=2 Meta-1=1.5! || return
     scroll_cover 1
+}
+
+# whole_px SCALE V...: every V a whole number of physical pixels at SCALE
+whole_px() {
+    "$E2E_PYTHON" -c "import sys; s=float(sys.argv[1]); sys.exit(any(abs(int(v)*s-round(int(v)*s))>1e-3 for v in sys.argv[2:]))" "$@"
 }
 
 # loop_away TITLE: the longest the window titled TITLE last stayed away
@@ -288,13 +296,13 @@ loop_away() {
 # (GNOME asks to force quit after 5 s)
 answered() { local a; a=$(loop_away "$1"); echo "  $1: longest away from the compositor ${a:-?} ms"; test "${a:-99999}" -lt "$2"; }
 
-# scroll_hidpi MON SCALE W LAYOUT...: the page on monitor MON (at SCALE),
-# a region W x 1383 px at 1023,309 on it, scrolled to the page's end
+# scroll_hidpi MON SCALE X0 W LAYOUT...: the page on monitor MON (at
+# SCALE), a region W x 1383 px at X0,309 on it, scrolled to the page's end
 scroll_hidpi() {
-    local mon=$1 sc=$2 rw=$3 s tw th want
-    "$ROOT/tools/e2e/monitors.sh" "${@:4}" >"$OUT/layout.txt" || fail "monitor layout"
+    local mon=$1 sc=$2 x0=$3 rw=$4 s tw th want lw lh lx ly mx my
+    "$ROOT/tools/e2e/monitors.sh" "${@:5}" >"$OUT/layout.txt" || fail "monitor layout"
     cat "$OUT/layout.txt"
-    if [ $# -gt 4 ]; then modes_start Meta-0 Meta-1; else modes_start Meta-0; fi
+    if [ $# -gt 5 ]; then modes_start Meta-0 Meta-1; else modes_start Meta-0; fi
     mode_cfg copy
     require_pygtk || return
     drv move "$mon" 1900 1000
@@ -307,11 +315,15 @@ scroll_hidpi() {
     # reaches them once they are up)
     shell_wait 20 "area picker: up" 1
     sleep 1
-    drag "$mon" 1023 309 "$mon" 2000 900 "$mon" $((1023 + rw)) 1692
+    drag "$mon" "$x0" 309 "$mon" 2000 900 "$mon" $((x0 + rw)) 1692
     sleep 0.5
     shot "$mon" region
     keys enter
     check "Enter starts scrolling the region" shell_wait 10 "scrolling capture of" 1
+    # what the shell was asked for, logical, and the monitor's origin
+    read -r lw lh lx ly <<<"$(grep -o "scrolling capture of [0-9]*x[0-9]* at [0-9]*,[0-9]*" "$SHOTLET_E2E_SHELL_LOG" | tail -1 | tr -c '0-9\n' ' ')"
+    read -r _ mx my _ <<<"$(sed -n "$((mon + 1))p" "$OUT/layout.txt")"
+    check "  ... on whole physical pixels (${lw}x$lh at $lx,$ly on a monitor at $mx,$my)" whole_px "$sc" $((lx - mx)) $((ly - my)) "$lw" "$lh"
     check "  ... the page scrolls by itself" wait_log 30 "^scrolled [1-9]" "$OUT/page.log"
     check "it stops at the end of the page" shell_wait 90 "stopped: end_of_page (Reached the end of the page)" 1
     grep -E "scrolling capture|scrolling_capture" "$SHOTLET_E2E_SHELL_LOG" | sed 's/^/  log: /'
@@ -322,7 +334,8 @@ scroll_hidpi() {
     keys enter
     check "Enter copies the stitched image" wait_until 10 clip_png "$OUT/tall.png"
     s=$(png_size "$OUT/tall.png"); tw=${s%x*} th=${s#*x}
-    want=$("$E2E_PYTHON" -c "print(round(1383 + ($PAGE_H - ${VP:-0}) * $sc))")
+    want=$("$E2E_PYTHON" -c "print(round((${lh:-0} + $PAGE_H - ${VP:-0}) * $sc))")
+    rw=$("$E2E_PYTHON" -c "print(round(${lw:-0} * $sc))")
     check "  ... ${tw}x${th}: the region's width ($rw)" near_h "$tw" "$rw"
     check "  ... and the page's height through the region (~$want)" near_h "$th" "$want"
     check "  ... the marker band exactly once" eq "$(drv runs "$OUT/tall.png" 5 ff00ff 8 && echo "$VAL")" 1

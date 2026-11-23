@@ -75,7 +75,9 @@ fn directFrame(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, 
 /// Start a session for the region (image pixels of `cap`).
 pub fn open(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, cap: *const capture.Capture, region: geom.Rect, shell: bool, auto: bool) !Source {
     const l = geom.imageToLogical(cap.monitors, region) orelse return error.RegionOffScreen;
-    if (shell) return .{ .shell = .{ .session = try shell1.Scroll.begin(gpa, bus, l.rect, auto), .auto = auto } };
+    // the shell paints the logical region at the monitor's scale: on its
+    // whole pixels, or every frame is resampled half a pixel off
+    if (shell) return .{ .shell = .{ .session = try shell1.Scroll.begin(gpa, bus, geom.onWholePixels(cap.monitors, l.rect), auto), .auto = auto } };
     const wheel = if (auto) inject.Wheel.open(gpa, env.runtime_dir, env.session.display, geom.layoutBounds(cap.monitors)) catch null else null;
     return .{ .direct = .{ .region = region, .logical = l.rect, .wheel = wheel } };
 }
