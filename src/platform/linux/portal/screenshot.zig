@@ -1,11 +1,11 @@
 //! org.freedesktop.portal.Screenshot, and reading back the file a portal
-//! answered with (a file:// URI, uri.zig).
+//! answered with (a file:// URI, src/uri.zig).
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const request = @import("request.zig");
-const uri_mod = @import("../uri.zig");
+const uri_mod = @import("../../../uri.zig");
 
 const Request = request.Request;
 const Result = request.Result;

@@ -8,6 +8,7 @@ const buffers = @import("buffers.zig");
 const surface = @import("surface.zig");
 
 const Window = window.Window;
+const Output = wl.output.Output;
 const max_outputs = window.max_outputs;
 
 /// Buffer size for a logical size. With fractional scaling the buffer is
@@ -27,12 +28,13 @@ pub fn bufferSize(logical_w: u32, logical_h: u32, scale120: u32, fractional: boo
 /// = 2554 on a 2560-pixel panel at 1.4953) and the compositor would then
 /// resample the whole UI. Null when the surface does not match the output's
 /// logical size or the mode is not plausibly that output at about `approx`.
-pub fn outputBufferSize(logical_w: u32, logical_h: u32, approx: [2]u32, out_w: i32, out_h: i32, mode_w: i32, mode_h: i32) ?[2]u32 {
-    if (out_w != @as(i64, logical_w) or out_h != @as(i64, logical_h) or mode_w <= 0 or mode_h <= 0) return null;
-    // the mode is in the panel's native orientation; rotated outputs swap it
-    var mw: u32 = @intCast(mode_w);
-    var mh: u32 = @intCast(mode_h);
-    if ((mw > mh) != (logical_w > logical_h) and mw != mh) std.mem.swap(u32, &mw, &mh);
+pub fn outputBufferSize(logical_w: u32, logical_h: u32, approx: [2]u32, o: *const Output) ?[2]u32 {
+    const out = o.logicalRect();
+    if (out.w != @as(i64, logical_w) or out.h != @as(i64, logical_h) or o.mode_w <= 0 or o.mode_h <= 0) return null;
+    // the mode is in the panel's own orientation: the transform turns it
+    var mw: u32 = @intCast(o.mode_w);
+    var mh: u32 = @intCast(o.mode_h);
+    if (o.transform & 1 != 0) std.mem.swap(u32, &mw, &mh);
     const close = struct {
         fn f(a: u32, b: u32) bool {
             const d = if (a > b) a - b else b - a;
@@ -64,7 +66,7 @@ pub fn applySize(w: *Window, idx: u8) !void {
     var size = bufferSize(s.logical_w, s.logical_h, s.scale120, fractional, s.int_scale);
     if (fractional) {
         if (w.outputs.covering(s)) |o| {
-            if (outputBufferSize(s.logical_w, s.logical_h, size, o.logicalRect().w, o.logicalRect().h, o.mode_w, o.mode_h)) |px| size = px;
+            if (outputBufferSize(s.logical_w, s.logical_h, size, o)) |px| size = px;
         }
     }
     if (size[0] == 0 or size[1] == 0) return;
@@ -112,13 +114,29 @@ test "a surface covering one output gets the output's pixels" {
     // 2560x1440 panel at 1.4953: logical 1712x963, scale120 179 -> 2554x1436
     const approx = bufferSize(1712, 963, 179, true, 1);
     try t.expectEqual([2]u32{ 2554, 1436 }, approx);
-    try t.expectEqual([2]u32{ 2560, 1440 }, outputBufferSize(1712, 963, approx, 1712, 963, 2560, 1440).?);
-    // rotated panel: the mode is reported in native orientation
-    try t.expectEqual([2]u32{ 1440, 2560 }, outputBufferSize(963, 1712, .{ 1436, 2554 }, 963, 1712, 2560, 1440).?);
+    const panel = testOutput(1712, 963, 2560, 1440, 0);
+    try t.expectEqual([2]u32{ 2560, 1440 }, outputBufferSize(1712, 963, approx, &panel).?);
+    // rotated panel: the mode is reported in native orientation, the
+    // transform (90 or 270 degrees, flipped or not) turns it
+    for ([_]u32{ 1, 3, 5, 7 }) |tr| {
+        const turned = testOutput(963, 1712, 2560, 1440, tr);
+        try t.expectEqual([2]u32{ 1440, 2560 }, outputBufferSize(963, 1712, .{ 1436, 2554 }, &turned).?);
+    }
+    // turned by 180 degrees: the mode as it is
+    const upside = testOutput(1712, 963, 2560, 1440, 2);
+    try t.expectEqual([2]u32{ 2560, 1440 }, outputBufferSize(1712, 963, approx, &upside).?);
+    // a portrait panel used as it is: its mode is portrait already
+    const portrait = testOutput(963, 1712, 1440, 2560, 0);
+    try t.expectEqual([2]u32{ 1440, 2560 }, outputBufferSize(963, 1712, .{ 1436, 2554 }, &portrait).?);
     // not covering the output, or an implausible mode: keep the computed size
-    try t.expect(outputBufferSize(800, 600, .{ 1200, 900 }, 1712, 963, 2560, 1440) == null);
-    try t.expect(outputBufferSize(1712, 963, approx, 1712, 963, 3840, 2160) == null);
-    try t.expect(outputBufferSize(1712, 963, approx, 1712, 963, 0, 0) == null);
+    try t.expect(outputBufferSize(800, 600, .{ 1200, 900 }, &panel) == null);
+    try t.expect(outputBufferSize(1712, 963, approx, &testOutput(1712, 963, 3840, 2160, 0)) == null);
+    try t.expect(outputBufferSize(1712, 963, approx, &testOutput(1712, 963, 0, 0, 0)) == null);
+}
+
+/// An output as xdg_output and wl_output describe it.
+fn testOutput(lw: i32, lh: i32, mode_w: i32, mode_h: i32, transform: u32) Output {
+    return .{ .lw = lw, .lh = lh, .has_logical = true, .mode_w = mode_w, .mode_h = mode_h, .transform = transform };
 }
 
 test "buffer size for fractional and integer scales" {

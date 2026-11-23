@@ -4,7 +4,7 @@
 const std = @import("std");
 const dbus = @import("../dbus.zig");
 const request = @import("request.zig");
-const uri = @import("../uri.zig");
+const uri = @import("../../../uri.zig");
 
 const Request = request.Request;
 const Result = request.Result;

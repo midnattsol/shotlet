@@ -97,19 +97,7 @@ pub fn loadHanded(gpa: std.mem.Allocator, env: Env, args: HandedCapture) !captur
 pub const finishPendingSetup = gnome.finishPendingSetup;
 
 /// `shotlet gnome-integration ...`.
-// TODO(wave 3): remove: gnome/cli.zig takes `Cli` itself, not these words
-pub fn runCli(gpa: std.mem.Allocator, env: Env, cmd: Cli) !void {
-    switch (cmd) {
-        .status => try gnome.runCli(gpa, env, "status", &.{}),
-        .install => |how| try gnome.runCli(gpa, env, "install", switch (how) {
-            .ask => &.{},
-            .move_shortcut => &.{"--move-shortcut"},
-            .keep_shortcut => &.{"--keep-shortcut"},
-        }),
-        .uninstall => try gnome.runCli(gpa, env, "uninstall", &.{}),
-        .shortcut => |keys| try gnome.runCli(gpa, env, "shortcut", keys),
-    }
-}
+pub const runCli = gnome.runCli;
 
 // --- the capture modes' global shortcuts (its settings) ---
 

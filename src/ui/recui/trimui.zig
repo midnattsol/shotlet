@@ -190,25 +190,20 @@ fn firstPicture(gpa: std.mem.Allocator, envp: @import("../../platform/api.zig").
     return gpa.dupe(u32, f.pixels);
 }
 
-fn parseRange(s: []const u8) !trim.Range {
-    const c = std.mem.indexOfScalar(u8, s, ',') orelse return error.BadRange;
-    return .{ .start_ms = try std.fmt.parseInt(i64, s[0..c], 10), .end_ms = try std.fmt.parseInt(i64, s[c + 1 ..], 10) };
-}
+/// `trim ROOT ID [--range A,B] [--export]` as parsed.
+pub const Options = struct {
+    /// milliseconds to keep (default: the whole recording)
+    range: ?trim.Range = null,
+    /// write the trimmed file without a window (--export)
+    headless: bool = false,
+};
 
-pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8, opts: []const []const u8) !void {
+pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8, opts: Options) !void {
     if (!history.Id.valid(id)) return error.BadId;
     const vi = keepvid.read(gpa, root, id) orelse return error.NotARecording;
     defer gpa.free(vi.buf);
-    var range: trim.Range = .{ .start_ms = 0, .end_ms = vi.info.duration_ms };
-    var headless = false;
-    var i: usize = 0;
-    while (i < opts.len) : (i += 1) {
-        if (std.mem.eql(u8, opts[i], "--range") and i + 1 < opts.len) {
-            range = try parseRange(opts[i + 1]);
-            i += 1;
-        } else if (std.mem.eql(u8, opts[i], "--export")) headless = true;
-    }
-    if (headless) return exportRange(gpa, env, &vi.info, range);
+    const range = opts.range orelse trim.Range{ .start_ms = 0, .end_ms = vi.info.duration_ms };
+    if (opts.headless) return exportRange(gpa, env, &vi.info, range);
     try runWindow(gpa, env, root, id, vi.info, range);
 }
 
@@ -306,10 +301,4 @@ fn paint(t: *Trim, win: *window.Window) !bool {
     draw.paint(t.gpa, &cv, scale.of(win.scale120), &t.st);
     try t.frame.present(win, draw.edge(t.st.th));
     return true;
-}
-
-test "trim ranges parse" {
-    const r = try parseRange("1000,2500");
-    try std.testing.expectEqual(@as(i64, 2500), r.end_ms);
-    try std.testing.expectError(error.BadRange, parseRange("12"));
 }

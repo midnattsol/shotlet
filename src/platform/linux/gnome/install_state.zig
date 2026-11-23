@@ -44,7 +44,7 @@ pub const Facts = struct {
     /// the extension owns its bus name
     active: bool,
     /// GNOME Shell's state for it (extension.shellState); null: no shell
-    shell_state: ?u32,
+    shell_state: ?extension.ShellState,
     /// its files are in the user's extension directory
     files: bool,
     /// in enabled-extensions, not in disabled-extensions
@@ -56,10 +56,13 @@ pub const Facts = struct {
 pub fn decide(f: Facts) State {
     if (f.active) return .active;
     const st = f.shell_state orelse return .no_shell;
-    if (st == 1) return .active;
-    if (st == 3) return .failed;
-    if (st == 4) return .out_of_date;
-    const known = st != 99;
+    switch (st) {
+        .active => return .active,
+        .failed => return .failed,
+        .out_of_date => return .out_of_date,
+        else => {},
+    }
+    const known = st != .unknown;
     if (!known and !f.files) return .not_installed;
     if (!f.enabled) return .disabled;
     if (f.user_extensions_off) return .user_extensions_off;
@@ -92,7 +95,7 @@ fn filesPresent(home: []const u8) bool {
 }
 
 test "the extension's states are told apart" {
-    const base: Facts = .{ .active = false, .shell_state = 99, .files = false, .enabled = false, .user_extensions_off = false };
+    const base: Facts = .{ .active = false, .shell_state = .unknown, .files = false, .enabled = false, .user_extensions_off = false };
     try std.testing.expectEqual(State.not_installed, decide(base));
     var f = base;
     f.files = true;
@@ -105,10 +108,14 @@ test "the extension's states are told apart" {
     f.active = true;
     try std.testing.expectEqual(State.active, decide(f));
     f = base;
-    f.shell_state = 2; // installed system-wide, switched off
+    f.shell_state = .inactive; // installed system-wide, switched off
     try std.testing.expectEqual(State.disabled, decide(f));
-    f.shell_state = 3;
+    f.shell_state = .failed;
     try std.testing.expectEqual(State.failed, decide(f));
+    f.shell_state = .out_of_date;
+    try std.testing.expectEqual(State.out_of_date, decide(f));
+    f.shell_state = .active;
+    try std.testing.expectEqual(State.active, decide(f));
     f.shell_state = null;
     try std.testing.expectEqual(State.no_shell, decide(f));
 }

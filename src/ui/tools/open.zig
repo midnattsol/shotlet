@@ -7,6 +7,7 @@ const doc_mod = @import("../doc.zig");
 const editor_mod = @import("../editor.zig");
 const png = @import("../../gfx/png.zig");
 const imgload = @import("../../gfx/imgload.zig");
+const uri = @import("../../uri.zig");
 const sys = @import("../../platform/api.zig").sys;
 const env_mod = @import("../../app/env.zig");
 const keep = @import("../../app/keep.zig");
@@ -23,7 +24,7 @@ pub fn poll(ed: *Editor) void {
     defer ed.alloc.free(d.data);
     var buf: [1024]u8 = undefined;
     const is_file = std.mem.eql(u8, d.mime, "text/uri-list");
-    const path: []const u8 = if (is_file) (imgload.firstFileUri(&buf, d.data) orelse return) else "the dropped image";
+    const path: []const u8 = if (is_file) (uri.firstFilePath(&buf, d.data) orelse return) else "the dropped image";
     const img = (if (is_file) imgload.loadFile(ed.alloc, path) else imgload.decode(ed.alloc, d.data)) catch |err| {
         std.log.warn("drop: cannot open {s}: {t}", .{ path, err });
         ed.tools.toast.show(.problem, "Not an image Shotlet can open", 3000);

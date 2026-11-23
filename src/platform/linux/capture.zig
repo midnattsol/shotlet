@@ -130,6 +130,7 @@ pub const ResetOutcome = reset.Outcome;
 pub const resetSummary = reset.summary;
 
 /// `shotlet permissions [reset [--dry-run]]`.
+pub const PermissionsCli = @import("../api/capture.zig").PermissionsCli;
 pub const permissionsCli = @import("capture/permissions.zig").run;
 
 comptime {

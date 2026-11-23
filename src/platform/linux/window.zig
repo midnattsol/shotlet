@@ -141,16 +141,8 @@ pub const Output = output.Output;
 pub const Surface = surface.Surface;
 
 pub const bufferSize = scale_mod.bufferSize;
-pub const outputBufferSize = scale_mod.outputBufferSize;
 pub const pickIntScale = scale_mod.pickIntScale;
 pub const utf8Chunk = text_input.utf8Chunk;
-
-// clipboard and drag-and-drop payloads (transfer.zig)
-const transfer = @import("../../ui/transfer.zig");
-pub const readBounded = transfer.readBounded;
-pub const drag_mimes = transfer.drag_mimes;
-pub const dragPayloadFor = transfer.dragPayloadFor;
-pub const fileUriList = transfer.fileUriList;
 
 pub const Window = struct {
     alloc: std.mem.Allocator,

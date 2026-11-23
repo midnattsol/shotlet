@@ -99,7 +99,8 @@ pub fn teardown(pre: *Pre, streams: []const ?*anyopaque) void {
     pre.* = .{};
 }
 
-pub const max_nodes = 16;
+/// one stream per monitor
+pub const max_nodes = @import("../../api/window.zig").max_outputs;
 
 /// Grab one frame from each node using a pre-established connection;
 /// consumes it. Streams run concurrently so N monitors cost about as much

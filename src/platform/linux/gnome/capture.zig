@@ -5,6 +5,7 @@ const std = @import("std");
 const dbus = @import("../dbus.zig");
 const shell1 = @import("shell1.zig");
 const gtk_accel = @import("gtk_accel.zig");
+const out = @import("../../../cli/out.zig").say;
 
 /// How captures go, for `status` and the Settings window.
 pub const CaptureInfo = @import("../../api/shell.zig").CaptureInfo;
@@ -47,9 +48,8 @@ fn readFirstOfStrvVariant(r: *dbus.Reader) !?[]const u8 {
     return try r.readString();
 }
 
-/// The capture shortcut, for the command line (stderr).
+/// The capture shortcut, for the command line (stdout).
 pub fn printShortcut(info: *const CaptureInfo) void {
-    const out = std.debug.print;
     if (!info.capture) return;
     if (info.shortcut()) |k| {
         if (info.blocked) {

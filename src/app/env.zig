@@ -39,6 +39,9 @@ pub const Xdg = struct {
     videos_dir: ?[]const u8 = null,
     /// $HOME, for code that is handed no Env (font discovery)
     home: ?[]const u8 = null,
+    /// XDG_CURRENT_DESKTOP: the desktops this session is, colon separated
+    /// ("ubuntu:GNOME")
+    current_desktop: ?[]const u8 = null,
 
     /// The variables from the process environment (`vars.get(name)`).
     pub fn read(vars: anytype) Xdg {
@@ -50,6 +53,7 @@ pub const Xdg = struct {
             .pictures_dir = absolute(vars.get("XDG_PICTURES_DIR")),
             .videos_dir = absolute(vars.get("XDG_VIDEOS_DIR")),
             .home = absolute(vars.get("HOME")),
+            .current_desktop = vars.get("XDG_CURRENT_DESKTOP"),
         };
     }
 };

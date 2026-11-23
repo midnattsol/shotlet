@@ -70,5 +70,4 @@ comptime {
     _ = screencast;
     _ = app_scope;
     _ = notify_mod;
-    _ = @import("uri.zig");
 }

@@ -6,7 +6,7 @@ const std = @import("std");
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
-const transfer = @import("../../../ui/transfer.zig");
+const utf8 = @import("../../../gfx/utf8.zig");
 
 const Window = window.Window;
 
@@ -147,7 +147,7 @@ fn takeDrop(w: *Window) !void {
     const c = &w.conn;
     const fd = try receive(w, id, mime);
     defer sys.close(fd);
-    const data = try transfer.readBounded(w.alloc, fd, 256 * 1024 * 1024, sys.monoMs() + 10_000);
+    const data = try readBounded(w.alloc, fd, 256 * 1024 * 1024, sys.monoMs() + 10_000);
     if (w.globals.ddm_version >= 3) try c.request(id, wl.wl_data_offer.finish, &.{});
     if (dd.offerSlot(id)) |slot| dropOffer(w, slot);
     dd.dnd_offer = 0;
@@ -180,7 +180,7 @@ pub fn clipboardText(w: *Window, alloc: std.mem.Allocator, max_bytes: usize, tim
     if (kinds == 0) return null;
     const fd = try receive(w, dd.selection_offer, text_mimes[@ctz(kinds)]);
     defer sys.close(fd);
-    return try transfer.readBounded(alloc, fd, max_bytes, sys.monoMs() + timeout_ms);
+    return try readBounded(alloc, fd, max_bytes, sys.monoMs() + timeout_ms);
 }
 
 /// The clipboard's content in the first of accept_mimes it offers
@@ -190,5 +190,39 @@ pub fn clipboardAccepted(w: *Window, alloc: std.mem.Allocator, max_bytes: usize,
     const mime = acceptedMime(w, offer) orelse return null;
     const fd = try receive(w, offer, mime);
     defer sys.close(fd);
-    return .{ .mime = mime, .data = try transfer.readBounded(alloc, fd, max_bytes, sys.monoMs() + timeout_ms) };
+    return .{ .mime = mime, .data = try readBounded(alloc, fd, max_bytes, sys.monoMs() + timeout_ms) };
+}
+
+/// Read an offer's pipe until EOF, `max_bytes` or the deadline, whichever
+/// comes first (sys.readBounded); a cut never splits a UTF-8 sequence.
+/// Caller owns the bytes.
+fn readBounded(alloc: std.mem.Allocator, fd: sys.fd_t, max_bytes: usize, deadline_ms: i64) ![]u8 {
+    const out = try sys.readBounded(alloc, fd, max_bytes, deadline_ms);
+    if (out.len < max_bytes) return out;
+    // drop a trailing partial character
+    const last = utf8.prevBoundary(out, out.len);
+    if (last == out.len or out[last] < 0xC0) return out;
+    const need = std.unicode.utf8ByteSequenceLength(out[last]) catch 1;
+    if (out.len - last >= need) return out;
+    defer alloc.free(out);
+    return alloc.dupe(u8, out[0..last]);
+}
+
+test "offers are read up to EOF, the size limit and the deadline" {
+    const alloc = std.testing.allocator;
+    const fds = try sys.pipe();
+    defer sys.close(fds[0]);
+    try sys.writeAll(fds[1], "ab\xc3\xb1cd"); // "abñcd"
+    // limit cuts inside "ñ": the partial character is dropped
+    const cut = try readBounded(alloc, fds[0], 3, sys.monoMs() + 1000);
+    defer alloc.free(cut);
+    try std.testing.expectEqualStrings("ab", cut);
+    // nothing more arrives and the writer stays open: the deadline ends it
+    const rest = try readBounded(alloc, fds[0], 100, sys.monoMs() + 50);
+    defer alloc.free(rest);
+    try std.testing.expectEqualStrings("\xb1cd", rest);
+    sys.close(fds[1]);
+    const eof = try readBounded(alloc, fds[0], 100, sys.monoMs() + 1000);
+    defer alloc.free(eof);
+    try std.testing.expectEqual(@as(usize, 0), eof.len);
 }

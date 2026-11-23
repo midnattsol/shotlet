@@ -1,7 +1,8 @@
 //! Installing the integration end to end: once the extension is active,
 //! point it at this binary, offer to move custom shortcuts that run
-//! shotlet to it, and offer it GNOME's own screenshot key. Messages go to
-//! stderr; a line about the outcome is kept for the Settings window.
+//! shotlet to it, and offer it GNOME's own screenshot key. What it did
+//! goes to stdout, what failed to stderr (cli/out.zig); a line about the
+//! outcome is kept for the Settings window.
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
@@ -16,9 +17,10 @@ const displayAccel = @import("gtk_accel.zig").display;
 const ask = @import("ask.zig");
 const next_login = @import("next_login.zig");
 const pending_setup = @import("pending_setup.zig");
+const cli_out = @import("../../../cli/out.zig");
 
 const ext_schema_id = extension.ext_schema_id;
-const out = std.debug.print;
+const out = cli_out.say;
 
 /// What to do with custom shortcuts that run shotlet once the extension
 /// is active.
@@ -57,7 +59,7 @@ pub fn pointAt(arena: std.mem.Allocator, env: Env, schemadir: []const u8, exe: [
 }
 
 /// The extension is active: point it at this binary and sort out the
-/// shortcut (see gnome.zig). Messages go to stderr.
+/// shortcut (see gnome.zig).
 fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShortcuts) void {
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
@@ -87,7 +89,7 @@ fn offerCustomShortcuts(arena: std.mem.Allocator, env: Env, schemadir: []const u
     const yes = ask.resolve(move, "Move it to the GNOME integration, so it captures straight away inside GNOME Shell?");
     if (yes) {
         custom.moveShortcuts(arena, env, schemadir, found) catch |err| {
-            out("Could not move it ({t}); it keeps working as it is.\n", .{err});
+            cli_out.warn("could not move it ({t}); it keeps working as it is", .{err});
             return false;
         };
         out("Moved: the same key now captures through the GNOME integration, without any prompt.\n" ++
@@ -133,7 +135,7 @@ fn takeGnomeKey(arena: std.mem.Allocator, env: Env, schemadir: []const u8, move:
         return;
     }
     screenshot_keys.takeKeys(arena, env, taken) catch |err| {
-        out("Could not change GNOME's shortcuts ({t}).\n", .{err});
+        cli_out.warn("could not change GNOME's shortcuts ({t})", .{err});
         return;
     };
     out("{s} now captures with Shotlet; {s}.\n", .{ key, where });
