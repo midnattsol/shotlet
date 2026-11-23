@@ -19,7 +19,7 @@ const Xform = geometry.Xform;
 const Shape = model.Shape;
 const TextCursor = draw_text.TextCursor;
 
-/// Paint `s` through `xf`. `alloc` is scratch for transformed polylines
+/// Paint `s` through `xf`. `gpa` is scratch for transformed polylines
 /// and blur; `cursor` marks the caret and selection of a text shape being
 /// edited.
 pub fn drawShape(canvas: *Canvas, gpa: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {

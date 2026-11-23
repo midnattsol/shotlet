@@ -22,7 +22,7 @@ pub const EncodeOptions = struct {
 /// Encode opaque 8-bit RGB PNG from 0xAARRGGBB pixels (alpha ignored;
 /// encodeWith(.., .{ .alpha = .always/.auto }) writes RGBA).
 /// Large images are compressed on worker threads, which allocate from
-/// `alloc` concurrently: it must be thread-safe (DebugAllocator and
+/// `gpa` concurrently: it must be thread-safe (DebugAllocator and
 /// smp_allocator are; pass .threads = 1 to encodeWith otherwise).
 pub fn encode(gpa: std.mem.Allocator, pixels: []const u32, width: u32, height: u32) ![]u8 {
     return encodeWith(gpa, pixels, width, height, .{});
