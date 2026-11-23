@@ -10,6 +10,9 @@ check() { # check DESCRIPTION COMMAND...
     local what=$1; shift
     if "$@"; then pass "$what"; else fail "$what"; fi
 }
+# a helper a scenario calls but nobody defines (renamed or deleted) is a
+# FAIL, not a line on stderr while the checks after it quietly vanish
+command_not_found_handle() { fail "no command $1"; return 127; }
 eq() { [ "$1" = "$2" ] || { echo "  expected '$2', got '$1'" >&2; return 1; }; }
 
 # require TOOL...: false, with a SKIP, when one is missing. TOOL is a

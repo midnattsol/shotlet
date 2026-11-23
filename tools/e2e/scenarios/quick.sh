@@ -105,6 +105,25 @@ quick_drag_same_second() {
     check "  ... the first one's file unchanged" eq "$(md5sum <"$first")" "$sum"
 }
 
+# pin: a second capture, pinned
+quick_pin() {
+    n=$(shown_count)
+    red_capture second
+    new_card "$n"
+    read -r x y <<<"$(card_point 120 75)"
+    drv move 0 "$x" "$y"
+    sleep 0.3
+    read -r x y <<<"$(card_point $((240 - 21)) $((150 - 21)))"
+    click 0 "$x" "$y"
+    check "Pin opens a pinned window" any_log 5 "pin: showing"
+    sleep 1
+    shot 0 pinned
+    click 0 1500 100
+    sleep 0.8
+    shot 0 pinned-after-click
+    check "  ... that stays above after clicking the app" find_on 0 "$PEN_RED" 40 4
+}
+
 scenario_quick_plain() {
     # no extension: the thumbnail is an ordinary window, still usable
     quick_cfg
