@@ -15,6 +15,9 @@ const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const window = @import("../../platform/api.zig").window;
 const fui = @import("../../ui/floatui.zig");
+const theme = @import("../../ui/theme.zig");
+const scale = @import("../../ui/scale.zig");
+const press = @import("../../ui/press.zig");
 const layout = @import("layout.zig");
 const ocr_scan = @import("ocr_scan.zig");
 const events = @import("events.zig");
@@ -26,9 +29,8 @@ const Action = layout.Action;
 pub const Item = struct {
     entry: history.Entry,
     thumb: ?png.Image,
-    scaled: []u32 = &.{},
-    sw: u32 = 0,
-    sh: u32 = 0,
+    /// the thumbnail fitted to its place in the grid
+    fit: fui.FitCache = .{},
 };
 
 pub const Panel = struct {
@@ -50,7 +52,8 @@ pub const Panel = struct {
     confirm_clear: bool = false,
     hover_confirm: ?layout.Confirm = null,
     hover_close: bool = false,
-    pressed: ?u32 = null,
+    /// the click under way (ui/press.zig)
+    click: press.Press(layout.Target) = .{},
     scroll: i32 = 0,
     search: std.ArrayList(u8) = .empty,
     searchable: bool = false,
@@ -58,7 +61,8 @@ pub const Panel = struct {
     notice_until: i64 = 0,
     dirty: bool = true,
     ocr_state: ocr_scan.Ocr = .{},
-    theme: fui.Theme = fui.Theme.dark,
+    /// the desktop's appearance (Opaque.of it for the panel's colours)
+    th: theme.Theme = theme.of(.{}),
 
     pub const searchTop = layout.searchTop;
     pub const gridTop = layout.gridTop;
@@ -82,7 +86,7 @@ pub const Panel = struct {
 
     /// Display scale.
     pub fn k(self: *const Panel) f64 {
-        return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
+        return scale.of(self.win.scale120);
     }
 
     pub fn deinit(self: *Panel) void {
@@ -99,7 +103,7 @@ pub const Panel = struct {
         for (self.items.items) |*it| {
             it.entry.deinit(self.gpa);
             if (it.thumb) |*t| t.deinit(self.gpa);
-            self.gpa.free(it.scaled);
+            it.fit.deinit(self.gpa);
         }
         self.items.clearRetainingCapacity();
     }

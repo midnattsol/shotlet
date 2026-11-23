@@ -4,28 +4,21 @@
 
 const std = @import("std");
 const effects = @import("../../gfx/effects.zig");
-const resample = @import("../../gfx/resample.zig");
 const sys = @import("../../platform/api.zig").sys;
 const fui = @import("../../ui/floatui.zig");
+const floatwin = @import("../../ui/floatwin.zig");
 const state = @import("state.zig");
 const chrome = @import("chrome.zig");
 const menu_draw = @import("menu_draw.zig");
 
 const Pin = state.Pin;
 const radius = 8;
-const fade_in_ms = 150;
 /// the Keep on Top hint shows this long
 pub const hint_ms = 5000;
 
-/// Opacity while fading in.
-fn fadeIn(p: *Pin, now: i64) f64 {
-    if (p.shown_ms == 0) p.shown_ms = now;
-    return @min(1, @as(f64, @floatFromInt(now - p.shown_ms)) / fade_in_ms);
-}
-
 /// Fading in (or not drawn yet), or the menu fading in or out.
 fn moving(p: *const Pin, now: i64) bool {
-    return p.shown_ms == 0 or now - p.shown_ms < fade_in_ms or p.menu.shown.busy(now);
+    return p.life.busy(now) or p.menu.busy(now);
 }
 
 /// Frames are due: something moves, or it stopped since the last frame.
@@ -37,17 +30,6 @@ pub fn hintShown(p: *const Pin, now: i64) bool {
     return p.hint and now - p.born < hint_ms;
 }
 
-/// Rescales the cached picture when its size changed.
-fn rescale(p: *Pin, pw: u32, ph: u32) !void {
-    if (p.scaled_w == pw and p.scaled_h == ph) return;
-    p.gpa.free(p.scaled);
-    p.scaled = &.{};
-    p.scaled = try p.gpa.alloc(u32, @as(usize, pw) * ph);
-    try resample.scale(p.gpa, p.img.pixels, p.img.width, p.img.height, p.scaled, pw, ph);
-    p.scaled_w = pw;
-    p.scaled_h = ph;
-}
-
 pub fn frame(p: *Pin, k: f64) !void {
     const win = p.win;
     const px = try win.backBuffer();
@@ -55,39 +37,35 @@ pub fn frame(p: *Pin, k: f64) !void {
     const bh = win.height;
     @memset(px, 0);
     const now = sys.monoMs();
+    p.life.start(now);
     p.settled = !moving(p, now);
     // away in the editor: nothing shows, nothing takes clicks
     if (p.edit != null) {
         p.settled = true;
-        return win.present();
+        return floatwin.presentStraight(win, px);
     }
-    const sz = p.picSize();
-    try rescale(p, sz[0], sz[1]);
-    const a = fadeIn(p, now);
-    try picture(p, px, bw, bh, k, a);
-    if (p.menu.visible(now)) try menu_draw.draw(p.gpa, px, bw, bh, k, p.th, &p.menu, .{ .locked = p.locked, .opacity = p.opacity }, now);
-    fui.premultiply(px, bw, bh, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) });
-    try win.present();
+    try picture(p, px, bw, bh, k, p.life.alpha(now));
+    if (p.menu.visible(now)) try menu_draw.draw(p.gpa, .{ .px = px, .w = bw, .h = bh }, k, p.th, &p.menu, .{ .locked = p.locked, .opacity = p.opacity }, now);
+    try floatwin.presentStraight(win, px);
 }
 
 /// The card at the pin's opacity, then whatever chrome shows, opaque
 /// (only faded in with the pin): it must stay readable on a faint pin.
 fn picture(p: *Pin, px: []u32, bw: u32, bh: u32, k: f64, a: f64) !void {
-    const pw = p.scaled_w;
-    const ph = p.scaled_h;
+    const sz = p.picSize();
+    const pw = sz[0];
+    const ph = sz[1];
+    // the picture flattened on black: the card
+    const card = try p.fit.ensure(p.gpa, .{ .px = p.img.pixels, .w = p.img.width, .h = p.img.height }, pw, ph, .contain, 0xFF000000);
     const ox: i32 = @intFromFloat(@round(state.pad * k));
-    const card = try p.gpa.alloc(u32, @as(usize, pw) * ph);
-    defer p.gpa.free(card);
-    @memset(card, 0xFF000000);
-    for (card, p.scaled) |*d, s| d.* = effects.over(d.*, s);
-    fui.placeCard(px, bw, bh, card, pw, ph, ox, ox, @intFromFloat(radius * k), @intFromFloat(@max(1, 10 * k)));
+    fui.place(p.gpa, .{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = pw, .h = ph }, .{ ox, ox }, radius * k, p.th.card_shadow, k);
     fui.fadeAlpha(px, a * p.opacity.alpha());
     const look: chrome.Look = .{ .hover = p.hover, .locked = p.locked, .zoom = p.zoom, .hint = hintShown(p, sys.monoMs()) };
     if (!look.locked and look.hover == .none and !look.hint) return;
     const over = try p.gpa.dupe(u32, card);
     defer p.gpa.free(over);
     var cv = fui.Canvas.init(over, pw, ph);
-    chrome.draw(&cv, k, pw, ph, look);
+    chrome.draw(&cv, k, pw, ph, look, p.th);
     overlayChanged(px, bw, bh, card, over, pw, ph, ox, a);
 }
 

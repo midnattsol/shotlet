@@ -10,6 +10,7 @@ const state = @import("state.zig");
 const menu = @import("menu.zig");
 const view = @import("view.zig");
 const actions = @import("actions.zig");
+const focus = @import("../../ui/focus.zig");
 
 const Pin = state.Pin;
 const Key = window.Key;
@@ -63,17 +64,21 @@ fn opacityKey(code: window.KeyCode) ?view.Opacity {
 fn menuKey(p: *Pin, key: Key, now: i64) bool {
     const l = &p.menu.lay;
     switch (key.code) {
-        .escape, .menu => p.closeMenu(now),
-        .up => p.menu.hot = menu.step(l, p.menu.hot, -1),
-        .down => p.menu.hot = menu.step(l, p.menu.hot, 1),
-        .tab => p.menu.hot = menu.step(l, p.menu.hot, if (key.shift) -1 else 1),
+        .menu => p.closeMenu(now),
+        .up => p.menu.hot = menu.step(l, p.menu.hot, .prev),
+        .down => p.menu.hot = menu.step(l, p.menu.hot, .next),
         .left, .right => {
             const i = p.menu.hot orelse return false;
             if (l.items[i] != .opacity) return false;
             p.setOpacity(stepOpacity(p.opacity, if (key.code == .left) -1 else 1));
         },
-        .enter, .kp_enter, .space => actions.activate(p, .{ .index = p.menu.hot orelse return true }),
-        else => return false,
+        // Tab, Enter or Space, Esc: as in every window
+        else => switch (focus.action(key, .none) orelse return false) {
+            .next => p.menu.hot = menu.step(l, p.menu.hot, .next),
+            .prev => p.menu.hot = menu.step(l, p.menu.hot, .prev),
+            .activate => actions.activate(p, .{ .index = p.menu.hot orelse return true }),
+            .close => p.closeMenu(now),
+        },
     }
     p.menu.hot_seg = null;
     p.dirty = true;

@@ -20,7 +20,6 @@ const ocr = @import("../platform/api.zig").ocr;
 const sys = @import("../platform/api.zig").sys;
 const text = @import("../gfx/text.zig");
 const window = @import("../platform/api.zig").window;
-const fui = @import("../ui/floatui.zig");
 const theme_mod = @import("../ui/theme.zig");
 const layout = @import("history_ui/layout.zig");
 const Panel = @import("history_ui/panel.zig").Panel;
@@ -41,7 +40,9 @@ pub fn run(gpa: std.mem.Allocator, env: Env, smoke_ms: i64) !void {
     };
     defer p.deinit();
     p.root_len = (try history.historyRoot(&p.root_buf, env.home)).len;
-    if (p.bus_()) |b| p.theme = fui.Theme.fromPrefs(theme_mod.readPrefs(b, 1000));
+    // the panel keeps its session (Copy, Save): no theme.load, which
+    // opens one of its own
+    if (p.bus_()) |b| p.th = theme_mod.of(theme_mod.readPrefs(b, 1000));
     try p.load();
     p.searchable = ocr.available();
     std.log.info("history: text search {s}", .{if (p.searchable) "on (tesseract)" else "off (no libtesseract)"});

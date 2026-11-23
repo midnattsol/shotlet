@@ -7,6 +7,7 @@ const std = @import("std");
 const theme = @import("../../ui/theme.zig");
 const icons = @import("../../ui/icons.zig");
 const motion = @import("../../ui/motion.zig");
+const focus = @import("../../ui/focus.zig");
 const Rect = @import("../../ui/shapes.zig").Rect;
 
 pub const Item = enum {
@@ -151,11 +152,10 @@ pub fn hit(l: *const Layout, x: i32, y: i32) ?Hit {
     return null;
 }
 
-/// The next row up (dir -1) or down (+1) from `cur`, wrapping.
-pub fn step(l: *const Layout, cur: ?u8, dir: i2) u8 {
-    const n: i32 = l.n;
-    const c: i32 = cur orelse return if (dir > 0) 0 else @intCast(n - 1);
-    return @intCast(@mod(c + dir, n));
+/// The next row (or the previous one) from `cur`, wrapping.
+pub fn step(l: *const Layout, cur: ?u8, dir: focus.Dir) ?u8 {
+    const i = focus.cycle(l.n, if (cur) |c| c else null, dir) orelse return null;
+    return @intCast(i);
 }
 
 /// Where a menu of `size` opens for a pointer at `anchor` in a surface
@@ -189,7 +189,8 @@ pub const State = struct {
     /// the row under the pointer or the keyboard focus, and the segment
     hot: ?u8 = null,
     hot_seg: ?u2 = null,
-    shown: motion.Tween = .{ .dur_ms = theme.motion },
+    /// fades in when shown, out when closed
+    life: motion.Life = .{},
     /// the pointer left the pin: the menu closes at this time (0: no)
     close_at: i64 = 0,
 
@@ -200,19 +201,29 @@ pub const State = struct {
 
     /// Open or fading out.
     pub fn visible(s: *const State, now: i64) bool {
-        return s.open or s.shown.at(now) > 0.001;
+        return s.open or (s.life.born != 0 and !s.life.gone(now));
+    }
+
+    /// Fading in or out.
+    pub fn busy(s: *const State, now: i64) bool {
+        return s.life.born != 0 and s.life.busy(now);
+    }
+
+    /// Its opacity now, 0..1.
+    pub fn alpha(s: *const State, now: i64) f64 {
+        return s.life.alpha(now);
     }
 
     pub fn show(s: *State, lay: Layout, at: [2]i32, hot: ?u8, now: i64) void {
-        s.* = .{ .open = true, .at = at, .lay = lay, .hot = hot, .shown = s.shown };
-        s.shown.to(1, now);
+        s.* = .{ .open = true, .at = at, .lay = lay, .hot = hot };
+        s.life.start(now);
     }
 
     pub fn hide(s: *State, now: i64) void {
         if (!s.open) return;
         s.open = false;
         s.close_at = 0;
-        s.shown.to(0, now);
+        s.life.leave(now);
     }
 };
 
@@ -244,9 +255,20 @@ test "hits land on rows and on the opacity segments" {
 
 test "keyboard steps wrap around" {
     const l = layout(.{});
-    try std.testing.expectEqual(@as(u8, 0), step(&l, null, 1));
-    try std.testing.expectEqual(l.n - 1, step(&l, null, -1));
-    try std.testing.expectEqual(@as(u8, 0), step(&l, l.n - 1, 1));
+    try std.testing.expectEqual(@as(?u8, 0), step(&l, null, .next));
+    try std.testing.expectEqual(@as(?u8, l.n - 1), step(&l, null, .prev));
+    try std.testing.expectEqual(@as(?u8, 0), step(&l, l.n - 1, .next));
+}
+
+test "the menu fades in when shown and is gone once faded out" {
+    var s: State = .{};
+    try std.testing.expect(!s.visible(1000) and !s.busy(1000));
+    s.show(layout(.{}), .{ 0, 0 }, null, 1000);
+    try std.testing.expect(s.visible(1000) and s.busy(1000));
+    try std.testing.expectEqual(@as(f64, 1), s.alpha(2000));
+    s.hide(2000);
+    try std.testing.expect(s.visible(2001));
+    try std.testing.expect(!s.visible(3000) and !s.busy(3000));
 }
 
 test "the menu opens toward where there is room, else grows the surface" {

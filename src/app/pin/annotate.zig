@@ -90,8 +90,8 @@ fn finish(p: *Pin) void {
     };
     p.img.deinit(p.gpa);
     p.img.* = img;
-    // the cached scaled copy is of the old picture
-    p.scaled_w = 0;
-    p.scaled_h = 0;
+    // the cached fitted copy is of the old picture (its buffer may be
+    // at the same address)
+    p.fit.deinit(p.gpa);
     std.log.info("pin: updated from the editor ({d}x{d})", .{ img.width, img.height });
 }

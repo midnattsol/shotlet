@@ -6,6 +6,11 @@ const std = @import("std");
 const env_mod = @import("../env.zig");
 const png = @import("../../gfx/png.zig");
 const theme = @import("../../ui/theme.zig");
+const scale_mod = @import("../../ui/scale.zig");
+const floatwin = @import("../../ui/floatwin.zig");
+const fui = @import("../../ui/floatui.zig");
+const motion = @import("../../ui/motion.zig");
+const press_mod = @import("../../ui/press.zig");
 const window = @import("../../platform/api.zig").window;
 const view = @import("view.zig");
 const menu = @import("menu.zig");
@@ -15,15 +20,26 @@ const annotate = @import("annotate.zig");
 const Env = env_mod.Env;
 const Rect = @import("../../ui/shapes.zig").Rect;
 
+/// the room a card's shadow (theme card_shadow: its blur, and its fall
+/// below) takes around it, logical pixels
+pub const shadow_room = 32;
 /// shadow room around the picture, logical pixels
-pub const pad = 14;
-/// the menu's shadow (logical pixels), and the room it takes around the
-/// menu (more below: it falls a little)
-pub const menu_shadow = 10;
-pub const menu_room = menu_shadow + menu_shadow / 2;
+pub const pad = shadow_room;
+/// the room the menu's shadow takes around the menu
+pub const menu_room = shadow_room;
 
 /// What the pointer is over.
 pub const Hover = enum { none, picture, close, more, badge, menu };
+
+/// What a click (press and release on the same one) acts on.
+pub const Target = union(enum) {
+    close,
+    more,
+    badge,
+    /// a middle click on the picture closes the pin
+    dismiss,
+    row: menu.Hit,
+};
 
 pub const Pin = struct {
     gpa: std.mem.Allocator,
@@ -37,8 +53,8 @@ pub const Pin = struct {
     born: i64,
     /// where its centre goes (logical); null: where the compositor puts it
     at: ?[2]i32 = null,
-    /// first drawn (0: not yet): it fades in from there
-    shown_ms: i64 = 0,
+    /// fades in from its first frame
+    life: motion.Life = .{},
     /// "Right-click: Keep on Top" while young (GNOME without the extension)
     hint: bool = false,
     /// a plain window nothing keeps above: the menu offers its window menu
@@ -54,9 +70,10 @@ pub const Pin = struct {
     opacity: view.Opacity = .full,
     /// clicks go through it, but for its badge
     locked: bool = false,
-    scaled: []u32 = &.{},
-    scaled_w: u32 = 0,
-    scaled_h: u32 = 0,
+    /// the picture at its zoomed size, flattened on black
+    fit: fui.FitCache = .{},
+    /// the button pressed, until its release
+    press: press_mod.Press(Target) = .{},
     hover: Hover = .none,
     /// the last pointer position on the surface (buffer pixels)
     pointer: [2]f64 = .{ 0, 0 },
@@ -82,12 +99,12 @@ pub const Pin = struct {
     pub fn deinit(p: *Pin) void {
         if (p.edit) |*e| e.deinit(p.gpa);
         p.ipc.close();
-        p.gpa.free(p.scaled);
+        p.fit.deinit(p.gpa);
     }
 
     /// Buffer pixels per logical pixel.
     pub fn scale(p: *const Pin) f64 {
-        return @as(f64, @floatFromInt(p.win.scale120)) / 120.0;
+        return scale_mod.of(p.win.scale120);
     }
 
     /// The picture's size on screen, buffer pixels.
@@ -120,19 +137,14 @@ pub const Pin = struct {
         p.lh = p.img.height + 2 * pad;
         var title_buf: [48]u8 = undefined;
         const title = p.placeAt(&title_buf);
-        if (p.layer) {
-            try win.open(title, .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh, .layer = .{
-                .layer = .top,
-                .anchor = .{ .top = true, .left = true },
-                .width = p.lw,
-                .height = p.lh,
-                .margin = p.margin,
-            } });
-        } else {
-            try win.open(title, .{ .fullscreen = false, .transparent = true, .width = p.lw, .height = p.lh });
-        }
-        win.report_leave = true;
-        win.setCursor(.arrow) catch {};
+        p.layer = try floatwin.open(win, .{
+            .title = title,
+            .size = .{ p.lw, p.lh },
+            .anchor = .{ .top = true, .left = true },
+            .margin = p.margin,
+            .layer = .top,
+            .keyboard = .on_demand,
+        });
     }
 
     /// With `at`: the margins (layer shell) and the title (the GNOME
@@ -246,7 +258,19 @@ fn toWin(r: Rect) window.Rect {
     return .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
 }
 
-/// `n` buffer pixels in logical pixels, rounded up.
+/// A length of `n` buffer pixels in logical pixels, rounded up (the
+/// surface must hold all of it; scale.toLogical floors positions).
 pub fn logical(n: u32, k: f64) i32 {
     return @intFromFloat(@ceil(@as(f64, @floatFromInt(n)) / k));
+}
+
+test "the shadow room holds a card's shadow in either appearance" {
+    const material = @import("../../ui/material.zig");
+    for ([_]bool{ false, true }) |dark| {
+        const sh = theme.Theme.get(dark, null).card_shadow;
+        const box: Rect = .{ .x = 0, .y = 0, .w = 100, .h = 50 };
+        const fr = material.shadowFootprint(box, sh, 1);
+        try std.testing.expect(-fr.x <= shadow_room and -fr.y <= shadow_room);
+        try std.testing.expect(fr.right() - box.w <= shadow_room and fr.bottom() - box.h <= shadow_room);
+    }
 }

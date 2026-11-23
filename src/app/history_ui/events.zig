@@ -1,10 +1,13 @@
 //! Input of the "Recent captures" panel: hover, clicks, the wheel, and
 //! keys (Enter copies, Delete removes, arrows move the pick, typing
 //! searches, Esc clears the search, then the pick, then closes). Clear
-//! history asks first; any other click or key backs out of it.
+//! history asks first; any other click or key backs out of it. A click
+//! acts on release over what was pressed (ui/press.zig).
 
 const std = @import("std");
 const window = @import("../../platform/api.zig").window;
+const focus = @import("../../ui/focus.zig");
+const utf8 = @import("../../gfx/utf8.zig");
 const layout = @import("layout.zig");
 const Panel = @import("panel.zig").Panel;
 
@@ -63,8 +66,9 @@ pub fn onEvent(self: *Panel, ev: window.InputEvent) !bool {
         .pointer_motion => |m| onMotion(self, m.x, m.y),
         .pointer_button => |b| {
             onMotion(self, b.x, b.y);
-            if (b.button != .left or !b.pressed) return true;
-            return onPress(self, b.y);
+            if (b.button != .left) return true;
+            if (b.pressed) return onPress(self, b.x, b.y);
+            return onClick(self, self.click.up(hovered(self)) orelse return true);
         },
         .pointer_axis => |a| {
             const maxs = @max(0, self.contentH() - self.gridViewH());
@@ -80,21 +84,38 @@ pub fn onEvent(self: *Panel, ev: window.InputEvent) !bool {
     return true;
 }
 
-/// A left press on what is hovered; returns false to close.
-fn onPress(self: *Panel, by: f64) !bool {
+/// What a click now would act on (the hover onMotion keeps).
+fn hovered(self: *const Panel) ?layout.Target {
+    if (self.hover_close) return .close;
+    if (self.confirm_clear) return if (self.hover_confirm) |c| .{ .confirm = c } else .outside;
+    if (self.hover_clear) return .clear;
+    if (self.hover_action) |a| return .{ .action = a };
+    if (self.hover_item) |i| return .{ .item = i };
+    return null;
+}
+
+/// A left press: on a target, the start of a click; on the header, a
+/// move of the window.
+fn onPress(self: *Panel, bx: f64, by: f64) !bool {
     const y: i32 = @intFromFloat(by / self.k() - pad);
-    if (self.hover_close) return false;
-    if (self.confirm_clear) return try onConfirmPress(self);
-    if (self.hover_clear) {
-        askClear(self);
-    } else if (self.hover_action) |a| {
-        self.act(@fromBackingInt(@intCast(a)));
-    } else if (self.hover_item) |i| {
-        self.selected = if (self.selected == i) null else i;
-        self.dirty = true;
-    } else if (y < inset + header_h + 4) {
-        try self.win.startMoveOf(0);
+    const t = hovered(self);
+    self.click.down(t, bx, by);
+    if (t == null and y < inset + header_h + 4) try self.win.startMoveOf(0);
+    return true;
+}
+
+/// A click on `t`; returns false to close.
+fn onClick(self: *Panel, t: layout.Target) !bool {
+    switch (t) {
+        .close => return false,
+        .clear => askClear(self),
+        .confirm => |c| if (c == .clear) try self.clearAll() else backOut(self),
+        .outside => backOut(self),
+        .action => |a| self.act(@fromBackingInt(@intCast(a))),
+        .item => |i| self.selected = if (self.selected == i) null else i,
     }
+    self.hover_confirm = null;
+    self.dirty = true;
     return true;
 }
 
@@ -102,29 +123,20 @@ fn onPress(self: *Panel, by: f64) !bool {
 fn askClear(self: *Panel) void {
     self.confirm_clear = true;
     self.hover_clear = false;
-    self.dirty = true;
     std.log.info("history: asking before clearing {d} captures", .{self.items.items.len});
 }
 
-/// While asking: Clear clears, any other click backs out.
-fn onConfirmPress(self: *Panel) !bool {
-    if (self.hover_confirm == .clear) {
-        try self.clearAll();
-    } else {
-        self.confirm_clear = false;
-        std.log.info("history: clearing cancelled", .{});
-    }
-    self.hover_confirm = null;
-    self.dirty = true;
-    return true;
+/// Not clearing after all.
+fn backOut(self: *Panel) void {
+    self.confirm_clear = false;
+    std.log.info("history: clearing cancelled", .{});
 }
 
 /// A key press; returns false to close.
 fn onKey(self: *Panel, key: window.Key) bool {
     if (self.confirm_clear) {
         // any key backs out of clearing; Esc does nothing else
-        self.confirm_clear = false;
-        std.log.info("history: clearing cancelled", .{});
+        backOut(self);
         if (key.code == .escape) return true;
     }
     switch (key.code) {
@@ -139,12 +151,10 @@ fn onKey(self: *Panel, key: window.Key) bool {
         .delete => self.act(.delete),
         .enter, .kp_enter => self.act(.copy),
         .backspace => if (self.search.items.len > 0) {
-            var n = self.search.items.len - 1;
-            while (n > 0 and (self.search.items[n] & 0xC0) == 0x80) n -= 1;
-            self.search.shrinkRetainingCapacity(n);
+            self.search.shrinkRetainingCapacity(utf8.prevBoundary(self.search.items, self.search.items.len));
             self.filter();
         },
-        .left, .right, .up, .down, .tab => moveSelection(self, key.code, key.shift),
+        .left, .right, .up, .down, .tab => moveSelection(self, key),
         else => if (key.ctrl and key.code == .c) {
             self.act(.copy);
         } else if (key.ctrl and key.code == .s) {
@@ -157,19 +167,17 @@ fn onKey(self: *Panel, key: window.Key) bool {
     return true;
 }
 
-fn moveSelection(self: *Panel, code: window.KeyCode, shift: bool) void {
-    if (self.shown.items.len == 0) return;
+/// The arrows and Tab move the pick through the grid (up and down by a
+/// row of two), wrapping.
+fn moveSelection(self: *Panel, key: window.Key) void {
     const n = self.shown.items.len;
-    var pos: usize = if (self.selected) |s| std.mem.indexOfScalar(usize, self.shown.items, s) orelse 0 else n - 1;
-    const step: usize = switch (code) {
-        .up => n - @min(n, 2),
-        .down => 2,
-        .left => n - 1,
-        .tab => if (shift) n - 1 else 1,
-        else => 1,
+    if (n == 0) return;
+    const cur: ?usize = if (self.selected) |s| std.mem.indexOfScalar(usize, self.shown.items, s) else null;
+    const pos: usize = switch (key.code) {
+        .down => if (cur) |c| (c + 2) % n else 0,
+        .up => if (cur) |c| (c + n - @min(n, 2)) % n else n - 1,
+        else => focus.cycle(n, cur, if (focus.action(key, .horizontal) == .prev) .prev else .next).?,
     };
-    if (self.selected == null) pos = if (code == .left or (code == .tab and shift)) 0 else n - 1;
-    pos = (pos + step) % n;
     self.selected = self.shown.items[pos];
     // keep it in view
     const r = self.itemRect(pos);

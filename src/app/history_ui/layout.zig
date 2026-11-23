@@ -3,13 +3,15 @@
 //! the action bar of the picked capture.
 
 const shapes = @import("../../ui/shapes.zig");
-const fui = @import("../../ui/floatui.zig");
+const icons = @import("../../ui/icons.zig");
 const Panel = @import("panel.zig").Panel;
 const Rect = shapes.Rect;
 
 // layout, logical pixels (the mockup's panel)
 pub const panel_w = 300;
-pub const pad = 18; // shadow room around the panel
+/// shadow room around the panel (theme card_shadow: its blur, and its
+/// fall below)
+pub const pad = 32;
 pub const inset = 14;
 pub const header_h = 20;
 pub const field_h = 32;
@@ -22,7 +24,7 @@ pub const footer_button_h = 28;
 pub const max_panel_h = 620;
 
 pub const Action = enum { copy, save, annotate, pin, delete };
-pub const action_icons = [_]fui.Icon{ .copy, .save, .pencil, .pin, .trash };
+pub const action_icons = [_]icons.Icon{ .copy, .save, .pen, .pin, .trash };
 pub const action_names = [_][]const u8{ "Copy", "Save", "Annotate", "Pin", "Delete" };
 
 pub fn searchTop(self: *const Panel) i32 {
@@ -79,12 +81,26 @@ pub fn clearRect(self: *const Panel) Rect {
 /// Cancel and a destructive Clear.
 pub const Confirm = enum { cancel, clear };
 
+/// What a click (press and release on the same one) acts on.
+pub const Target = union(enum) {
+    close,
+    /// "Clear history…"
+    clear,
+    confirm: Confirm,
+    /// anywhere else while asking before clearing: backs out
+    outside,
+    action: usize,
+    /// a capture of the grid (its index in items)
+    item: usize,
+};
+
 pub fn confirmRect(self: *const Panel, c: Confirm) Rect {
     const y = self.panelH() - actions_h + 4;
-    const clear: Rect = .{ .x = panel_w - inset - 60, .y = y, .w = 60, .h = footer_button_h };
+    // wide enough for barkit.textButton's labels
+    const clear: Rect = .{ .x = panel_w - inset - 64, .y = y, .w = 64, .h = footer_button_h };
     return switch (c) {
         .clear => clear,
-        .cancel => .{ .x = clear.x - 8 - 64, .y = y, .w = 64, .h = footer_button_h },
+        .cancel => .{ .x = clear.x - 8 - 76, .y = y, .w = 76, .h = footer_button_h },
     };
 }
 

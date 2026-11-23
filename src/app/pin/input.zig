@@ -1,7 +1,8 @@
 //! A pin's pointer: hover (its buttons, the menu's rows), drag to move
 //! (a hand over the picture), scroll to zoom, right-click or ⋯ for the
-//! menu, and clicks on the menu and the lock badge. Event positions are
-//! buffer pixels on the surface.
+//! menu, and clicks on its buttons, the menu and the lock badge (a click
+//! acts on release over what was pressed: ui/press.zig). Event positions
+//! are buffer pixels on the surface.
 
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
@@ -12,6 +13,7 @@ const chrome = @import("chrome.zig");
 const view = @import("view.zig");
 const keys = @import("keys.zig");
 const actions = @import("actions.zig");
+const scale = @import("../../ui/scale.zig");
 
 const Pin = state.Pin;
 const Hover = state.Hover;
@@ -50,9 +52,7 @@ fn onAxis(p: *Pin, v: f64) void {
     p.setZoom(view.zoomStep(p.zoom, steps));
 }
 
-fn logical(v: f64, k: f64) i32 {
-    return @intFromFloat(@floor(v / k));
-}
+const logical = scale.toLogical;
 
 /// What is under the pointer; on the menu, its hot row follows.
 fn hoverAt(p: *Pin, x: f64, y: f64, k: f64) Hover {
@@ -70,7 +70,7 @@ fn hoverAt(p: *Pin, x: f64, y: f64, k: f64) Hover {
     }
     if (!p.picRect(k).contains(lx, ly)) return .none;
     const ox = state.pad * k;
-    return chrome.under(p.scaled_w, k, x - ox, y - ox, p.locked);
+    return chrome.under(p.picSize()[0], k, x - ox, y - ox, p.locked);
 }
 
 fn onMotion(p: *Pin, x: f64, y: f64, k: f64) !void {
@@ -119,50 +119,69 @@ fn dragTo(p: *Pin, from: [2]f64, inside: bool, x: f64, y: f64, k: f64) !void {
 
 fn onButton(p: *Pin, button: window.Button, pressed: bool, x: f64, y: f64, k: f64) !void {
     const now = sys.monoMs();
+    if (!pressed) return onRelease(p, button, x, y, k);
+    p.press.cancel();
     if (p.menu.open) {
         if (p.hover == .menu) {
-            // a row acts when the button comes up on it
-            if (!pressed and (button == .left or button == .right)) {
-                const h = menu.hit(&p.menu.lay, logical(x, k) - p.menu.at[0], logical(y, k) - p.menu.at[1]) orelse return;
-                actions.activate(p, h);
-            }
+            if (button == .left or button == .right) if (menuHit(p, x, y, k)) |h| p.press.down(.{ .row = h }, x, y);
             return;
         }
         // a press elsewhere on the pin closes the menu; a right-click
         // opens it again there
-        if (pressed) p.closeMenu(now);
+        p.closeMenu(now);
         if (button != .right) return;
     }
-    if (!pressed) {
-        if (button == .left) p.drag_from = null;
-        return;
-    }
     switch (button) {
-        .left => try onLeftPress(p, x, y, k, now),
+        .left => try onLeftPress(p, x, y),
+        // a context menu opens on the press, as everywhere
         .right => p.openMenu(.{ logical(x, k), logical(y, k) }, false, now),
-        .middle => if (!p.locked) {
-            p.quit = true;
-        },
-        else => {},
+        else => p.press.down(targetAt(p, button, x, y, k), x, y),
     }
 }
 
-fn onLeftPress(p: *Pin, x: f64, y: f64, k: f64, now: i64) !void {
-    switch (p.hover) {
-        .close => p.quit = true,
+/// The menu's row (and segment) under x, y.
+fn menuHit(p: *const Pin, x: f64, y: f64, k: f64) ?menu.Hit {
+    return menu.hit(&p.menu.lay, logical(x, k) - p.menu.at[0], logical(y, k) - p.menu.at[1]);
+}
+
+/// What a click of `button` at x, y would act on.
+fn targetAt(p: *const Pin, button: window.Button, x: f64, y: f64, k: f64) ?state.Target {
+    if (button == .middle) return switch (p.hover) {
+        .picture, .close, .more => .dismiss,
+        else => null,
+    };
+    return switch (p.hover) {
+        .close => .close,
+        .more => .more,
+        .badge => .badge,
+        .menu => if (menuHit(p, x, y, k)) |h| .{ .row = h } else null,
+        .picture, .none => null,
+    };
+}
+
+fn onLeftPress(p: *Pin, x: f64, y: f64) !void {
+    if (p.hover != .picture) return p.press.down(targetAt(p, .left, x, y, p.scale()), x, y);
+    if (p.layer) {
+        p.drag_from = .{ x, y };
+        p.drag_at = .{ @floatFromInt(p.margin[0]), @floatFromInt(p.margin[3]) };
+        p.drag_rel = false;
+        _ = p.win.takeRelative();
+    } else try p.win.startMoveOf(0);
+}
+
+/// A release: the click, when it is over what was pressed.
+fn onRelease(p: *Pin, button: window.Button, x: f64, y: f64, k: f64) void {
+    if (button == .left) p.drag_from = null;
+    const t = p.press.up(targetAt(p, button, x, y, k)) orelse return;
+    switch (t) {
+        .close, .dismiss => p.quit = true,
         .more => {
             // below the ⋯ button, from its left edge
-            const c = chrome.centre(.more, p.scaled_w, k);
+            const c = chrome.centre(.more, p.picSize()[0], k);
             const anchor: [2]i32 = .{ logical(c[0], k) + state.pad - chrome.radius, logical(c[1], k) + state.pad + chrome.radius + 4 };
-            p.openMenu(anchor, false, now);
+            p.openMenu(anchor, false, sys.monoMs());
         },
         .badge => actions.setLocked(p, false),
-        .picture => if (p.layer) {
-            p.drag_from = .{ x, y };
-            p.drag_at = .{ @floatFromInt(p.margin[0]), @floatFromInt(p.margin[3]) };
-            p.drag_rel = false;
-            _ = p.win.takeRelative();
-        } else try p.win.startMoveOf(0),
-        .none, .menu => {},
+        .row => |h| actions.activate(p, h),
     }
 }

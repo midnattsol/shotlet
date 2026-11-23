@@ -34,6 +34,7 @@ const png = @import("../gfx/png.zig");
 const text = @import("../gfx/text.zig");
 const theme = @import("../ui/theme.zig");
 const motion = @import("../ui/motion.zig");
+const floatwin = @import("../ui/floatwin.zig");
 const state = @import("pin/state.zig");
 const view = @import("pin/view.zig");
 const draw = @import("pin/draw.zig");
@@ -67,7 +68,7 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *png.Image, what: []const u8,
 
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
-    var pin: Pin = .{ .gpa = gpa, .env = env, .win = &win, .img = img, .th = theme.Theme.get(false, null), .layer = win.hasLayerShell(), .born = sys.monoMs(), .at = at };
+    var pin: Pin = .{ .gpa = gpa, .env = env, .win = &win, .img = img, .th = theme.of(.{}), .layer = win.hasLayerShell(), .born = sys.monoMs(), .at = at };
     defer pin.deinit();
     askDesktop(&pin);
     pin.ipc = ipc.Listener.open(env);
@@ -83,9 +84,10 @@ pub fn show(gpa: std.mem.Allocator, env: Env, img: *png.Image, what: []const u8,
     }
 }
 
-/// The desktop's appearance for the menu, and whether anything keeps the
-/// pin above (GNOME without the Shotlet extension cannot): one short
-/// session connection.
+/// The desktop's appearance (light or dark, the accent, reduced motion)
+/// and whether anything keeps the pin above (GNOME without the Shotlet
+/// extension cannot): one short session connection for both, so not
+/// theme.load, which opens its own.
 fn askDesktop(p: *Pin) void {
     const toplevel = !p.layer and shell.applies();
     var bus = desktop.connectBrief(p.gpa, p.env) catch {
@@ -117,7 +119,7 @@ fn loop(p: *Pin) !void {
             p.hint = false;
             p.dirty = true;
         }
-        if (p.dirty and !p.win.frame_pending and p.win.width > 0) {
+        if (p.dirty and floatwin.canDraw(p.win)) {
             p.dirty = false;
             try draw.frame(p, k);
         }

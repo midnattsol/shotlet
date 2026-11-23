@@ -4,9 +4,11 @@
 //! Positions in buffer pixels from the picture's top-left unless said.
 
 const std = @import("std");
-const text = @import("../../gfx/text.zig");
 const icons = @import("../../ui/icons.zig");
 const fui = @import("../../ui/floatui.zig");
+const selchrome = @import("../../ui/selchrome.zig");
+const scale = @import("../../ui/scale.zig");
+const Theme = @import("../../ui/theme.zig").Theme;
 const Rect = @import("../../ui/shapes.zig").Rect;
 const Hover = @import("state.zig").Hover;
 
@@ -52,55 +54,48 @@ pub const Look = struct {
 };
 
 /// The chrome `look` asks for, on the picture's card.
-pub fn draw(cv: *fui.Canvas, k: f64, pw: u32, ph: u32, look: Look) void {
-    if (look.locked) drawBadge(cv, k, pw, look.hover == .badge);
+pub fn draw(cv: *fui.Canvas, k: f64, pw: u32, ph: u32, look: Look, th: Theme) void {
+    if (look.locked) drawBadge(cv, k, pw, look.hover == .badge, th);
     if (!look.locked and look.hover != .none) {
-        button(cv, k, centre(.close, pw, k), look.hover == .close, .close);
-        button(cv, k, centre(.more, pw, k), look.hover == .more or look.hover == .menu, .more);
-        if (look.zoom != 1) drawZoom(cv, k, ph, look.zoom);
+        button(cv, k, centre(.close, pw, k), look.hover == .close, .close, th);
+        button(cv, k, centre(.more, pw, k), look.hover == .more or look.hover == .menu, .more, th);
+        if (look.zoom != 1) drawZoom(cv, k, ph, look.zoom, th);
     }
-    if (look.hint) drawHint(cv, k, pw, ph);
+    if (look.hint) drawHint(cv, k, pw, ph, th);
 }
 
-fn button(cv: *fui.Canvas, k: f64, c: [2]f64, hot: bool, icon: icons.Icon) void {
-    cv.fillCircleAA(c[0], c[1], radius * k, if (hot) fui.btn_round_hover else fui.btn_round);
-    const s: i32 = @intFromFloat(@round(14 * k));
-    icons.drawStroke(cv, icon, @intFromFloat(@round(c[0] - @as(f64, @floatFromInt(s)) / 2)), @intFromFloat(@round(c[1] - @as(f64, @floatFromInt(s)) / 2)), s, if (icon == .close) 2.4 else 3, fui.white);
+fn button(cv: *fui.Canvas, k: f64, c: [2]f64, hot: bool, icon: icons.Icon, th: Theme) void {
+    fui.roundButton(cv, c[0], c[1], radius * k, icon, .{ .hot = hot }, k, th);
 }
 
-/// The lock badge; hovered, it says what a click does.
-fn drawBadge(cv: *fui.Canvas, k: f64, pw: u32, hot: bool) void {
+/// The lock badge; hovered, a tooltip says what a click does.
+fn drawBadge(cv: *fui.Canvas, k: f64, pw: u32, hot: bool, th: Theme) void {
     const c = centre(.close, pw, k);
-    button(cv, k, c, hot, .lock);
+    button(cv, k, c, hot, .lock, th);
     if (!hot) return;
-    const msg = "Click to unlock";
-    const fs = 11 * k;
-    const tw = text.width(fs, msg) + @as(i32, @intFromFloat(16 * k));
-    const th: i32 = @intFromFloat(22 * k);
-    const x = @as(i32, @intFromFloat(c[0] - radius * k - gap * k)) - tw;
-    const y = @as(i32, @intFromFloat(c[1])) - @divTrunc(th, 2);
-    cv.fillRoundRectAA(x, y, tw, th, 11 * k, 0xCC000000);
-    fui.textCentered(cv, .{ .x = x, .y = y, .w = tw, .h = th }, fs, fui.white, .regular, msg);
+    const sz = selchrome.tooltipSize(tip, "", k);
+    const x = @as(i32, @intFromFloat(c[0] - radius * k)) - scale.px(gap, k) - sz[0];
+    const y = @as(i32, @intFromFloat(c[1])) - @divTrunc(sz[1], 2);
+    selchrome.tooltip(cv, .{ .x = x, .y = y, .w = sz[0], .h = sz[1] }, tip, "", k, th);
 }
 
-fn drawZoom(cv: *fui.Canvas, k: f64, ph: u32, zoom: f64) void {
+const tip = "Click to unlock";
+
+/// The zoom, bottom-left, while away from 100%.
+fn drawZoom(cv: *fui.Canvas, k: f64, ph: u32, zoom: f64, th: Theme) void {
     var zb: [16]u8 = undefined;
     const zs = std.fmt.bufPrint(&zb, "{d}%", .{@as(u32, @intFromFloat(@round(zoom * 100)))}) catch "";
-    const tw = text.widthStyled(11 * k, text.Style.regular.num(), zs) + @as(i32, @intFromFloat(12 * k));
-    const th: i32 = @intFromFloat(20 * k);
-    const r: Rect = .{ .x = @intFromFloat(inset * k), .y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(inset * k)), .w = tw, .h = th };
-    cv.fillRoundRectAA(r.x, r.y, r.w, r.h, 10 * k, 0x99000000);
-    fui.textCentered(cv, r, 11 * k, fui.white, text.Style.regular.num(), zs);
+    const h = scale.px(fui.scrim_pill_h, k);
+    const r: Rect = .{ .x = scale.px(inset, k), .y = @as(i32, @intCast(ph)) - h - scale.px(inset, k), .w = fui.scrimPillWidth(zs, null, k), .h = h };
+    fui.scrimPill(cv, r, zs, null, .pill, k, th);
 }
 
-fn drawHint(cv: *fui.Canvas, k: f64, pw: u32, ph: u32) void {
+fn drawHint(cv: *fui.Canvas, k: f64, pw: u32, ph: u32, th: Theme) void {
     const msg = "Right-click: Keep on Top";
-    const tw = text.width(11 * k, msg) + @as(i32, @intFromFloat(16 * k));
-    const th: i32 = @intFromFloat(22 * k);
-    const x = @divTrunc(@as(i32, @intCast(pw)) - tw, 2);
-    const y = @as(i32, @intCast(ph)) - th - @as(i32, @intFromFloat(10 * k));
-    cv.fillRoundRectAA(x, y, tw, th, 11 * k, 0xCC000000);
-    fui.textCentered(cv, .{ .x = x, .y = y, .w = tw, .h = th }, 11 * k, fui.white, .regular, msg);
+    const w = fui.scrimPillWidth(msg, null, k);
+    const h = scale.px(fui.scrim_pill_h, k);
+    const r: Rect = .{ .x = @divTrunc(@as(i32, @intCast(pw)) - w, 2), .y = @as(i32, @intCast(ph)) - h - scale.px(10, k), .w = w, .h = h };
+    fui.scrimPill(cv, r, msg, null, .strong, k, th);
 }
 
 test "the buttons sit in the top-right corner, ⋯ left of close" {
