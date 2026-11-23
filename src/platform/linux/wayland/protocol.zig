@@ -228,6 +228,7 @@ pub const wp_fractional_scale_manager_v1 = struct {
 };
 
 pub const wp_fractional_scale_v1 = struct {
+    pub const destroy = 0;
     pub const ev_preferred_scale = 0;
 };
 
@@ -291,4 +292,97 @@ pub const wl_data_offer = struct {
     pub const finish = 3; // since v3
     pub const set_actions = 4; // since v3
     pub const ev_offer = 0;
+};
+
+/// relative-pointer-unstable-v1
+pub const zwp_relative_pointer_manager_v1 = struct {
+    pub const get_relative_pointer = 1;
+};
+
+pub const zwp_relative_pointer_v1 = struct {
+    pub const destroy = 0;
+    pub const ev_relative_motion = 0;
+};
+
+/// xdg-foreign: zxdg_exporter_v2 and v1 share these requests and events
+pub const zxdg_exporter_v2 = struct {
+    pub const destroy = 0;
+    pub const export_toplevel = 1;
+};
+
+pub const zxdg_exported_v2 = struct {
+    pub const destroy = 0;
+    pub const ev_handle = 0;
+};
+
+/// ext-image-capture-source-v1 (output sources)
+pub const ext_output_image_capture_source_manager_v1 = struct {
+    pub const create_source = 0;
+    pub const destroy = 1;
+};
+
+pub const ext_image_capture_source_v1 = struct {
+    pub const destroy = 0;
+};
+
+/// ext-image-copy-capture-v1
+pub const ext_image_copy_capture_manager_v1 = struct {
+    pub const create_session = 0;
+    pub const destroy = 2;
+};
+
+pub const ext_image_copy_capture_session_v1 = struct {
+    pub const create_frame = 0;
+    pub const destroy = 1;
+    pub const ev_buffer_size = 0;
+    pub const ev_shm_format = 1;
+    pub const ev_done = 4;
+    pub const ev_stopped = 5;
+};
+
+pub const ext_image_copy_capture_frame_v1 = struct {
+    pub const destroy = 0;
+    pub const attach_buffer = 1;
+    pub const damage_buffer = 2;
+    pub const capture = 3;
+    pub const ev_transform = 0;
+    pub const ev_ready = 3;
+    pub const ev_failed = 4;
+};
+
+/// wlr-screencopy-unstable-v1
+pub const zwlr_screencopy_manager_v1 = struct {
+    pub const capture_output = 0;
+    pub const destroy = 2;
+};
+
+pub const zwlr_screencopy_frame_v1 = struct {
+    pub const copy = 0;
+    pub const destroy = 1;
+    pub const ev_buffer = 0;
+    pub const ev_flags = 1;
+    pub const ev_ready = 2;
+    pub const ev_failed = 3;
+    pub const ev_buffer_done = 6; // since v3
+    pub const flag_y_invert: u32 = 1;
+};
+
+/// wlr-virtual-pointer-unstable-v1
+pub const zwlr_virtual_pointer_manager_v1 = struct {
+    pub const create_virtual_pointer = 0;
+};
+
+pub const zwlr_virtual_pointer_v1 = struct {
+    pub const motion_absolute = 1;
+    pub const frame = 4;
+    pub const axis_source = 5;
+    pub const axis_discrete = 7;
+    pub const destroy = 8;
+};
+
+/// KWin's fake input (offered only to clients KWin trusts)
+pub const org_kde_kwin_fake_input = struct {
+    pub const authenticate = 0;
+    pub const axis = 3;
+    pub const pointer_motion_absolute = 9; // since v3
 };

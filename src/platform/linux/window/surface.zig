@@ -3,7 +3,6 @@
 //! scale and frame events of each surface's objects.
 
 const std = @import("std");
-const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const buffers = @import("buffers.zig");
@@ -74,9 +73,8 @@ pub const Surface = struct {
     bounds_w: u32 = 0, // from xdg_toplevel.configure_bounds (logical)
     bounds_h: u32 = 0,
 
-    pool: u32 = 0,
-    pool_fd: sys.fd_t = -1,
-    pool_mem: []align(std.heap.page_size_min) u8 = &.{},
+    /// the two buffers' memory; pool.id 0 while there are none
+    pool: wl.shm.Pool = .{},
     buffers: [2]Buffer = .{ .{}, .{} },
     cur_buf: usize = 0,
     /// buffer index of the last present, for SHOTLET_DUMP_FRAME
@@ -176,7 +174,7 @@ pub fn destroy(w: *Window, idx: u8) void {
     const c = &w.conn;
     const s = &w.surfaces[idx];
     buffers.destroyPool(c, s);
-    if (s.fs_obj != 0) c.request(s.fs_obj, 0, &.{}) catch {}; // wp_fractional_scale_v1.destroy
+    if (s.fs_obj != 0) c.request(s.fs_obj, wl.wp_fractional_scale_v1.destroy, &.{}) catch {};
     if (s.viewport != 0) c.request(s.viewport, wl.wp_viewport.destroy, &.{}) catch {};
     if (s.toplevel != 0) c.request(s.toplevel, wl.xdg_toplevel.destroy, &.{}) catch {};
     if (s.layer_surf != 0) c.request(s.layer_surf, wl.zwlr_layer_surface_v1.destroy, &.{}) catch {};

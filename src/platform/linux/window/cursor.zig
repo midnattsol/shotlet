@@ -6,7 +6,6 @@
 //! SHOTLET_NO_CURSOR_SHAPE=1 ignores the protocol (registry.zig).
 
 const std = @import("std");
-const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const art = @import("cursor_art.zig");
@@ -27,11 +26,11 @@ pub const Cursors = struct {
     /// one wl_buffer per Cursor at `scale`; 0 until first needed
     surface: u32 = 0,
     scale: u32 = 0,
-    pool_mem: []align(std.heap.page_size_min) u8 = &.{},
+    pool: wl.shm.Pool = .{},
     buffers: [n_kinds]u32 = @splat(0),
 
-    pub fn deinit(self: *Cursors) void {
-        if (self.pool_mem.len > 0) sys.munmap(self.pool_mem);
+    pub fn deinit(self: *Cursors, c: *wl.Connection) void {
+        self.pool.deinit(c);
     }
 };
 
@@ -132,33 +131,21 @@ fn drawAll(w: *Window, scale: u32) !void {
     const cs = &w.cursors;
     const side = art.size * scale;
     const buf_size: usize = side * side * 4;
-    const total = buf_size * n_kinds;
-    const fd = try sys.memfdCreate("shotlet-cursor", sys.MFD_CLOEXEC);
-    defer sys.close(fd);
-    try sys.ftruncate(fd, total);
-    const mem = try sys.mmapRw(fd, total);
-    if (cs.pool_mem.len > 0) sys.munmap(cs.pool_mem);
-    cs.pool_mem = mem;
-    cs.scale = scale;
-
-    const pool = c.newId();
-    try c.request(w.globals.shm, wl.wl_shm.create_pool, &.{ .{ .new_id = pool }, .{ .fd = fd }, .{ .int = @intCast(total) } });
-    const pixels: [*]u32 = @ptrCast(@alignCast(mem.ptr));
+    var pool: wl.shm.Pool = try .create(c, w.globals.shm, buf_size * n_kinds);
+    errdefer pool.deinit(c);
+    for (&cs.buffers) |*id| if (id.* != 0) {
+        try c.request(id.*, wl.wl_buffer.destroy, &.{});
+        id.* = 0;
+    };
     for (&cs.buffers, std.enums.values(Cursor), 0..) |*id, kind, i| {
-        if (id.* != 0) try c.request(id.*, wl.wl_buffer.destroy, &.{});
-        id.* = c.newId();
-        try c.request(pool, wl.wl_shm_pool.create_buffer, &.{
-            .{ .new_id = id.* },
-            .{ .int = @intCast(i * buf_size) },
-            .{ .int = @intCast(side) },
-            .{ .int = @intCast(side) },
-            .{ .int = @intCast(side * 4) },
-            .{ .uint = wl.wl_shm.format_argb8888 },
-        });
-        art.draw(kind, scale, pixels[i * side * side ..][0 .. side * side]);
+        id.* = try pool.buffer(c, i * buf_size, side, side, side * 4, wl.wl_shm.format_argb8888);
+        const px: [*]u32 = @ptrCast(@alignCast(pool.bytes(i * buf_size, buf_size).ptr));
+        art.draw(kind, scale, px[0 .. side * side]);
     }
-    try c.request(pool, wl.wl_shm_pool.destroy, &.{});
-    try c.flush(); // the fd travels with the queued bytes: before close
+    pool.drop(c);
+    cs.pool.deinit(c);
+    cs.pool = pool;
+    cs.scale = scale;
 }
 
 test "every cursor names a shape of its own" {

@@ -45,6 +45,26 @@ pub const wl_data_device = protocol.wl_data_device;
 pub const dnd_action_copy = protocol.dnd_action_copy;
 pub const dnd_action_move = protocol.dnd_action_move;
 pub const wl_data_offer = protocol.wl_data_offer;
+pub const zwp_relative_pointer_manager_v1 = protocol.zwp_relative_pointer_manager_v1;
+pub const zwp_relative_pointer_v1 = protocol.zwp_relative_pointer_v1;
+pub const zxdg_exporter_v2 = protocol.zxdg_exporter_v2;
+pub const zxdg_exported_v2 = protocol.zxdg_exported_v2;
+pub const ext_output_image_capture_source_manager_v1 = protocol.ext_output_image_capture_source_manager_v1;
+pub const ext_image_capture_source_v1 = protocol.ext_image_capture_source_v1;
+pub const ext_image_copy_capture_manager_v1 = protocol.ext_image_copy_capture_manager_v1;
+pub const ext_image_copy_capture_session_v1 = protocol.ext_image_copy_capture_session_v1;
+pub const ext_image_copy_capture_frame_v1 = protocol.ext_image_copy_capture_frame_v1;
+pub const zwlr_screencopy_manager_v1 = protocol.zwlr_screencopy_manager_v1;
+pub const zwlr_screencopy_frame_v1 = protocol.zwlr_screencopy_frame_v1;
+pub const zwlr_virtual_pointer_manager_v1 = protocol.zwlr_virtual_pointer_manager_v1;
+pub const zwlr_virtual_pointer_v1 = protocol.zwlr_virtual_pointer_v1;
+pub const org_kde_kwin_fake_input = protocol.org_kde_kwin_fake_input;
+
+/// Shared-memory pools and buffers (wayland/shm.zig).
+pub const shm = @import("wayland/shm.zig");
+/// Output (monitor) geometry from wl_output and zxdg_output_v1
+/// (wayland/output.zig).
+pub const output = @import("wayland/output.zig");
 
 // --- marshaling helper types ---
 
@@ -67,7 +87,44 @@ pub const Event = struct {
     opcode: u16,
     /// argument payload; valid until the next readEvent call
     body: []const u8,
+
+    pub fn reader(self: Event) ArgReader {
+        return .{ .data = self.body };
+    }
+
+    /// A wl_display.error: logged, and error.ProtocolError (any other
+    /// event: nothing).
+    pub fn checkDisplayError(self: Event) !void {
+        if (self.object != wl_display.id or self.opcode != wl_display.ev_error) return;
+        var r = self.reader();
+        const obj = try r.uint();
+        const code = try r.uint();
+        const msg = try r.string();
+        std.log.err("wayland protocol error on object {d} code {d}: {s}", .{ obj, code, msg });
+        return error.ProtocolError;
+    }
 };
+
+/// A wl_registry.global event: an interface the compositor offers.
+pub const Global = struct {
+    name: u32,
+    interface: []const u8,
+    version: u32,
+
+    /// The global announced by `ev`; null for any other event.
+    pub fn of(registry: u32, ev: Event) ArgReader.Error!?Global {
+        if (ev.object != registry or ev.opcode != wl_registry.ev_global) return null;
+        var r = ev.reader();
+        return .{ .name = try r.uint(), .interface = try r.string(), .version = try r.uint() };
+    }
+
+    pub fn is(self: Global, interface: []const u8) bool {
+        return std.mem.eql(u8, self.interface, interface);
+    }
+};
+
+/// A bound global: its object and the version agreed on.
+pub const Bound = struct { id: u32, version: u32 };
 
 /// Sequential decoder for event arguments. Every accessor is bounds
 /// checked: a short or malformed payload yields error.Malformed instead of
@@ -242,7 +299,6 @@ pub const Connection = struct {
     }
 
     // --- convenience wrappers ---
-    // --- convenience wrappers ---
 
     pub fn sync(self: *Connection) !u32 {
         const cb = self.newId();
@@ -266,6 +322,37 @@ pub const Connection = struct {
         });
         return id;
     }
+
+    /// Bind `g` at its version, at most `max_version`.
+    pub fn bindGlobal(self: *Connection, registry: u32, g: Global, max_version: u32) !Bound {
+        const v = @min(g.version, max_version);
+        return .{ .id = try self.bind(registry, g.name, g.interface, v), .version = v };
+    }
+
+    /// Send what is queued and dispatch events to `onEvent(ctx, ev)`
+    /// until the compositor has handled all of it (wl_display.sync).
+    pub fn roundtrip(self: *Connection, ctx: anytype, comptime onEvent: anytype) !void {
+        const cb = try self.sync();
+        while (true) {
+            const ev = try self.readEvent();
+            if (ev.object == cb and ev.opcode == wl_callback.ev_done) return;
+            try onEvent(ctx, ev);
+        }
+    }
+
+    /// The next event of object `obj`, dispatching the others to
+    /// `onOther(ctx, ev)`; error.Timeout at `deadline` (sys.monoMs).
+    pub fn waitFor(self: *Connection, obj: u32, deadline: i64, ctx: anytype, comptime onOther: anytype) !Event {
+        while (true) {
+            const ev = (try self.pollEvent()) orelse blk: {
+                try self.flush();
+                if (!try sys.waitReadable(self.fd, deadline)) return error.Timeout;
+                break :blk try self.readEvent();
+            };
+            if (ev.object == obj) return ev;
+            try onOther(ctx, ev);
+        }
+    }
 };
 
 pub const Parsed = struct { event: Event, size: usize };
@@ -283,6 +370,22 @@ pub fn parseMessage(buf: []const u8) error{Malformed}!?Parsed {
     if (size < 8 or size % 4 != 0) return error.Malformed;
     if (buf.len < size) return null;
     return .{ .event = .{ .object = object, .opcode = opcode, .body = buf[8..size] }, .size = size };
+}
+
+comptime {
+    _ = shm;
+    _ = output;
+}
+
+test "a registry global is read off its event" {
+    // wl_registry (id 2) .global: name 7, "wl_shm", version 2
+    const body = [_]u8{ 7, 0, 0, 0, 7, 0, 0, 0, 'w', 'l', '_', 's', 'h', 'm', 0, 0, 2, 0, 0, 0 };
+    const ev: Event = .{ .object = 2, .opcode = wl_registry.ev_global, .body = &body };
+    const g = (try Global.of(2, ev)).?;
+    try std.testing.expectEqual(@as(u32, 7), g.name);
+    try std.testing.expect(g.is("wl_shm"));
+    try std.testing.expectEqual(@as(u32, 2), g.version);
+    try std.testing.expect((try Global.of(3, ev)) == null);
 }
 
 test "arg reader strings" {

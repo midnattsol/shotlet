@@ -40,14 +40,13 @@ pub fn updateDevice(w: *Window, has_pointer: bool) !void {
         try c.request(w.globals.seat, wl.wl_seat.get_pointer, &.{.{ .new_id = p.id }});
         if (w.globals.rel_manager != 0 and w.track_relative) {
             p.rel = c.newId();
-            // zwp_relative_pointer_manager_v1.get_relative_pointer
-            try c.request(w.globals.rel_manager, 1, &.{ .{ .new_id = p.rel }, .{ .object = p.id } });
+            try c.request(w.globals.rel_manager, wl.zwp_relative_pointer_manager_v1.get_relative_pointer, &.{ .{ .new_id = p.rel }, .{ .object = p.id } });
         }
         try cursor.pointerAdded(w);
     } else if (!has_pointer and p.id != 0) {
         try cursor.pointerRemoved(w);
         if (p.rel != 0) {
-            try c.request(p.rel, 0, &.{}); // destroy
+            try c.request(p.rel, wl.zwp_relative_pointer_v1.destroy, &.{});
             p.rel = 0;
         }
         if (w.globals.seat_version >= 3) try c.request(p.id, wl.wl_pointer.release, &.{});

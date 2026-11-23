@@ -19,6 +19,7 @@ const capture = @import("../../../app/capture.zig");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
+const kde = @import("../kde.zig");
 const kwin = @import("../kde/screenshot2.zig");
 
 pub const Method = enum {
@@ -41,131 +42,33 @@ pub const Result = union(enum) {
     unavailable: []const u8,
 };
 
-const max_outputs = 16;
+const max_outputs = @import("../../api/window.zig").max_outputs;
+const Output = wl.output.Output;
 
-const Output = struct {
-    global: u32,
-    version: u32,
-    id: u32 = 0,
-    xdg: u32 = 0,
-    name_buf: [64]u8 = undefined,
-    name_len: usize = 0,
-    transform: u32 = 0,
-    scale: i32 = 1,
-    mode_w: i32 = 0,
-    mode_h: i32 = 0,
-    geo_x: i32 = 0,
-    geo_y: i32 = 0,
-    lx: i32 = 0,
-    ly: i32 = 0,
-    lw: i32 = 0,
-    lh: i32 = 0,
-    has_logical: bool = false,
+const ext_source_mgr = wl.ext_output_image_capture_source_manager_v1;
+const ext_source = wl.ext_image_capture_source_v1;
+const ext_copy_mgr = wl.ext_image_copy_capture_manager_v1;
+const ext_session = wl.ext_image_copy_capture_session_v1;
+const ext_frame = wl.ext_image_copy_capture_frame_v1;
+const screencopy_frame = wl.zwlr_screencopy_frame_v1;
 
-    fn name(self: *const Output) []const u8 {
-        return self.name_buf[0..self.name_len];
+/// A buffer to capture into: its pool's memory holds the pixels.
+const Shm = struct {
+    pool: wl.shm.Pool,
+    buffer: u32,
+
+    fn init(c: *wl.Connection, shm: u32, format: u32, w: u32, h: u32, stride: u32) !Shm {
+        var pool: wl.shm.Pool = try .create(c, shm, @as(usize, stride) * h);
+        errdefer pool.deinit(c);
+        const buffer = try pool.buffer(c, 0, w, h, stride, format);
+        pool.drop(c);
+        return .{ .pool = pool, .buffer = buffer };
     }
 
-    fn setName(self: *Output, n: []const u8) void {
-        self.name_len = @min(n.len, self.name_buf.len);
-        @memcpy(self.name_buf[0..self.name_len], n[0..self.name_len]);
+    fn deinit(self: *Shm, c: *wl.Connection) void {
+        c.request(self.buffer, wl.wl_buffer.destroy, &.{}) catch {};
+        self.pool.deinit(c);
     }
-
-    fn onOutputEvent(o: *Output, opcode: u16, r: *wl.ArgReader) !void {
-        switch (opcode) {
-            wl.wl_output.ev_geometry => {
-                o.geo_x = try r.int();
-                o.geo_y = try r.int();
-                _ = try r.int(); // physical size
-                _ = try r.int();
-                _ = try r.int(); // subpixel
-                _ = try r.string(); // make
-                _ = try r.string(); // model
-                o.transform = try r.uint() & 7;
-            },
-            wl.wl_output.ev_mode => {
-                const flags = try r.uint();
-                const w = try r.int();
-                const h = try r.int();
-                if (flags & wl.wl_output.mode_current != 0) {
-                    o.mode_w = w;
-                    o.mode_h = h;
-                }
-            },
-            wl.wl_output.ev_scale => o.scale = try r.int(),
-            wl.wl_output.ev_name => o.setName(try r.string()),
-            else => {},
-        }
-    }
-
-    fn onXdgOutputEvent(o: *Output, opcode: u16, r: *wl.ArgReader) !void {
-        switch (opcode) {
-            wl.zxdg_output_v1.ev_logical_position => {
-                o.lx = try r.int();
-                o.ly = try r.int();
-                o.has_logical = true;
-            },
-            wl.zxdg_output_v1.ev_logical_size => {
-                o.lw = try r.int();
-                o.lh = try r.int();
-            },
-            wl.zxdg_output_v1.ev_name => if (o.name_len == 0) o.setName(try r.string()),
-            else => {},
-        }
-    }
-
-    fn logical(self: *const Output) capture.Monitor.Logical {
-        if (self.has_logical and self.lw > 0 and self.lh > 0)
-            return .{ .x = self.lx, .y = self.ly, .w = @intCast(self.lw), .h = @intCast(self.lh) };
-        const sc = @max(1, self.scale);
-        const swap = self.transform & 1 != 0;
-        const w = @divTrunc(if (swap) self.mode_h else self.mode_w, sc);
-        const h = @divTrunc(if (swap) self.mode_w else self.mode_h, sc);
-        return .{ .x = self.geo_x, .y = self.geo_y, .w = @intCast(@max(1, w)), .h = @intCast(@max(1, h)) };
-    }
-};
-
-// protocol opcodes
-const ext_source_mgr = struct {
-    const create_source = 0;
-    const destroy = 1;
-};
-const ext_source = struct {
-    const destroy = 0;
-};
-const ext_copy_mgr = struct {
-    const create_session = 0;
-    const destroy = 2;
-};
-const ext_session = struct {
-    const create_frame = 0;
-    const destroy = 1;
-    const ev_buffer_size = 0;
-    const ev_shm_format = 1;
-    const ev_done = 4;
-    const ev_stopped = 5;
-};
-const ext_frame = struct {
-    const destroy = 0;
-    const attach_buffer = 1;
-    const damage_buffer = 2;
-    const capture_ = 3;
-    const ev_transform = 0;
-    const ev_ready = 3;
-    const ev_failed = 4;
-};
-const screencopy_mgr = struct {
-    const capture_output = 0;
-    const destroy = 2;
-};
-const screencopy_frame = struct {
-    const copy = 0;
-    const destroy = 1;
-    const ev_buffer = 0;
-    const ev_flags = 1;
-    const ev_ready = 2;
-    const ev_failed = 3;
-    const ev_buffer_done = 6;
 };
 
 const Client = struct {
@@ -182,98 +85,50 @@ const Client = struct {
     n_outputs: usize = 0,
 
     fn roundtrip(self: *Client) !void {
-        const cb = try self.conn.sync();
-        try self.conn.flush();
-        while (true) {
-            const ev = try self.conn.readEvent();
-            if (ev.object == cb and ev.opcode == wl.wl_callback.ev_done) return;
-            try self.handle(ev);
-        }
+        try self.conn.roundtrip(self, handle);
     }
 
     fn handle(self: *Client, ev: wl.Event) !void {
-        var r: wl.ArgReader = .{ .data = ev.body };
-        if (ev.object == wl.wl_display.id and ev.opcode == wl.wl_display.ev_error) {
-            _ = try r.uint();
-            const code = try r.uint();
-            std.log.info("direct capture: wayland error {d}: {s}", .{ code, try r.string() });
-            return error.ProtocolError;
-        }
-        if (ev.object == self.registry and ev.opcode == wl.wl_registry.ev_global) return self.onGlobal(&r);
+        try ev.checkDisplayError();
+        if (try wl.Global.of(self.registry, ev)) |g| return self.onGlobal(g);
+        var r = ev.reader();
         for (self.outputs[0..self.n_outputs]) |*o| {
-            if (o.id != 0 and ev.object == o.id) return o.onOutputEvent(ev.opcode, &r);
-            if (o.xdg != 0 and ev.object == o.xdg) return o.onXdgOutputEvent(ev.opcode, &r);
+            if (o.id != 0 and ev.object == o.id) _ = try o.onOutput(ev.opcode, &r);
+            if (o.xdg != 0 and ev.object == o.xdg) _ = try o.onXdg(ev.opcode, &r);
         }
     }
 
     /// A registry global: outputs are noted, the capture interfaces bound.
-    fn onGlobal(self: *Client, r: *wl.ArgReader) !void {
-        const gname = try r.uint();
-        const iface = try r.string();
-        const version = try r.uint();
-        const eql = std.mem.eql;
-        if (eql(u8, iface, "wl_output")) {
+    fn onGlobal(self: *Client, g: wl.Global) !void {
+        const c = &self.conn;
+        const reg = self.registry;
+        if (g.is("wl_output")) {
             if (self.n_outputs < max_outputs) {
-                self.outputs[self.n_outputs] = .{ .global = gname, .version = @min(version, 4) };
+                self.outputs[self.n_outputs] = .ofGlobal(g);
                 self.n_outputs += 1;
             }
-        } else if (eql(u8, iface, "wl_shm")) {
-            self.shm = try self.conn.bind(self.registry, gname, iface, 1);
-        } else if (eql(u8, iface, "zxdg_output_manager_v1")) {
-            self.xdg_mgr = try self.conn.bind(self.registry, gname, iface, @min(version, 3));
-        } else if (eql(u8, iface, "ext_output_image_capture_source_manager_v1")) {
-            self.ext_source_mgr = try self.conn.bind(self.registry, gname, iface, 1);
-        } else if (eql(u8, iface, "ext_image_copy_capture_manager_v1")) {
-            self.ext_copy_mgr = try self.conn.bind(self.registry, gname, iface, 1);
-        } else if (eql(u8, iface, "zwlr_screencopy_manager_v1")) {
-            self.screencopy_version = @min(version, 3);
-            self.screencopy = try self.conn.bind(self.registry, gname, iface, self.screencopy_version);
+        } else if (g.is("wl_shm")) {
+            self.shm = (try c.bindGlobal(reg, g, 1)).id;
+        } else if (g.is("zxdg_output_manager_v1")) {
+            self.xdg_mgr = (try c.bindGlobal(reg, g, 3)).id;
+        } else if (g.is("ext_output_image_capture_source_manager_v1")) {
+            self.ext_source_mgr = (try c.bindGlobal(reg, g, 1)).id;
+        } else if (g.is("ext_image_copy_capture_manager_v1")) {
+            self.ext_copy_mgr = (try c.bindGlobal(reg, g, 1)).id;
+        } else if (g.is("zwlr_screencopy_manager_v1")) {
+            const b = try c.bindGlobal(reg, g, 3);
+            self.screencopy = b.id;
+            self.screencopy_version = b.version;
         }
     }
 
-    /// Events for objects other than `obj` while waiting on it.
+    /// The next event of `obj`, handling the others meanwhile.
     fn next(self: *Client, obj: u32, deadline: i64) !wl.Event {
-        while (true) {
-            if (try self.conn.pollEvent()) |ev| {
-                if (ev.object == obj) return ev;
-                try self.handle(ev);
-                continue;
-            }
-            try self.conn.flush();
-            if (!try sys.waitReadable(self.conn.fd, deadline)) return error.Timeout;
-            const ev = try self.conn.readEvent();
-            if (ev.object == obj) return ev;
-            try self.handle(ev);
-        }
+        return self.conn.waitFor(obj, deadline, self, handle);
     }
-
-    const Shm = struct {
-        fd: sys.fd_t,
-        mem: []align(std.heap.page_size_min) u8,
-        buffer: u32,
-
-        fn deinit(self: *Shm, c: *wl.Connection) void {
-            c.request(self.buffer, wl.wl_buffer.destroy, &.{}) catch {};
-            sys.munmap(self.mem);
-            sys.close(self.fd);
-        }
-    };
 
     fn shmBuffer(self: *Client, format: u32, w: u32, h: u32, stride: u32) !Shm {
-        const size = @as(usize, stride) * h;
-        if (size == 0 or size > 1 << 30) return error.BadBufferSize;
-        const fd = try sys.memfdCreate("shotlet-capture", sys.MFD_CLOEXEC);
-        errdefer sys.close(fd);
-        try sys.ftruncate(fd, size);
-        const mem = try sys.mmapRw(fd, size);
-        errdefer sys.munmap(mem);
-        const c = &self.conn;
-        const pool = c.newId();
-        try c.request(self.shm, wl.wl_shm.create_pool, &.{ .{ .new_id = pool }, .{ .fd = fd }, .{ .int = @intCast(size) } });
-        const buffer = c.newId();
-        try c.request(pool, wl.wl_shm_pool.create_buffer, &.{ .{ .new_id = buffer }, .{ .int = 0 }, .{ .int = @intCast(w) }, .{ .int = @intCast(h) }, .{ .int = @intCast(stride) }, .{ .uint = format } });
-        try c.request(pool, wl.wl_shm_pool.destroy, &.{});
-        return .{ .fd = fd, .mem = mem, .buffer = buffer };
+        return .init(&self.conn, self.shm, format, w, h, stride);
     }
 
     /// Binds the registry and every output, with its xdg_output, and
@@ -282,11 +137,8 @@ const Client = struct {
         cl.registry = try cl.conn.getRegistry();
         try cl.roundtrip();
         for (cl.outputs[0..cl.n_outputs]) |*o| {
-            o.id = try cl.conn.bind(cl.registry, o.global, "wl_output", o.version);
-            if (cl.xdg_mgr != 0) {
-                o.xdg = cl.conn.newId();
-                try cl.conn.request(cl.xdg_mgr, wl.zxdg_output_manager_v1.get_xdg_output, &.{ .{ .new_id = o.xdg }, .{ .object = o.id } });
-            }
+            try o.bind(&cl.conn, cl.registry);
+            try o.getXdg(&cl.conn, cl.xdg_mgr);
         }
         try cl.roundtrip();
         try cl.roundtrip();
@@ -352,7 +204,7 @@ const Client = struct {
         defer c.request(frame, ext_frame.destroy, &.{}) catch {};
         try c.request(frame, ext_frame.attach_buffer, &.{.{ .object = shm.buffer }});
         try c.request(frame, ext_frame.damage_buffer, &.{ .{ .int = 0 }, .{ .int = 0 }, .{ .int = @intCast(w) }, .{ .int = @intCast(h) } });
-        try c.request(frame, ext_frame.capture_, &.{});
+        try c.request(frame, ext_frame.capture, &.{});
         var transform: u32 = 0;
         while (true) {
             const ev = try self.next(frame, deadline);
@@ -364,7 +216,7 @@ const Client = struct {
                 else => {},
             }
         }
-        return toFrame(self.gpa, shm.mem, fmt, w, h, w * 4, false, transform);
+        return toFrame(self.gpa, shm.pool.mem, fmt, w, h, w * 4, false, transform);
     }
 
     /// One output with zwlr_screencopy_v1.
@@ -372,7 +224,7 @@ const Client = struct {
         const c = &self.conn;
         const deadline = sys.monoMs() + 5000;
         const frame = c.newId();
-        try c.request(self.screencopy, screencopy_mgr.capture_output, &.{ .{ .new_id = frame }, .{ .int = 0 }, .{ .object = o.id } });
+        try c.request(self.screencopy, wl.zwlr_screencopy_manager_v1.capture_output, &.{ .{ .new_id = frame }, .{ .int = 0 }, .{ .object = o.id } });
         defer c.request(frame, screencopy_frame.destroy, &.{}) catch {};
         // format, width, height, stride of the best shm buffer offered
         var best: ?[4]u32 = null;
@@ -395,7 +247,7 @@ const Client = struct {
                 screencopy_frame.ev_failed => return error.CaptureFailed,
                 screencopy_frame.ev_ready => {
                     const b = best.?;
-                    return toFrame(self.gpa, shm.?.mem, b[0], b[1], b[2], b[3], flags & 1 != 0, o.transform);
+                    return toFrame(self.gpa, shm.?.pool.mem, b[0], b[1], b[2], b[3], flags & screencopy_frame.flag_y_invert != 0, o.transform);
                 },
                 else => {},
             }
@@ -442,8 +294,8 @@ pub fn captureAll(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []co
     var parts: [max_outputs]capture.Part = undefined;
     for (cl.outputs[0..cl.n_outputs]) |*o| {
         frames[n] = (try cl.grab(o, method, bus)) orelse return .{ .unavailable = kwin.refused };
-        parts[n] = .{ .pixels = frames[n].pixels, .width = frames[n].width, .height = frames[n].height, .logical = o.logical() };
-        std.log.debug("direct capture: {s} {d}x{d} at {any}", .{ o.name(), frames[n].width, frames[n].height, o.logical() });
+        parts[n] = .{ .pixels = frames[n].pixels, .width = frames[n].width, .height = frames[n].height, .logical = logicalOf(o) };
+        std.log.debug("direct capture: {s} {d}x{d} at {any}", .{ o.name(), frames[n].width, frames[n].height, parts[n].logical });
         n += 1;
     }
     std.log.info("direct capture: {d} outputs with {s}", .{ n, method.label() });
@@ -460,5 +312,11 @@ pub fn probe(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []const u
     cl.roundtrip() catch return null;
     const m = cl.method();
     if (m != .kwin_screenshot) return m;
-    return if (bus.nameHasOwner("org.kde.KWin") catch false) m else null;
+    return if (kde.kwinRunning(bus)) m else null;
+}
+
+/// Where an output's picture goes in the stitched capture (at least 1x1).
+fn logicalOf(o: *const Output) capture.Monitor.Logical {
+    const r = o.logicalRect();
+    return .{ .x = r.x, .y = r.y, .w = @intCast(@max(1, r.w)), .h = @intCast(@max(1, r.h)) };
 }

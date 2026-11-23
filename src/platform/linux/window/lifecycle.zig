@@ -101,7 +101,7 @@ pub fn deinit(w: *Window) void {
     clipboard.dropSource(w);
     drag.endDrag(w);
     for (&w.surfaces) |*s| buffers.destroyPool(&w.conn, s);
-    w.cursors.deinit();
+    w.cursors.deinit(&w.conn);
     w.queue.deinit(w.alloc);
     w.kb.deinit();
     w.conn.deinit();
