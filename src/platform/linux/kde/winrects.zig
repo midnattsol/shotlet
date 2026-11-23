@@ -142,6 +142,8 @@ pub fn parse(s: []const u8, token: []const u8, out: []i32) ?[]const i32 {
     return out[0 .. n / 4 * 4];
 }
 
+const testutil = @import("../../../testutil.zig");
+
 test "the script's answer counts only with our token" {
     var out: [8]i32 = undefined;
     try std.testing.expectEqualSlices(i32, &.{ 1, 2, 3, 4 }, parse("ab12 1,2,3,4,5", "ab12", &out).?);
@@ -153,6 +155,6 @@ test "the script's answer counts only with our token" {
 test "the script is filled in" {
     var buf: [2048]u8 = undefined;
     const s = try std.fmt.bufPrint(&buf, script_fmt, .{ ":1.42", obj_path, iface, "beef" });
-    try std.testing.expect(std.mem.indexOf(u8, s, "callDBus(\":1.42\", \"/dev/shotlet/WinRects\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, s, "\"beef \" + out.join") != null);
+    try testutil.expectContains(s, "callDBus(\":1.42\", \"/dev/shotlet/WinRects\"");
+    try testutil.expectContains(s, "\"beef \" + out.join");
 }

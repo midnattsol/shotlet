@@ -74,16 +74,17 @@ pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, session: *desktop.Sessio
     return path;
 }
 
+const testutil = @import("../testutil.zig");
+
 test "copyFile copies and never overwrites" {
     const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-files");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-files");
+    defer tmp.deinit();
     var a: [256]u8 = undefined;
     var b: [256]u8 = undefined;
-    const pa = try std.fmt.bufPrint(&a, "{s}/a.mp4", .{dir});
-    const pb = try std.fmt.bufPrint(&b, "{s}/b.mp4", .{dir});
-    try sys.writeFile(pa, "video bytes");
+    const pa = try tmp.join(&a, "a.mp4");
+    const pb = try tmp.join(&b, "b.mp4");
+    try tmp.write("a.mp4", "video bytes");
     try copyFile(gpa, pa, pb);
     const got = try sys.readFileAlloc(gpa, pb, 64);
     defer gpa.free(got);

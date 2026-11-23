@@ -4,6 +4,7 @@
 
 const shapes = @import("../../ui/shapes.zig");
 const icons = @import("../../ui/icons.zig");
+const theme = @import("../../ui/theme.zig");
 const Panel = @import("panel.zig").Panel;
 const Rect = shapes.Rect;
 
@@ -11,7 +12,7 @@ const Rect = shapes.Rect;
 pub const panel_w = 300;
 /// shadow room around the panel (theme card_shadow: its blur, and its
 /// fall below)
-pub const pad = 32;
+pub const pad = theme.card_room;
 pub const inset = 14;
 pub const header_h = 20;
 pub const field_h = 32;

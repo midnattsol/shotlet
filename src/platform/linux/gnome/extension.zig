@@ -200,15 +200,17 @@ fn waitActive(bus: *dbus.Connection) bool {
     return false;
 }
 
+const testutil = @import("../../../testutil.zig");
+
 test "the bundled extension declares the uuid and bus name we look for" {
-    try std.testing.expect(std.mem.indexOf(u8, ext_metadata, "\"uuid\": \"" ++ uuid ++ "\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_js, bus_name) != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_js, "shotlet:quick") != null);
+    try testutil.expectContains(ext_metadata, "\"uuid\": \"" ++ uuid ++ "\"");
+    try testutil.expectContains(ext_js, bus_name);
+    try testutil.expectContains(ext_js, "shotlet:quick");
     // the settings schema the metadata names ships, compiled
-    try std.testing.expect(std.mem.indexOf(u8, ext_metadata, "\"settings-schema\": \"" ++ ext_schema_id ++ "\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_schema, "id=\"" ++ ext_schema_id ++ "\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_schema_compiled, ext_schema_id) != null);
-    try std.testing.expect(std.mem.indexOf(u8, ext_js, "'--from-shell'") != null);
+    try testutil.expectContains(ext_metadata, "\"settings-schema\": \"" ++ ext_schema_id ++ "\"");
+    try testutil.expectContains(ext_schema, "id=\"" ++ ext_schema_id ++ "\"");
+    try testutil.expectContains(ext_schema_compiled, ext_schema_id);
+    try testutil.expectContains(ext_js, "'--from-shell'");
 }
 
 test "GNOME is told from XDG_CURRENT_DESKTOP" {

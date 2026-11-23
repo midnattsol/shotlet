@@ -44,9 +44,7 @@ fn dispatch(gpa: std.mem.Allocator, env: Env, p: *const Parsed) !void {
             .title = p.positionals[0],
             .body = p.arg(1) orelse "",
         }),
-        .test_window, .test_grab, .test_font, .test_decode => {
-            _ = try platform.devtools(gpa, env, p.chain.items[0].name, p.positionals);
-        },
+        .test_window, .test_grab, .test_font, .test_decode => try platform.devtools(gpa, env, devCommand(p)),
     }
 }
 
@@ -54,7 +52,7 @@ fn dispatch(gpa: std.mem.Allocator, env: Env, p: *const Parsed) !void {
 /// Shell extension starting one.
 fn runShot(gpa: std.mem.Allocator, env: Env, p: *const Parsed) !void {
     if (p.shell_launch) {
-        launch.takeHandOff(env.runtime_dir);
+        launch.takeHandOff(env);
         // the extension runs: an install that waited for it can finish
         shell.finishPendingSetup(env);
     }
@@ -87,6 +85,17 @@ fn shellCli(p: *const Parsed) shell.Cli {
         .gnome_uninstall => .uninstall,
         .gnome_shortcut => .{ .shortcut = p.positionals },
         else => .status,
+    };
+}
+
+/// `test-window`, `test-grab`, `test-font [LINES [OUT [FONT]]]`,
+/// `test-decode FILE`.
+fn devCommand(p: *const Parsed) platform.DevCommand {
+    return switch (p.id()) {
+        .test_window => .window,
+        .test_grab => .grab,
+        .test_font => .{ .font = .{ .lines = p.arg(0), .out = p.arg(1), .font = p.arg(2) } },
+        else => .{ .decode = p.positionals[0] },
     };
 }
 
@@ -167,4 +176,16 @@ test "trim's range and export arrive typed" {
     try std.testing.expectEqual(@as(i64, 1000), both.range.?.start_ms);
     try std.testing.expectEqual(@as(i64, 2500), both.range.?.end_ms);
     try std.testing.expect(both.headless);
+}
+
+test "the development commands reach the backend typed" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    try std.testing.expect(devCommand(&try parsed(a, &.{"test-grab"})) == .grab);
+    const f = devCommand(&try parsed(a, &.{ "test-font", "a|b", "out.png" })).font;
+    try std.testing.expectEqualStrings("a|b", f.lines.?);
+    try std.testing.expectEqualStrings("out.png", f.out.?);
+    try std.testing.expect(f.font == null);
+    try std.testing.expectEqualStrings("x.png", devCommand(&try parsed(a, &.{ "test-decode", "x.png" })).decode);
 }

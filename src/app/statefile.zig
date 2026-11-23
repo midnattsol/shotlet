@@ -70,12 +70,9 @@ pub fn remove(home: []const u8, dir: Dir, name: []const u8) bool {
 
 test "state files are written atomically, private, and appended to" {
     const alloc = std.testing.allocator;
-    const home = try sys.makeTempDir(alloc, "/tmp", "shotlet-home");
-    defer alloc.free(home);
-    defer sys.removeTree(home);
-    const saved = env.xdg;
-    defer env.xdg = saved;
-    env.xdg = .{};
+    var tmp = try @import("../testutil.zig").TmpDir.home();
+    defer tmp.deinit();
+    const home = tmp.path;
     try std.testing.expectError(error.NotFound, read(alloc, home, .state, "x", 64));
     try write(home, .state, "x", "one\n");
     try append(alloc, home, .state, "x", "two\n", 64);

@@ -74,6 +74,11 @@ pub fn savePng(c: Ctx, data: []const u8, where: Where) !?[]u8 {
     const path = (try writePng(c, data, where)) orelse return null;
     std.log.info("{s}: saved to {s}", .{ c.who, path });
     const p = policy(c.cfg, c.thumbnail_shows);
+    // compositors take the clipboard only from the focused client: the
+    // save dialog had the focus, so wait for it to come back (a while at
+    // most), else the copy would be dropped without a word
+    if (p.copy and where == .ask and !c.win_closed and !c.win.kb_focus and !(c.win.waitKeyboardFocus(refocus_ms) catch false))
+        std.log.info("{s}: no keyboard focus back for the copy", .{c.who});
     if (p.copy) copyPng(c, data) catch |err| std.log.warn("{s}: copy on save failed: {t}", .{ c.who, err });
     if (p.notify) notifySaved(c, path);
     return path;
@@ -127,6 +132,10 @@ pub fn askTarget(gpa: std.mem.Allocator, bus: *desktop.Session, opts: desktop.Sa
         .unavailable => .unavailable,
     };
 }
+
+/// How long a window waits to get the keyboard focus back (after the
+/// save dialog) before it takes the clipboard.
+const refocus_ms = 1500;
 
 /// Put a copy of `data` (a PNG) on the clipboard.
 pub fn copyPng(c: Ctx, data: []const u8) !void {
@@ -212,6 +221,8 @@ pub const Entry = struct {
 
 const testing = std.testing;
 
+const testutil = @import("../testutil.zig");
+
 test "copy on save and the notification follow the settings everywhere" {
     var cfg: config.Config = .{};
     cfg.copy_on_save = false;
@@ -245,9 +256,9 @@ test "a failed save says why in words" {
 
 test "Save writes into the folder under a new name each time" {
     const gpa = testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-deliver");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-deliver");
+    defer tmp.deinit();
+    const dir = tmp.path;
     var cfg: config.Config = .{};
     var line_buf: [600]u8 = undefined;
     _ = @import("config/parse.zig").applyText(&cfg, try std.fmt.bufPrint(&line_buf, "save_dir={s}/shots\n", .{dir}));

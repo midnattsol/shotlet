@@ -217,12 +217,12 @@ pub fn thumbnail(alloc: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, m
 test "thumbnails fit the box and average colours" {
     const alloc = std.testing.allocator;
     var src: [8 * 4]u32 = undefined;
-    for (&src, 0..) |*p, i| p.* = if (i % 2 == 0) 0xFF000000 else 0xFFFFFFFF;
+    @import("../testutil.zig").checker(&src, 8);
     const t = try thumbnail(alloc, &src, 8, 4, 4, 4);
     defer alloc.free(t.pixels);
     try std.testing.expectEqual(@as(u32, 4), t.width);
     try std.testing.expectEqual(@as(u32, 2), t.height);
-    // black and white columns average to grey
+    // black and white average to grey
     try std.testing.expectEqual(@as(u32, 0xFF808080), t.pixels[0]);
     // never scaled up
     const same = try thumbnail(alloc, &src, 8, 4, 100, 100);

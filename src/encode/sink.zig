@@ -148,15 +148,15 @@ pub const Sink = struct {
     }
 };
 
+const testutil = @import("../testutil.zig");
+
 test "a GIF sink writes a file the decoder reads" {
     const gpa = std.testing.allocator;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-sink");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
-    const path = try std.fmt.allocPrintSentinel(gpa, "{s}/a.gif", .{dir}, 0);
+    var tmp = try testutil.TmpDir.init("shotlet-sink");
+    defer tmp.deinit();
+    const path = try tmp.joinZ("a.gif");
     defer gpa.free(path);
-    const envp: proc.Envp = @ptrCast(std.c.environ);
-    var s = try Sink.open(gpa, envp, path, .{ .format = .gif, .width = 40, .height = 20, .fps = 10 });
+    var s = try Sink.open(gpa, testutil.envp(), path, .{ .format = .gif, .width = 40, .height = 20, .fps = 10 });
     var px: [40 * 20]u32 = undefined;
     for (0..20) |i| {
         for (&px, 0..) |*p, k| p.* = if (k % 40 == i * 2) 0xFFFFFFFF else 0xFF203040;

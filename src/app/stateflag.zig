@@ -33,15 +33,9 @@ pub fn set(home: []const u8, f: Flag) void {
 }
 
 test "a flag is unset until it is set" {
-    const sys = @import("../platform/api.zig").sys;
-    const env = @import("env.zig");
-    const alloc = std.testing.allocator;
-    const home = try sys.makeTempDir(alloc, "/tmp", "shotlet-test");
-    defer alloc.free(home);
-    defer sys.removeTree(home);
-    const saved = env.xdg;
-    defer env.xdg = saved;
-    env.xdg = .{};
+    var tmp = try @import("../testutil.zig").TmpDir.home();
+    defer tmp.deinit();
+    const home = tmp.path;
     try std.testing.expect(!isSet(home, .zoom_hint));
     set(home, .zoom_hint);
     try std.testing.expect(isSet(home, .zoom_hint));

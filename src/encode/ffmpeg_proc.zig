@@ -294,22 +294,24 @@ fn joined(buf: []u8, argv: []const ?[*:0]const u8) []const u8 {
     return buf[0..n];
 }
 
+const testutil = @import("../testutil.zig");
+
 test "ffmpeg arguments for software and VA-API encodes" {
     var buf: [1024]u8 = undefined;
     var s: Args = .{};
     const line = joined(&buf, try buildArgs(&s, "/usr/bin/ffmpeg", "/tmp/o.mp4", .{ .width = 640, .height = 360, .fps = 30, .audio = true }));
     try std.testing.expect(std.mem.startsWith(u8, line, "/usr/bin/ffmpeg -hide_banner -nostdin -loglevel error -y "));
-    try std.testing.expect(std.mem.indexOf(u8, line, "-s 640x360 -r 30 -i pipe:0") != null);
-    try std.testing.expect(std.mem.indexOf(u8, line, "-i pipe:3") != null);
-    try std.testing.expect(std.mem.indexOf(u8, line, "-c:v libx264 -preset veryfast -crf 25 -pix_fmt yuv420p") != null);
-    try std.testing.expect(std.mem.indexOf(u8, line, "-c:a aac -b:a 160k") != null);
+    try testutil.expectContains(line, "-s 640x360 -r 30 -i pipe:0");
+    try testutil.expectContains(line, "-i pipe:3");
+    try testutil.expectContains(line, "-c:v libx264 -preset veryfast -crf 25 -pix_fmt yuv420p");
+    try testutil.expectContains(line, "-c:a aac -b:a 160k");
     try std.testing.expect(std.mem.endsWith(u8, line, "-movflags +faststart -f mp4 /tmp/o.mp4"));
     var s2: Args = .{};
     const line2 = joined(&buf, try buildArgs(&s2, "/usr/bin/ffmpeg", "/tmp/o.mp4", .{ .width = 64, .height = 64, .fps = 60, .quality = .low, .vaapi = "/dev/dri/renderD128" }));
-    try std.testing.expect(std.mem.indexOf(u8, line2, "-vaapi_device /dev/dri/renderD128 ") != null);
-    try std.testing.expect(std.mem.indexOf(u8, line2, "-c:v h264_vaapi -qp 30") != null);
-    try std.testing.expect(std.mem.indexOf(u8, line2, "libx264") == null);
-    try std.testing.expect(std.mem.indexOf(u8, line2, "aac") == null);
+    try testutil.expectContains(line2, "-vaapi_device /dev/dri/renderD128 ");
+    try testutil.expectContains(line2, "-c:v h264_vaapi -qp 30");
+    try testutil.expectNotContains(line2, "libx264");
+    try testutil.expectNotContains(line2, "aac");
 }
 
 test "trimming and the preview share the prefix and the output settings" {
@@ -341,13 +343,12 @@ test "a long path fits; a failed exit is an error" {
 
 test "the ffmpeg program writes H.264 and AAC that ffprobe reads back" {
     const gpa = std.testing.allocator;
-    const envp: proc.Envp = @ptrCast(std.c.environ);
+    const envp = testutil.envp();
     var buf: [512]u8 = undefined;
-    const probe = proc.which(&buf, envp, "ffprobe") orelse return error.SkipZigTest;
-    const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-ff");
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
-    const path = try std.fmt.allocPrintSentinel(gpa, "{s}/a.mp4", .{dir}, 0);
+    const probe = try testutil.program(&buf, "ffprobe");
+    var tmp = try testutil.TmpDir.init("shotlet-ff");
+    defer tmp.deinit();
+    const path = try tmp.joinZ("a.mp4");
     defer gpa.free(path);
     var p = Proc.open(gpa, envp, path, .{ .width = 64, .height = 48, .fps = 30, .audio = true }) catch |err| {
         if (err == error.NoFfmpeg) return error.SkipZigTest;
@@ -370,6 +371,6 @@ test "the ffmpeg program writes H.264 and AAC that ffprobe reads back" {
     try p.finish();
     const r = try proc.output(gpa, &.{ probe.ptr, "-v", "error", "-show_entries", "stream=codec_name,width,height,avg_frame_rate", "-of", "csv=p=0", path.ptr }, envp, 4096, 10_000);
     defer gpa.free(r.out);
-    try std.testing.expect(std.mem.indexOf(u8, r.out, "h264,64,48,30/1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, r.out, "aac") != null);
+    try testutil.expectContains(r.out, "h264,64,48,30/1");
+    try testutil.expectContains(r.out, "aac");
 }

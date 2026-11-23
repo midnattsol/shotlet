@@ -22,7 +22,7 @@ const Rect = @import("../../ui/shapes.zig").Rect;
 
 /// the room a card's shadow (theme card_shadow: its blur, and its fall
 /// below) takes around it, logical pixels
-pub const shadow_room = 32;
+pub const shadow_room = theme.card_room;
 /// shadow room around the picture, logical pixels
 pub const pad = shadow_room;
 /// the room the menu's shadow takes around the menu

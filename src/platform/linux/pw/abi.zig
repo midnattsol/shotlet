@@ -146,16 +146,3 @@ pub const Api = struct {
     stream_queue_buffer: *const fn (?*anyopaque, *PwBuffer) callconv(.c) c_int,
     stream_update_params: *const fn (?*anyopaque, [*]const [*]const u8, u32) callconv(.c) c_int,
 };
-
-/// Look up every Api field as `pw_<field name>`; null if any is missing.
-pub fn loadApi(l: *std.DynLib) ?Api {
-    var out: Api = undefined;
-    const info = @typeInfo(Api).@"struct";
-    inline for (info.field_names, info.field_types) |fld_name, fld_type| {
-        const sym_name = "pw_" ++ fld_name;
-        // DynLib.lookup requires a null-terminated name
-        const ptr = l.lookup(fld_type, sym_name) orelse return null;
-        @field(out, fld_name) = ptr;
-    }
-    return out;
-}

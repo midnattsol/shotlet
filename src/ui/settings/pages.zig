@@ -44,7 +44,7 @@ pub fn drawView(p: Page, y: i32) !i32 {
     return switch (p.st.view) {
         .general => try general(p, y),
         .editor => try editor(p, y),
-        .recording => try settings_rec.draw(p.ui, p.ui.alloc, p.cx, y, p.col_w),
+        .recording => try settings_rec.draw(p.ui, &p.cfg.record, p.cx, y, p.col_w),
         .shortcuts => try shortcuts(p, y),
     };
 }

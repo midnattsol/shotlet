@@ -7,6 +7,7 @@
 const std = @import("std");
 const sys = @import("sys.zig");
 const env_mod = @import("../../app/env.zig");
+const optlib = @import("../../optlib.zig");
 
 const types = @import("../api/fonts.zig");
 pub const Query = types.Query;
@@ -37,30 +38,22 @@ const FcApi = struct {
 };
 
 const Fc = struct {
-    lib: std.DynLib,
-    api: FcApi,
+    lib: optlib.Table(FcApi),
 
     fn open() ?Fc {
-        var lib = std.DynLib.open("libfontconfig.so.1") catch return null;
-        var api: FcApi = undefined;
-        const info = @typeInfo(FcApi).@"struct";
-        inline for (info.field_names, info.field_types) |name, T| {
-            @field(api, name) = lib.lookup(T, name) orelse {
-                lib.close();
-                return null;
-            };
-        }
-        if (api.FcInit() == 0) {
-            lib.close();
+        var why: []const u8 = "";
+        var t = optlib.bind(FcApi, "fontconfig", &.{"1"}, &why) catch return null;
+        if (t.api.FcInit() == 0) {
+            t.close();
             return null;
         }
-        return .{ .lib = lib, .api = api };
+        return .{ .lib = t };
     }
 
     /// Best match for a fontconfig pattern string; when `cp` is set, only a
     /// face whose charset really contains it.
     fn match(self: *Fc, alloc: std.mem.Allocator, pattern: [*:0]const u8, cp: ?u21) ?Face {
-        const a = &self.api;
+        const a = &self.lib.api;
         const pat = a.FcNameParse(pattern) orelse return null;
         defer a.FcPatternDestroy(pat);
         if (cp) |c| {

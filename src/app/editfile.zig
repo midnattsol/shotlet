@@ -1,5 +1,6 @@
 //! `shotlet edit FILE`: any PNG, JPEG or WebP in the editor, all of it
-//! selected, then copied or saved like a capture.
+//! selected, then copied or saved like a capture. A file that cannot
+//! be opened is reported (report.zig) and ends with status 1.
 
 const std = @import("std");
 const desktop = @import("../platform/api.zig").desktop;
@@ -9,13 +10,15 @@ const capture = @import("capture.zig");
 const shot = @import("shot.zig");
 const imgload = @import("../gfx/imgload.zig");
 const launch = @import("../ui/tools/launch.zig");
+const report = @import("report.zig");
 const Env = env_mod.Env;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     const window = @import("../platform/api.zig").window;
     var img = imgload.loadFile(gpa, path) catch |err| {
-        std.log.err("edit: cannot open {s}: {t}", .{ path, err });
-        return err;
+        std.log.warn("edit: cannot open {s}: {t}", .{ path, err });
+        report.failed(env, "Couldn\u{2019}t open the image", err);
+        return report.exitIfReported(report.Reported);
     };
     var cap = capture.Capture.single(gpa, img) catch |err| {
         img.deinit(gpa);

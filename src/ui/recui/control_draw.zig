@@ -31,7 +31,7 @@ pub const State = struct {
 };
 
 /// room around the pill for its shadow (theme card_shadow)
-pub const pad = 24;
+pub const pad = theme.card_room;
 const pill_w = 232;
 const pill_h = 44;
 const btn = 32;
@@ -110,7 +110,7 @@ pub fn paint(gpa: std.mem.Allocator, buf: []u32, bw: u32, bh: u32, k: f64, st: *
     }
     const radius = ff(ch) / 2;
     material.hairline(&cv, .ofSize(cw, ch), radius, look.line);
-    fui.place(gpa, .{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ px(pad, k), px(pad, k) }, radius, st.th.card_shadow, k);
+    fui.place(.{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ px(pad, k), px(pad, k) }, radius, st.th.card_shadow, k);
 }
 
 /// The button's rectangle on the card, with its hover fill.

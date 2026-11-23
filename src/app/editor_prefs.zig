@@ -18,7 +18,7 @@ pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed:
 
 fn rememberAt(gpa: std.mem.Allocator, home: []const u8, cfg: *const config.Config, ed: anytype) void {
     if (ed.loupe.hint.seen) stateflag.set(home, .zoom_hint);
-    if (ed.hint_seen and !cfg.hint_shown) stateflag.set(home, .editor_hint);
+    if (ed.hint_seen) stateflag.set(home, .editor_hint);
     var next = cfg.*;
     // only what the editor changed is written, not what `cfg` may hold
     // in memory that differs from the file
@@ -39,14 +39,10 @@ fn apply(c: *config.Config, ed: anytype) void {
 }
 
 test "only what the editor changed is saved" {
-    const sys = @import("../platform/api.zig").sys;
     const alloc = std.testing.allocator;
-    const root = try sys.makeTempDir(alloc, "/tmp", "shotlet-test");
-    defer alloc.free(root);
-    defer sys.removeTree(root);
-    const saved = @import("env.zig").xdg;
-    defer @import("env.zig").xdg = saved;
-    @import("env.zig").xdg = .{};
+    var tmp = try @import("../testutil.zig").TmpDir.home();
+    defer tmp.deinit();
+    const root = tmp.path;
 
     var cfg = config.load(alloc, root);
     // held in memory only: never written by remember
@@ -58,8 +54,7 @@ test "only what the editor changed is saved" {
         hint_seen: bool = false,
     };
     rememberAt(alloc, root, &cfg, &Ed{});
-    var buf: [600]u8 = undefined;
-    const data = try sys.readFileAlloc(alloc, try std.fmt.bufPrint(&buf, "{s}/.config/shotlet/config", .{root}), 4096);
+    const data = try tmp.read(".config/shotlet/config");
     defer alloc.free(data);
     try std.testing.expectEqualStrings("# shotlet configuration\nbeautify_padding=large\nbeautify_shadow=false\n", data);
 }

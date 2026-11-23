@@ -254,6 +254,7 @@ pub const Window = struct {
     // events
     pub const nextEvent = events.nextEvent;
     pub const nextEventTimeout = events.nextEventTimeout;
+    pub const waitKeyboardFocus = events.waitKeyboardFocus;
     pub const pollTimeoutMs = events.pollTimeoutMs;
     pub const drainPending = events.drainPending;
     const roundtrip = registry.roundtrip;

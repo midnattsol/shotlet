@@ -186,11 +186,12 @@ pub fn freeNames(alloc: std.mem.Allocator, list: []const DirEntry) void {
     for (list) |e| alloc.free(e.name);
 }
 
+const testutil = @import("../../../testutil.zig");
+
 test "eachEntry reports every entry with its kind" {
-    const alloc = std.testing.allocator;
-    const dir = try makeTempDir(alloc, "/tmp", "shotlet-each");
-    defer alloc.free(dir);
-    defer removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-each");
+    defer tmp.deinit();
+    const dir = tmp.path;
     var a: [256]u8 = undefined;
     mkdirMode(try std.fmt.bufPrint(&a, "{s}/sub", .{dir}), 0o700);
     try fs.writeFile(try std.fmt.bufPrint(&a, "{s}/file", .{dir}), "x");

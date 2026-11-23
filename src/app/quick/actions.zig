@@ -31,15 +31,9 @@ pub fn act(self: *Quick, i: usize, a: Action) void {
 /// A short word over card i ("Copied"); the card stays a while for it.
 pub fn notice(self: *Quick, i: usize, s: []const u8) void {
     const c = &self.cards.items[i];
-    c.notice = s;
-    c.notice_until = sys.monoMs() + 1200;
-    c.deadline_ms = @max(c.deadline_ms, c.notice_until + 1500);
+    c.notice.show(s, sys.monoMs(), 1200);
+    c.deadline_ms = @max(c.deadline_ms, c.notice.until + 1500);
     self.dirty = true;
-}
-
-pub fn imagePath(self: *Quick, i: usize, buf: []u8) ![]u8 {
-    const c = &self.cards.items[i];
-    return history.entryPath(buf, c.kept.root(), c.kept.id.slice(), "image.png");
 }
 
 /// Card i's capture, for deliver.zig.

@@ -22,6 +22,7 @@ const parse = @import("config/parse.zig");
 const write = @import("config/write.zig");
 const location = @import("config/location.zig");
 const keys = @import("config/keys.zig");
+const stateflag = @import("stateflag.zig");
 
 // editor actions, their key bindings and key names (binds.zig)
 const binds = @import("binds.zig");
@@ -66,7 +67,11 @@ pub fn load(alloc: std.mem.Allocator, home: []const u8) Config {
     var dir_buf: env.PathBuf = undefined;
     const dir = env.configDir(&dir_buf, home) catch return .{};
     location.migrateLegacy(home, dir);
-    return loadDir(alloc, dir);
+    const cfg = loadDir(alloc, dir);
+    // older files kept the editor's first-run hint here (hint_shown): it
+    // is a state flag now, and nothing outside the config reads the key
+    if (cfg.hint_shown and !stateflag.isSet(home, .editor_hint)) stateflag.set(home, .editor_hint);
+    return cfg;
 }
 
 fn loadDir(alloc: std.mem.Allocator, dir: []const u8) Config {

@@ -69,7 +69,7 @@ fn drawHint(self: *Quick, dst: fui.Surface) !void {
     const hovered = if (self.hover) |hv| hv.control == .hint else false;
     text.draw(&cv, px(10, k), px(5, k), 12 * k, o.fg, self.hint_text);
     text.drawStyled(&cv, px(10, k), px(21, k), 12 * k, if (hovered) th.accent_hover else th.accent_text, .semibold, self.hint_link);
-    fui.place(self.gpa, dst, .{ .px = buf, .w = w, .h = h }, .{ r.x, r.y }, hint_radius * k, th.card_shadow, k);
+    fui.place(dst, .{ .px = buf, .w = w, .h = h }, .{ r.x, r.y }, hint_radius * k, th.card_shadow, k);
 }
 
 /// Card i at r (buffer pixels).
@@ -94,7 +94,8 @@ fn drawCard(self: *Quick, dst: fui.Surface, i: usize, r: Rect, now: i64) !void {
         if (shown < 1) drawStatus(&cv, c, k, self.th);
         if (shown > 0) try drawControls(self, card, pic, cw, ch, i, .{ .hovered = hovered, .focused = focused }, shown);
     }
-    if (c.notice.len > 0) fui.notice(&cv, .{ .x = 0, .y = 0, .w = r.w, .h = r.h }, c.notice, k, self.th);
+    const word = c.notice.text(now);
+    if (word.len > 0) fui.notice(&cv, .{ .x = 0, .y = 0, .w = r.w, .h = r.h }, word, k, self.th);
     var alpha = c.life.alpha(now);
     if (dragged) alpha = @min(alpha, 0.5);
     try fui.compositeFaded(self.gpa, dst, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, card_radius * k, self.th.card_shadow, alpha, k);

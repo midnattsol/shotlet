@@ -1,7 +1,8 @@
 //! libxkbcommon ABI (opaque handles, plain C functions), dlopen'ed once
-//! at runtime.
+//! at runtime (optlib).
 
 const std = @import("std");
+const optlib = @import("../../../optlib.zig");
 
 pub const Ctx = opaque {};
 pub const Keymap = opaque {};
@@ -53,33 +54,27 @@ pub const COMPOSE_COMPOSING = 1;
 pub const COMPOSE_COMPOSED = 2;
 pub const COMPOSE_CANCELLED = 3;
 
-var lib: ?std.DynLib = null;
 /// The resolved entry points; valid once `available` returned true.
 pub var api: Api = undefined;
-var lib_tried = false;
+
+const Lib = optlib.Once(optlib.Table(Api), struct {
+    fn load(why: *[]const u8) anyerror!optlib.Table(Api) {
+        const t = optlib.bindPrefixed(Api, "xkbcommon", "xkb_", &.{"0"}, why) catch |err| {
+            if (err == error.NotFound)
+                std.log.info("{s}; keyboard falls back to a US layout", .{why.*})
+            else
+                std.log.warn("{s}; keyboard falls back to a US layout", .{why.*});
+            return err;
+        };
+        api = t.api;
+        return t;
+    }
+}.load);
 
 /// Load libxkbcommon once. False when it is not installed.
 pub fn available() bool {
-    if (lib_tried) return lib != null;
-    lib_tried = true;
-    lib = std.DynLib.open("libxkbcommon.so.0") catch {
-        std.log.info("libxkbcommon not found; keyboard falls back to a US layout", .{});
-        return false;
-    };
-    const info = @typeInfo(Api).@"struct";
-    inline for (info.field_names, info.field_types) |fld_name, fld_type| {
-        const ptr = lib.?.lookup(fld_type, "xkb_" ++ fld_name) orelse {
-            std.log.warn("libxkbcommon lacks xkb_{s}; keyboard falls back to a US layout", .{fld_name});
-            lib.?.close();
-            lib = null;
-            return false;
-        };
-        @field(api, fld_name) = ptr;
-    }
-    return true;
+    return Lib.available();
 }
 
 /// Whether libxkbcommon is loaded (without trying to load it).
-pub fn loaded() bool {
-    return lib != null;
-}
+pub const loaded = Lib.loaded;

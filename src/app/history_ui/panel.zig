@@ -15,6 +15,7 @@ const png = @import("../../gfx/png.zig");
 const window = @import("../../platform/api.zig").window;
 const fui = @import("../../ui/floatui.zig");
 const theme = @import("../../ui/theme.zig");
+const Notice = @import("../../ui/notice.zig").Notice;
 const scale = @import("../../ui/scale.zig");
 const press = @import("../../ui/press.zig");
 const layout = @import("layout.zig");
@@ -56,8 +57,8 @@ pub const Panel = struct {
     scroll: i32 = 0,
     search: std.ArrayList(u8) = .empty,
     searchable: bool = false,
-    notice: []const u8 = "",
-    notice_until: i64 = 0,
+    /// "Copied", "Saved" over the panel for a moment
+    notice: Notice = .{},
     dirty: bool = true,
     ocr_state: ocr_scan.Ocr = .{},
     /// the desktop's appearance (Opaque.of it for the panel's colours)
@@ -153,18 +154,13 @@ pub const Panel = struct {
     }
 
     fn say(self: *Panel, s: []const u8) void {
-        self.notice = s;
-        self.notice_until = sys.monoMs() + 1500;
+        self.notice.show(s, sys.monoMs(), 1500);
         self.dirty = true;
     }
 
     /// Clear the notice once its time is up.
     pub fn expireNotice(self: *Panel) void {
-        if (self.notice_until != 0 and sys.monoMs() > self.notice_until) {
-            self.notice = "";
-            self.notice_until = 0;
-            self.dirty = true;
-        }
+        if (self.notice.expire(sys.monoMs())) self.dirty = true;
     }
 
     /// Apply an action to the picked capture.

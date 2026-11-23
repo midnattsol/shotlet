@@ -8,23 +8,18 @@ const png = @import("../../gfx/png.zig");
 const sys = @import("sys.zig");
 const dump = @import("window/dump.zig");
 const Env = @import("../../app/env.zig").Env;
+const DevCommand = @import("../api/devtools.zig").DevCommand;
 const screencast = @import("capture/screencast.zig");
 const text = @import("../../gfx/text.zig");
 const render = @import("../../gfx/render.zig");
 
-/// Returns true when `cmd` was a recognized dev command; `args`: the
-/// arguments after it.
-pub fn run(gpa: std.mem.Allocator, env: Env, cmd: []const u8, args: []const [:0]const u8) !bool {
-    if (std.mem.eql(u8, cmd, "test-window")) {
-        try testWindow(gpa, env);
-    } else if (std.mem.eql(u8, cmd, "test-grab")) {
-        try testGrab(gpa, env);
-    } else if (std.mem.eql(u8, cmd, "test-font")) {
-        try testFont(gpa, env, args);
-    } else if (std.mem.eql(u8, cmd, "test-decode")) {
-        try testDecode(gpa, env, args);
-    } else return false;
-    return true;
+pub fn run(gpa: std.mem.Allocator, env: Env, cmd: DevCommand) !void {
+    switch (cmd) {
+        .window => try testWindow(gpa, env),
+        .grab => try testGrab(gpa, env),
+        .font => |f| try testFont(gpa, env, f.lines, f.out, f.font),
+        .decode => |file| try testDecode(gpa, env, file),
+    }
 }
 
 /// `test-window`: fullscreen gradient for ~3s, Esc to close.
@@ -91,14 +86,14 @@ fn testGrab(gpa: std.mem.Allocator, env: Env) !void {
 /// `test-font`: renders sample text to a PNG; `test-font "line|line..."
 /// [out.png [font.ttf]]` renders the given lines (with that font first in
 /// the fallback chain).
-fn testFont(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
-    text.initWith(gpa, if (args.len >= 3) args[2] else null);
+fn testFont(gpa: std.mem.Allocator, env: Env, lines: ?[]const u8, dest: ?[]const u8, font: ?[]const u8) !void {
+    text.initWith(gpa, font);
     defer text.deinit();
-    if (args.len >= 1) {
-        const out = try fontLines(gpa, args[0]);
+    if (lines) |l| {
+        const out = try fontLines(gpa, l);
         defer gpa.free(out);
-        if (args.len >= 2) {
-            try dump.write(args[1], out);
+        if (dest) |d| {
+            try dump.write(d, out);
         } else try writeDebug(gpa, env, "shotlet-font.png", out);
         return;
     }
@@ -144,9 +139,8 @@ fn fontSample(gpa: std.mem.Allocator) ![]u8 {
 }
 
 /// `test-decode FILE`: decodes a PNG and writes it back re-encoded.
-fn testDecode(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
-    if (args.len < 1) return error.MissingArg;
-    const data = try sys.readFileAlloc(gpa, args[0], 256 * 1024 * 1024);
+fn testDecode(gpa: std.mem.Allocator, env: Env, file: []const u8) !void {
+    const data = try sys.readFileAlloc(gpa, file, 256 * 1024 * 1024);
     defer gpa.free(data);
     var img = try png.decode(gpa, data);
     defer img.deinit(gpa);

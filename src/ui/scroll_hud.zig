@@ -137,7 +137,7 @@ pub const Hud = struct {
         self.drawCard(&cv, src);
         const px = try self.win.backBuffer();
         @memset(px, 0);
-        floatui.place(gpa, .{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, self.radiusPx(), null, self.k());
+        floatui.place(.{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, self.radiusPx(), null, self.k());
         try floatwin.presentStraight(self.win, px);
     }
 

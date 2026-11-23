@@ -204,6 +204,12 @@ pub const Window = struct {
         _ = .{ w, timeout_ms };
         return .close;
     }
+    /// Wait at most `ms` for the keyboard focus (input stays queued);
+    /// true once focused.
+    pub fn waitKeyboardFocus(w: *Window, ms: i32) Error!bool {
+        _ = .{ w, ms };
+        return false;
+    }
     /// The poll timeout that keeps key repeat and timers on time.
     pub fn pollTimeoutMs(w: *const Window, max_ms: i32) i32 {
         _ = w;

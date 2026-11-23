@@ -13,7 +13,8 @@ const Rect = @import("../shapes.zig").Rect;
 
 pub const card_w = 240;
 pub const card_h = 150;
-pub const pad = 28;
+/// room around the card for its shadow (theme card_shadow)
+pub const pad = theme.card_room;
 
 pub const Control = enum { body, close, trim, copy, save_as };
 

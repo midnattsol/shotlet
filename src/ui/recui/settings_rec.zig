@@ -1,8 +1,8 @@
 //! The Settings window's Recording view (settings.zig draws the frame):
 //! format, frame rates, quality, the GIF size, the countdown, and what is
 //! recorded by default (microphone, system sound, clicks, keystrokes).
-//! Each change is written at once (the config's record_* keys,
-//! config.Record).
+//! The window applies each change to its config (the record_* keys,
+//! config.Record) and saves it at once.
 
 const std = @import("std");
 const settings = @import("../settings.zig");
@@ -10,7 +10,6 @@ const theme_mod = @import("../theme.zig");
 const config = @import("../../app/config.zig");
 const Quality = @import("../../encode/sink.zig").Quality;
 const shell = @import("../../platform/api.zig").shell;
-const env_mod = @import("../../app/env.zig");
 
 pub const Hit = enum(u8) {
     fmt_minus,
@@ -35,10 +34,6 @@ fn h(x: Hit) settings.Hit {
     return .{ .rec = @backingInt(x) };
 }
 
-fn home() []const u8 {
-    return env_mod.xdg.home orelse "/";
-}
-
 const fps_steps = [_]u32{ 15, 24, 30, 60 };
 const gif_fps_steps = [_]u32{ 10, 12, 15, 20, 25, 30 };
 const gif_w_steps = [_]u32{ 320, 480, 640, 800, 1024, 1280, 0 };
@@ -51,8 +46,8 @@ pub fn step(steps: []const u32, v: u32, up: bool) u32 {
     return steps[if (i == 0) 0 else i - 1];
 }
 
-pub fn draw(ui: *settings.Ui, gpa: std.mem.Allocator, cx: i32, y0: i32, col_w: i32) !i32 {
-    const s = config.load(gpa, home()).record;
+/// The view from the window's recording settings `s`.
+pub fn draw(ui: *settings.Ui, s: *const config.Record, cx: i32, y0: i32, col_w: i32) !i32 {
     const rh = ui.sc(theme_mod.row_h);
     var y = try settings.groupTitle(ui, cx, y0, col_w, "Recording", null);
     var card = settings.beginCard(ui, cx, y, col_w, 4 * rh);
@@ -106,14 +101,6 @@ pub fn apply(r: *config.Record, raw: u8) void {
         .clicks => r.clicks = !r.clicks,
         .keys => r.keys = !r.keys,
     }
-}
-
-/// Apply control `raw` and save it at once.
-pub fn activate(gpa: std.mem.Allocator, home_dir: []const u8, raw: u8) void {
-    var cfg = config.load(gpa, home_dir);
-    apply(&cfg.record, raw);
-    config.save(gpa, home_dir, &cfg) catch |err|
-        std.log.warn("could not save the recording settings: {t}", .{err});
 }
 
 fn qualityStep(q: Quality, up: bool) Quality {

@@ -10,7 +10,8 @@
 //!   recorded area). Image (physical): a capture's pixels, each monitor
 //!   at its own scale (`Monitor`). Buffer and image sizes are u32
 //!   width/height (`Rect.ofSize` turns one into a Rect).
-//! - A surface's own logical-to-physical scale (scale120) is ui/scale.zig.
+//! - A surface's own logical-to-physical scale (scale120) is ui/scale.zig;
+//!   `physicalToLogical` takes a backend's physical rect back.
 
 const std = @import("std");
 
@@ -220,7 +221,25 @@ pub fn toFramePixels(region: Rect, mon: Rect, fw: u32, fh: u32) ?Rect {
     return Rect.fromEdges(x0, y0, x1, y1).clip(fw, fh);
 }
 
+/// A surface's physical rect `r` (scale `k`, ui/scale.zig) in its logical
+/// pixels, covering it: the origin floored, the size rounded up, at
+/// least 1 (the backend's text-input caret).
+pub fn physicalToLogical(r: Rect, k: f64) Rect {
+    const d = if (k > 0) k else 1.0;
+    return .{
+        .x = @intFromFloat(@floor(@as(f64, @floatFromInt(r.x)) / d)),
+        .y = @intFromFloat(@floor(@as(f64, @floatFromInt(r.y)) / d)),
+        .w = @max(1, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(r.w)) / d)))),
+        .h = @max(1, @as(i32, @intFromFloat(@ceil(@as(f64, @floatFromInt(r.h)) / d)))),
+    };
+}
+
 const testing = std.testing;
+
+test "a physical rect in logical pixels covers it" {
+    try testing.expectEqual(Rect{ .x = 150, .y = 25, .w = 2, .h = 21 }, physicalToLogical(.{ .x = 301, .y = 50, .w = 3, .h = 41 }, 2.0));
+    try testing.expectEqual(Rect{ .x = 1, .y = 2, .w = 1, .h = 1 }, physicalToLogical(.{ .x = 1, .y = 2, .w = 0, .h = 0 }, 0));
+}
 
 test "rect normalization" {
     const r = (Rect{ .x = 100, .y = 50, .w = -30, .h = -20 }).normalized();

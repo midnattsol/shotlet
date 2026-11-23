@@ -134,11 +134,7 @@ pub fn tick(self: *Quick) void {
         const c = &self.cards.items[i];
         if (c.menu or (keep_alive and c.life.leaving == 0)) c.deadline_ms = @max(c.deadline_ms, now + 2000);
         if (now >= c.deadline_ms) c.life.leave(now);
-        if (c.notice_until != 0 and now >= c.notice_until) {
-            c.notice_until = 0;
-            c.notice = "";
-            self.dirty = true;
-        }
+        if (c.notice.expire(now)) self.dirty = true;
         if (fading(c, now)) self.dirty = true;
         if (c.life.gone(now)) {
             self.remove(i);
@@ -160,7 +156,7 @@ pub fn nextWakeMs(self: *const Quick) i32 {
     for (self.cards.items) |*c| {
         if (fading(c, now)) return 16;
         wait = @min(wait, c.deadline_ms - now);
-        if (c.notice_until != 0) wait = @min(wait, c.notice_until - now);
+        if (c.notice.left(now)) |l| wait = @min(wait, l);
     }
     return @intCast(std.math.clamp(wait, 5, 1000));
 }

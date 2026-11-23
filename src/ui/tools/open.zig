@@ -55,7 +55,7 @@ fn replaceDocument(ed: *Editor, img: png.Image) !void {
 /// Pin the export to the screen (`shotlet pin`), and close; annotating
 /// a pin, that pin takes it.
 pub fn pinExport(ed: *Editor) !void {
-    const env = launch.env orelse return error.NoEnvironment;
+    const env = ed.tools.env orelse return error.NoEnvironment;
     const data = try ed.exportPng();
     defer ed.alloc.free(data);
     // annotating a pin: it shows this, where it is

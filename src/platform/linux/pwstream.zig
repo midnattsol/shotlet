@@ -39,10 +39,13 @@ pub const Capture = struct {
     slots: [max_streams]Slot = @splat(.{}),
     n: usize = 0,
 
-    /// Connect over the portal's fd (consumed), or to the session's
-    /// PipeWire daemon when null.
+    /// Connect over the portal's fd (consumed, also on failure), or to
+    /// the session's PipeWire daemon when null.
     pub fn open(gpa: std.mem.Allocator, fd: ?i32) !*Capture {
-        const self = try gpa.create(Capture);
+        const self = gpa.create(Capture) catch |err| {
+            if (fd) |f| sys.close(f);
+            return err;
+        };
         errdefer gpa.destroy(self);
         self.* = .{ .pre = if (fd) |f| try pw.preconnect(f) else try pw.connectDaemon("shotlet-rec") };
         return self;

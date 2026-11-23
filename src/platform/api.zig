@@ -52,9 +52,10 @@ pub const capture = backend.capture;
 /// shell's own controls.
 pub const record = backend.record;
 
-/// Development commands of the backend (`shotlet test-window` ...);
-/// false when `cmd` is none of them.
+/// Development commands of the backend (`shotlet test-window` ...,
+/// api/devtools.zig).
 pub const devtools = backend.devtools;
+pub const DevCommand = @import("api/devtools.zig").DevCommand;
 
 /// Font discovery: the UI faces and a face for a codepoint (api/fonts.zig).
 pub const fonts = backend.fonts;

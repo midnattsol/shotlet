@@ -10,7 +10,6 @@ const reflow = @import("../../ocr/reflow.zig");
 const shapes = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const redact = @import("redact.zig");
-const launch = @import("launch.zig");
 
 const Editor = editor_mod.Editor;
 const Rect = shapes.Rect;
@@ -121,7 +120,7 @@ fn copyText(ed: *Editor, words: []const page_mod.Word) !void {
     ed.tools.toast.show(.done, say, 2400);
     if (ed.tools.text_capture) {
         // done: a toast of its own says so once the editor is gone
-        if (launch.env) |env| @import("../../app/report.zig").done(env, "Copied", first);
+        if (ed.tools.env) |env| @import("../../app/report.zig").done(env, "Copied", first);
         ed.finish(.copied);
     }
 }

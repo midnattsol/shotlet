@@ -20,6 +20,7 @@ const motion = @import("../../ui/motion.zig");
 const press = @import("../../ui/press.zig");
 const scale = @import("../../ui/scale.zig");
 const theme = @import("../../ui/theme.zig");
+const Notice = @import("../../ui/notice.zig").Notice;
 const layout = @import("layout.zig");
 const actions = @import("actions.zig");
 const input = @import("input.zig");
@@ -46,8 +47,8 @@ pub const Card = struct {
     menu: bool = false,
     /// how far its hover controls show (0..1)
     hov: motion.Tween = .{ .dur_ms = theme.motion_fast },
-    notice: []const u8 = "",
-    notice_until: i64 = 0,
+    /// "Copied", "Saved" over it for a moment
+    notice: Notice = .{},
 
     fn deinit(self: *Card, gpa: std.mem.Allocator) void {
         self.meta.deinit(gpa);

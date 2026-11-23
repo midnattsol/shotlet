@@ -16,6 +16,8 @@ pub fn outputDir(gpa: std.mem.Allocator, s: *const Settings, home: []const u8, b
     return env_mod.userDir(gpa, buf, home, .videos);
 }
 
+const testutil = @import("../testutil.zig");
+
 test "recording settings read with limits" {
     var cfg: config.Config = .{};
     _ = @import("../app/config/parse.zig").applyText(&cfg, "save_dir=~/x\nrecord_format=gif\nrecord_fps=120\nrecord_gif_fps=5\nrecord_mic=true\nrecord_quality=high\nrecord_gif_dither=floyd\nrecord_countdown=0\n# record_keys=true\nrecord_dir=~/clips\n");
@@ -35,9 +37,8 @@ test "recording settings read with limits" {
 }
 
 test "recordings go to record_dir, else the Videos folder" {
-    const saved = env_mod.xdg;
-    defer env_mod.xdg = saved;
-    env_mod.xdg = .{ .videos_dir = "/media/films" };
+    const xdg = testutil.useXdg(.{ .videos_dir = "/media/films" });
+    defer xdg.restore();
     var buf: env_mod.PathBuf = undefined;
     var s: Settings = .{};
     try std.testing.expectEqualStrings("/media/films", try outputDir(std.testing.allocator, &s, "/home/u", &buf));

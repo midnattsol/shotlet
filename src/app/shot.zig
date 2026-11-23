@@ -113,7 +113,7 @@ fn countDown(win: *window.Window, conn: *desktop.Session, seconds: u8) !bool {
 
 fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, req: modes.Request, t0: i64) bool {
     if (!shell.applies() or !shell.active(conn)) return false;
-    launch.handOff(env.runtime_dir);
+    launch.handOff(env);
     switch (shell.requestCapture(gpa, conn, req)) {
         .started => {
             std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
@@ -182,12 +182,12 @@ const Reopen = struct {
 /// keeping the capture for quick access and the history.
 pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
+    ed.tools.env = env;
     ed.monitors = cap.monitors;
     configureEditor(&ed, conn, cfg, smoke_ms);
     const stateflag = @import("stateflag.zig");
     ed.loupe.hint.due = !stateflag.isSet(env.home, .zoom_hint);
-    // older versions kept the first-run hint in the config (hint_shown)
-    ed.show_hint = !(cfg.hint_shown or stateflag.isSet(env.home, .editor_hint));
+    ed.show_hint = !stateflag.isSet(env.home, .editor_hint);
     ed.presetSelection(preset_sel);
     if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     ed.keep_alpha = edit.keep_alpha;

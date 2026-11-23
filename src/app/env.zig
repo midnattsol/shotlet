@@ -226,6 +226,8 @@ pub fn parseUserDir(data: []const u8, name: []const u8, home: []const u8, buf: [
     return null;
 }
 
+const testutil = @import("../testutil.zig");
+
 test "user-dirs parsing" {
     var buf: [256]u8 = undefined;
     const data =
@@ -249,9 +251,8 @@ test "home expansion" {
 }
 
 test "state, cache and config paths follow the XDG variables" {
-    const saved = xdg;
-    defer xdg = saved;
-    xdg = .{ .cache_home = "/c" };
+    const saved = testutil.useXdg(.{ .cache_home = "/c" });
+    defer saved.restore();
     var buf: PathBuf = undefined;
     try std.testing.expectEqualStrings("/h/.local/state/shotlet/last-area", try statePath(&buf, "/h", "last-area"));
     try std.testing.expectEqualStrings("/c/shotlet/drop", try cachePath(&buf, "/h", "drop"));
@@ -260,9 +261,8 @@ test "state, cache and config paths follow the XDG variables" {
 }
 
 test "a user directory equal to $HOME counts as unset" {
-    const saved = xdg;
-    defer xdg = saved;
-    xdg = .{ .videos_dir = "/h/", .config_home = "/nonexistent-shotlet" };
+    const saved = testutil.useXdg(.{ .videos_dir = "/h/", .config_home = "/nonexistent-shotlet" });
+    defer saved.restore();
     var buf: PathBuf = undefined;
     try std.testing.expectEqualStrings("/h/Videos", try userDir(std.testing.allocator, &buf, "/h", .videos));
     xdg.pictures_dir = "/data/pics";

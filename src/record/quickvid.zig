@@ -23,6 +23,7 @@ const motion = @import("../ui/motion.zig");
 const press = @import("../ui/press.zig");
 const scale = @import("../ui/scale.zig");
 const theme = @import("../ui/theme.zig");
+const Notice = @import("../ui/notice.zig").Notice;
 const card = @import("../ui/recui/vidcard.zig");
 const keepvid = @import("keepvid.zig");
 const files = @import("files.zig");
@@ -47,8 +48,8 @@ const Quick = struct {
     press: press.Press(card.Control) = .{},
     /// fading in from the first frame, out once closed
     life: motion.Life = .{},
-    notice: []const u8 = "",
-    notice_until: i64 = 0,
+    /// "Copied", "Saved" over the card for a moment
+    notice: Notice = .{},
     play_from: i64 = 0,
     dirty: bool = true,
     drag: fui.DragOut = .{},
@@ -105,7 +106,7 @@ const Quick = struct {
             .gif = self.info.format == .gif,
             .hover = self.hover,
             .hovered = self.hover != null,
-            .notice = if (now < self.notice_until) self.notice else "",
+            .notice = self.notice.text(now),
             .alpha = alpha,
             .th = self.th,
         });
@@ -113,8 +114,7 @@ const Quick = struct {
     }
 
     fn say(self: *Quick, s: []const u8) void {
-        self.notice = s;
-        self.notice_until = sys.monoMs() + 1200;
+        self.notice.show(s, sys.monoMs(), 1200);
         self.dirty = true;
     }
 
@@ -203,10 +203,7 @@ const Quick = struct {
         const now = sys.monoMs();
         if (self.life.busy(now)) self.dirty = true;
         if (self.life.gone(now)) self.done = true;
-        if (self.notice_until != 0 and now >= self.notice_until) {
-            self.notice_until = 0;
-            self.dirty = true;
-        }
+        if (self.notice.expire(now)) self.dirty = true;
     }
 
     fn open(self: *Quick) !void {

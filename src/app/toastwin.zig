@@ -134,6 +134,6 @@ fn draw(gpa: std.mem.Allocator, win: *window.Window, th: theme.Theme, t: Toast, 
     const top: i32 = @divTrunc(@as(i32, @intCast(ch)) - text.heightStyled(fs, .semibold) - (if (t.body.len > 0) text.height(ss) else 0), 2);
     text.drawStyled(&c, tx, top, fs, o.fg, .semibold, text.ellipsize(&tbuf, fs, .semibold, t.title, room, .end));
     if (t.body.len > 0) text.draw(&c, tx, top + text.heightStyled(fs, .semibold), ss, o.muted, text.ellipsize(&bbuf, ss, .regular, t.body, room, .end));
-    fui.place(gpa, .{ .px = buf, .w = win.width, .h = win.height }, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, radius * k, th.card_shadow, k);
+    fui.place(.{ .px = buf, .w = win.width, .h = win.height }, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, radius * k, th.card_shadow, k);
     try floatwin.presentStraight(win, buf);
 }

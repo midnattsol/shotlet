@@ -206,11 +206,13 @@ pub fn symlink(target: []const u8, path: []const u8) !void {
     _ = try check(linux.symlinkat(t.ptr, linux.AT.FDCWD, p.ptr));
 }
 
+const testutil = @import("../../../testutil.zig");
+
 test "writeAtomic replaces a file, and a symlink without following it" {
     const alloc = std.testing.allocator;
-    const dir = try @import("dir.zig").makeTempDir(alloc, "/tmp", "shotlet-atomic");
-    defer alloc.free(dir);
-    defer @import("dir.zig").removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-atomic");
+    defer tmp.deinit();
+    const dir = tmp.path;
     var a: [256]u8 = undefined;
     var b: [256]u8 = undefined;
     const target = try std.fmt.bufPrint(&a, "{s}/target", .{dir});
@@ -232,10 +234,9 @@ test "writeAtomic replaces a file, and a symlink without following it" {
 }
 
 test "private files and directories are told apart" {
-    const alloc = std.testing.allocator;
-    const dir = try @import("dir.zig").makeTempDir(alloc, "/tmp", "shotlet-private");
-    defer alloc.free(dir);
-    defer @import("dir.zig").removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-private");
+    defer tmp.deinit();
+    const dir = tmp.path;
     try checkPrivateDir(dir);
     var a: [256]u8 = undefined;
     var b: [256]u8 = undefined;

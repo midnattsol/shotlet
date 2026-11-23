@@ -66,7 +66,7 @@ fn showView(st: *model.State, v: model.View) void {
 fn applyConfig(app: *App, hit: Hit) void {
     const cfg = &app.cfg;
     switch (hit) {
-        .rec => |r| settings_rec.activate(app.alloc, app.env.home, r),
+        .rec => |r| settings_rec.apply(&cfg.record, r),
         .toggle_notify => cfg.notify = !cfg.notify,
         .toggle_copy_on_save => cfg.copy_on_save = !cfg.copy_on_save,
         .th_minus => cfg.default_thickness = @max(1, cfg.default_thickness - 1),

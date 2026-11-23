@@ -39,6 +39,24 @@ pub fn nextEventTimeout(w: *Window, timeout_ms: i32) !?InputEvent {
     return w.queue.orderedRemove(0);
 }
 
+/// Wait at most `ms` for the keyboard focus, dispatching what arrives
+/// meanwhile (input stays queued for nextEvent). True once focused.
+pub fn waitKeyboardFocus(w: *Window, ms: i32) !bool {
+    const deadline = sys.monoMs() + ms;
+    while (!w.kb_focus) {
+        const left = deadline - sys.monoMs();
+        if (left <= 0) return false;
+        try w.conn.flush();
+        if (try w.conn.pollEvent()) |ev| {
+            try handleEvent(w, ev);
+            continue;
+        }
+        var fds = [_]sys.pollfd{.{ .fd = w.conn.fd, .events = sys.POLL.IN, .revents = 0 }};
+        if (try sys.poll(&fds, @intCast(left)) > 0) try dispatchOne(w);
+    }
+    return true;
+}
+
 /// One wait step: queue a due key repeat, dispatch buffered events, or
 /// poll the socket for at most max_ms (-1 = forever), waking early for
 /// the next key repeat. Returns false when it timed out idle.

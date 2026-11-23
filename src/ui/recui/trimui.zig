@@ -15,6 +15,7 @@ const text = @import("../../gfx/text.zig");
 const window = @import("../../platform/api.zig").window;
 const keepvid = @import("../../record/keepvid.zig");
 const trim = @import("../../record/trim.zig");
+const ffmpeg_proc = @import("../../encode/ffmpeg_proc.zig");
 const strip_mod = @import("../../record/strip.zig");
 const draw = @import("trim_draw.zig");
 const frame_mod = @import("../frame.zig");
@@ -177,7 +178,7 @@ pub fn exportRange(gpa: std.mem.Allocator, env: Env, info: *const keepvid.Info, 
 }
 
 fn firstPicture(gpa: std.mem.Allocator, envp: @import("../../platform/api.zig").proc.Envp, path: []const u8, info: *const keepvid.Info) ![]u32 {
-    if (info.format == .mp4) return trim.frameAt(gpa, envp, path, 0, info.width, info.height);
+    if (info.format == .mp4) return ffmpeg_proc.frameAt(gpa, envp, path, 0, info.width, info.height);
     const data = try sys.readFileAlloc(gpa, path, 512 * 1024 * 1024);
     defer gpa.free(data);
     var d = try @import("../../encode/gifdec.zig").Decoder.init(gpa, data);

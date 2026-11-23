@@ -129,9 +129,7 @@ pub const Server = struct {
     }
 };
 
-fn testDir(gpa: std.mem.Allocator) ![]const u8 {
-    return sys.makeTempDir(gpa, "/tmp", "shotlet-ipc");
-}
+const testutil = @import("../testutil.zig");
 
 test "session paths" {
     var buf: PathBuf = undefined;
@@ -140,10 +138,9 @@ test "session paths" {
 }
 
 test "a request reaches the server and its answer comes back" {
-    const gpa = std.testing.allocator;
-    const dir = try testDir(gpa);
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-ipc");
+    defer tmp.deinit();
+    const dir = tmp.path;
     var pbuf: PathBuf = undefined;
     const p = try std.fmt.bufPrint(&pbuf, "{s}/t.sock", .{dir});
     var s = try Server.listen(p);
@@ -162,10 +159,9 @@ test "a request reaches the server and its answer comes back" {
 }
 
 test "liveness: a live socket is kept, a stale one taken over" {
-    const gpa = std.testing.allocator;
-    const dir = try testDir(gpa);
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-ipc");
+    defer tmp.deinit();
+    const dir = tmp.path;
     var pbuf: PathBuf = undefined;
     const p = try std.fmt.bufPrint(&pbuf, "{s}/live.sock", .{dir});
     try std.testing.expect(!alive(p));
@@ -187,10 +183,9 @@ test "liveness: a live socket is kept, a stale one taken over" {
 }
 
 test "close removes the socket file" {
-    const gpa = std.testing.allocator;
-    const dir = try testDir(gpa);
-    defer gpa.free(dir);
-    defer sys.removeTree(dir);
+    var tmp = try testutil.TmpDir.init("shotlet-ipc");
+    defer tmp.deinit();
+    const dir = tmp.path;
     var pbuf: PathBuf = undefined;
     const p = try std.fmt.bufPrint(&pbuf, "{s}/c.sock", .{dir});
     var s = try Server.listen(p);

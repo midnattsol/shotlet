@@ -26,6 +26,7 @@ const launch = @import("launch.zig");
 const ocr_job = @import("ocr_job.zig");
 
 const Editor = editor_mod.Editor;
+const Env = @import("../../app/env.zig").Env;
 const Shape = shapes.Shape;
 const Point = shapes.Point;
 const Rect = shapes.Rect;
@@ -68,6 +69,9 @@ pub const State = struct {
     crops: crop.Store = .{},
     /// text recognition running in the background
     ocr: ocr_job.Job = .{},
+    /// the process environment (app/shot.zig sets it): to start
+    /// `shotlet pin`, and to say what was done once the editor is gone
+    env: ?Env = null,
 };
 
 /// Once, when the editor first shows: how it was started.
