@@ -9,21 +9,25 @@
 //! without the keyboard focus. A click closes it.
 
 const std = @import("std");
-const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("env.zig");
 const sys = @import("../platform/api.zig").sys;
 const text = @import("../gfx/text.zig");
 const render = @import("../gfx/render.zig");
 const window = @import("../platform/api.zig").window;
 const fui = @import("../ui/floatui.zig");
+const floatwin = @import("../ui/floatwin.zig");
+const badge = @import("../ui/badge.zig");
+const press = @import("../ui/press.zig");
+const scale = @import("../ui/scale.zig");
 const theme = @import("../ui/theme.zig");
-const icons = @import("../ui/icons.zig");
 const Env = env_mod.Env;
+const Rect = @import("../ui/shapes.zig").Rect;
 
 const card_w = 340;
 const card_max_w = 560;
 const card_h = 64;
 const pad = 20;
+const radius = 14;
 /// the text's left edge (after the badge) and the card's right margin
 const text_x = 16 + 24 + 12;
 const text_right = 16;
@@ -35,6 +39,13 @@ pub const Kind = enum {
     done,
     /// why something cannot be done: an "i"
     info,
+
+    fn badgeKind(self: Kind) badge.Kind {
+        return switch (self) {
+            .done => .done,
+            .info => .info,
+        };
+    }
 
     fn showMs(self: Kind) i64 {
         return switch (self) {
@@ -65,44 +76,36 @@ fn cardWidth(t: Toast) u32 {
     return @intCast(std.math.clamp(words + text_x + text_right, card_w, card_max_w));
 }
 
-fn prefsOf(gpa: std.mem.Allocator, env: Env) theme.Prefs {
-    var conn = desktop.connect(gpa, env) catch return .{ .dark = true };
-    defer conn.deinit();
-    return theme.readPrefs(&conn, 300);
-}
-
 pub fn run(gpa: std.mem.Allocator, env: Env, t: Toast) !void {
     text.init(gpa);
     defer text.deinit();
-    const th = prefsOf(gpa, env);
+    const th = theme.load(gpa, env, 300);
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
     const cw = cardWidth(t);
-    const w: u32 = cw + 2 * pad;
-    const h: u32 = card_h + 2 * pad;
-    if (win.hasLayerShell()) {
-        try win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = w, .height = h, .layer = .{
-            .layer = .overlay,
-            .anchor = .{ .bottom = true },
-            .width = w,
-            .height = h,
-            .margin = .{ 0, 0, 24, 0 },
-            .keyboard = .none,
-        } });
-    } else try win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = w, .height = h });
-    win.setCursor(.arrow) catch {};
+    _ = try floatwin.open(&win, .{
+        .size = .{ cw + 2 * pad, card_h + 2 * pad },
+        .anchor = .{ .bottom = true },
+        .margin = .{ 0, 0, 24, 0 },
+    });
     std.log.info("toast: {s}: {s}", .{ t.title, t.body });
     const end = sys.monoMs() + t.kind.showMs();
     var drawn = false;
+    // a click on the card (pressed and released on it) closes it
+    var click: press.Press(void) = .{};
     while (sys.monoMs() < end) {
-        if (!drawn and win.width > 0 and !win.frame_pending) {
-            try draw(&win, th, t, cw);
+        if (!drawn and floatwin.canDraw(&win)) {
+            try draw(gpa, &win, th, t, cw);
             drawn = true;
         }
         const ev = (try win.nextEventTimeout(100)) orelse continue;
         switch (ev) {
             .close => break,
-            .pointer_button => |b| if (b.pressed) break,
+            .pointer_button => |b| {
+                const k = scale.of(win.scale120);
+                const on: ?void = if (cardRect(cw).contains(scale.toLogical(b.x, k), scale.toLogical(b.y, k))) {} else null;
+                if (b.pressed) click.down(on, b.x, b.y) else if (click.up(on) != null) break;
+            },
             .resize => drawn = false,
             else => {},
         }
@@ -110,50 +113,34 @@ pub fn run(gpa: std.mem.Allocator, env: Env, t: Toast) !void {
     win.closeWindow();
 }
 
-fn sc(v: f64, k: f64) i32 {
-    return @intFromFloat(@round(v * k));
+/// The card in the window, logical px.
+fn cardRect(card_lw: u32) Rect {
+    return .{ .x = pad, .y = pad, .w = @intCast(card_lw), .h = card_h };
 }
 
 /// The card of logical width `card_lw`, at the window's scale.
-fn draw(win: *window.Window, prefs: theme.Prefs, t: Toast, card_lw: u32) !void {
-    const k = @as(f64, @floatFromInt(win.scale120)) / 120.0;
-    const px = try win.backBuffer();
-    @memset(px, 0);
-    const cw: u32 = @intCast(sc(@floatFromInt(card_lw), k));
-    const ch: u32 = @intCast(sc(card_h, k));
-    const card = try std.heap.page_allocator.alloc(u32, @as(usize, cw) * ch);
-    defer std.heap.page_allocator.free(card);
-    const th = fui.Theme.fromPrefs(prefs);
-    @memset(card, th.panel);
+fn draw(gpa: std.mem.Allocator, win: *window.Window, th: theme.Theme, t: Toast, card_lw: u32) !void {
+    const k = scale.of(win.scale120);
+    const buf = try win.backBuffer();
+    @memset(buf, 0);
+    const r = scale.rect(cardRect(card_lw), k);
+    const cw: u32 = @intCast(r.w);
+    const ch: u32 = @intCast(r.h);
+    const card = try gpa.alloc(u32, @as(usize, cw) * ch);
+    defer gpa.free(card);
+    const o = theme.Opaque.of(th);
+    @memset(card, o.panel);
     var c = render.Canvas.init(card, cw, ch);
-    drawBadge(&c, th, t.kind, k);
-    const tx = sc(text_x, k);
+    badge.statusBadge(&c, t.kind.badgeKind(), 28 * k, scale.ff(ch) / 2, k, th);
+    const tx = scale.px(text_x, k);
     const fs = title_size * k;
     const ss = body_size * k;
-    const room = @as(i32, @intCast(cw)) - tx - sc(text_right, k);
+    const room = @as(i32, @intCast(cw)) - tx - scale.px(text_right, k);
     var tbuf: [256]u8 = undefined;
     var bbuf: [256]u8 = undefined;
     const top: i32 = @divTrunc(@as(i32, @intCast(ch)) - text.heightStyled(fs, .semibold) - (if (t.body.len > 0) text.height(ss) else 0), 2);
-    text.drawStyled(&c, tx, top, fs, th.fg, .semibold, fui.ellipsize(&tbuf, fs, t.title, room));
-    if (t.body.len > 0) text.draw(&c, tx, top + text.heightStyled(fs, .semibold), ss, th.muted, fui.ellipsize(&bbuf, ss, t.body, room));
-    fui.placeCard(px, win.width, win.height, card, cw, ch, sc(pad, k), sc(pad, k), @intCast(sc(14, k)), @intCast(sc(10, k)));
-    fui.premultiply(px, win.width, win.height, .{ .x = 0, .y = 0, .w = @intCast(win.width), .h = @intCast(win.height) });
-    try win.present();
-}
-
-/// The accent disc at the card's left: a check, or an "i".
-fn drawBadge(c: *render.Canvas, th: fui.Theme, kind: Kind, k: f64) void {
-    const cy = @as(f64, @floatFromInt(c.h)) / 2.0;
-    const bx = 16.0 * k + 12.0 * k;
-    c.fillCircleAA(bx, cy, 12.0 * k, th.accent);
-    const is = sc(14, k);
-    const ix = @as(i32, @intFromFloat(bx)) - @divTrunc(is, 2);
-    const iy = @as(i32, @intFromFloat(cy)) - @divTrunc(is, 2);
-    switch (kind) {
-        .done => icons.drawStroke(c, .check, ix, iy, is, 3, 0xFFFFFFFF),
-        .info => {
-            const fs = 15.0 * k;
-            text.drawStyled(c, ix + @divTrunc(is - text.widthStyled(fs, .bold, "i"), 2), iy + @divTrunc(is - text.heightStyled(fs, .bold), 2), fs, 0xFFFFFFFF, .bold, "i");
-        },
-    }
+    text.drawStyled(&c, tx, top, fs, o.fg, .semibold, text.ellipsize(&tbuf, fs, .semibold, t.title, room, .end));
+    if (t.body.len > 0) text.draw(&c, tx, top + text.heightStyled(fs, .semibold), ss, o.muted, text.ellipsize(&bbuf, ss, .regular, t.body, room, .end));
+    fui.place(gpa, .{ .px = buf, .w = win.width, .h = win.height }, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, radius * k, th.card_shadow, k);
+    try floatwin.presentStraight(win, buf);
 }

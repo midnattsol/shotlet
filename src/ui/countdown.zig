@@ -10,27 +10,36 @@ const sys = @import("../platform/api.zig").sys;
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const fui = @import("floatui.zig");
+const floatwin = @import("floatwin.zig");
+const focus = @import("focus.zig");
+const press = @import("press.zig");
+const scale = @import("scale.zig");
+const theme = @import("theme.zig");
 const window = @import("../platform/api.zig").window;
 
+/// the card's size and corner radius, logical px
 const size = 132;
+const radius = 32;
+/// how much of the card shows: the screen stays readable through it
+const opacity = 0.86;
 
-fn draw(win: *window.Window, left: u32) !void {
+fn draw(win: *window.Window, th: theme.Theme, left: u32) !void {
     const bw = win.width;
     const bh = win.height;
+    const k = scale.of(win.scale120);
+    const o = theme.Opaque.of(th);
     const card = try win.alloc.alloc(u32, @as(usize, bw) * bh);
     defer win.alloc.free(card);
-    @memset(card, 0xFF1E1E20);
+    @memset(card, o.panel);
     var cv = render.Canvas.init(card, bw, bh);
     var buf: [4]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{d}", .{left}) catch "";
-    const k = @as(f64, @floatFromInt(win.scale120)) / 120.0;
-    fui.textCentered(&cv, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) }, 60 * k, 0xFFFFFFFF, text.Style.semibold.num(), s);
+    fui.textCentered(&cv, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) }, 60 * k, o.fg, text.Style.semibold.num(), s);
     const px = try win.backBuffer();
     @memset(px, 0);
-    fui.placeCard(px, bw, bh, card, bw, bh, 0, 0, @intFromFloat(32 * k), 0);
-    fui.fadeAlpha(px, 0.86);
-    fui.premultiply(px, bw, bh, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) });
-    try win.present();
+    fui.place(win.alloc, .{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, radius * k, null, k);
+    fui.fadeAlpha(px, opacity);
+    try floatwin.presentStraight(win, px);
 }
 
 /// Nothing drawn, and shown: the capture may start.
@@ -43,30 +52,35 @@ fn vanish(win: *window.Window) !void {
     sys.sleepMs(50);
 }
 
-/// Count `seconds` down. True when it ran out (the card is invisible
-/// now and is closed by the caller), false when cancelled.
+/// Count `seconds` down in the dark theme.
+/// TODO(wave 3): remove; app/shot.zig calls runThemed with the desktop's
+/// theme (theme.load, or theme.of(theme.readPrefs(&conn, ...))).
 pub fn run(win: *window.Window, seconds: u8) !bool {
-    try win.open("shotlet:timer", .{ .fullscreen = false, .transparent = true, .width = size, .height = size, .layer = .{
-        .width = size,
-        .height = size,
-        .keyboard = .none,
-        .namespace = "shotlet-timer",
-    } });
+    return runThemed(win, seconds, theme.Theme.get(true, null));
+}
+
+/// Count `seconds` down on a card in `th`. True when it ran out (the
+/// card is invisible now and is closed by the caller), false when
+/// cancelled: Escape, or a click on the card.
+pub fn runThemed(win: *window.Window, seconds: u8, th: theme.Theme) !bool {
+    _ = try floatwin.open(win, .{ .title = "shotlet:timer", .namespace = "shotlet-timer", .size = .{ size, size } });
     const end = sys.monoMs() + @as(i64, seconds) * 1000;
     var shown: u32 = 0;
+    // the whole window is the card: a press and release on it cancel
+    var click: press.Press(void) = .{};
     while (true) {
         const now = sys.monoMs();
         if (now >= end) break;
         const left: u32 = @intCast(@divTrunc(end - now + 999, 1000));
-        if (left != shown and !win.frame_pending and win.width > 0) {
-            try draw(win, left);
+        if (left != shown and floatwin.canDraw(win)) {
+            try draw(win, th, left);
             shown = left;
         }
         const ev = (try win.nextEventTimeout(@intCast(@min(100, end - now)))) orelse continue;
         switch (ev) {
             .close => return false,
-            .pointer_button => |b| if (b.pressed) return false,
-            .key => |k| if (k.pressed and k.code == .escape) return false,
+            .pointer_button => |b| if (b.pressed) click.down({}, b.x, b.y) else if (click.up(if (win.pointer_in) {} else null) != null) return false,
+            .key => |k| if (focus.action(k, .none) == .close) return false,
             .resize => shown = 0,
             else => {},
         }

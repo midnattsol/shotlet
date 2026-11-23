@@ -18,13 +18,16 @@ const png = @import("../gfx/png.zig");
 const text = @import("../gfx/text.zig");
 const window = @import("../platform/api.zig").window;
 const fui = @import("../ui/floatui.zig");
+const floatwin = @import("../ui/floatwin.zig");
+const motion = @import("../ui/motion.zig");
+const press = @import("../ui/press.zig");
+const scale = @import("../ui/scale.zig");
+const theme = @import("../ui/theme.zig");
 const card = @import("../ui/recui/vidcard.zig");
 const keepvid = @import("keepvid.zig");
 const files = @import("files.zig");
 const Env = env_mod.Env;
 
-const fade_ms = 250;
-const fade_in_ms = 150;
 const frame_ms = 160;
 
 const Quick = struct {
@@ -37,21 +40,30 @@ const Quick = struct {
     thumb: png.Image,
     strip: ?png.Image,
     strip_n: u32 = 0,
+    /// the desktop's appearance (motion.enabled follows it too)
+    // TODO(wave 3): pass to card.paint once ui/recui/vidcard.zig takes a
+    // Theme; its overlay controls use the tokens that do not change with it
+    th: theme.Theme,
     hover: ?card.Control = null,
-    pressed: ?card.Control = null,
-    press_at: [2]f64 = .{ 0, 0 },
-    /// first drawn (0: not yet); it fades in from there
-    born: i64 = 0,
-    fade_from: i64 = 0,
+    /// the left button held on a control (a click is its release there)
+    press: press.Press(card.Control) = .{},
+    /// fading in from the first frame, out once closed
+    life: motion.Life = .{},
     notice: []const u8 = "",
     notice_until: i64 = 0,
     play_from: i64 = 0,
     dirty: bool = true,
-    dragging: bool = false,
+    drag: fui.DragOut = .{},
     done: bool = false,
 
-    fn scale(self: *const Quick) f64 {
-        return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
+    fn factor(self: *const Quick) f64 {
+        return scale.of(self.win.scale120);
+    }
+
+    /// What is under a pointer at x, y (buffer pixels).
+    fn hitAt(self: *const Quick, x: f64, y: f64) ?card.Control {
+        const k = self.factor();
+        return card.hit(scale.toLogical(x, k), scale.toLogical(y, k));
     }
 
     /// The picture to show now: a strip picture while hovered.
@@ -79,16 +91,15 @@ const Quick = struct {
     fn render(self: *Quick) !void {
         const now = sys.monoMs();
         if (self.hover != null and self.strip_n > 1) self.dirty = true;
-        if (!self.dirty or self.win.frame_pending or self.win.width == 0) return;
+        if (!self.dirty or !floatwin.canDraw(&self.win)) return;
         self.dirty = false;
         const px = try self.win.backBuffer();
         @memset(px, 0);
         const pic = self.picture(now);
-        if (self.born == 0) self.born = now;
-        var alpha: f64 = @min(1, @as(f64, @floatFromInt(now - self.born)) / fade_in_ms);
-        if (self.fade_from != 0) alpha = @max(0, 1 - @as(f64, @floatFromInt(now - self.fade_from)) / fade_ms);
-        if (self.dragging) alpha = 0.5;
-        card.paint(self.gpa, px, self.win.width, self.win.height, self.scale(), &.{
+        self.life.start(now);
+        var alpha = self.life.alpha(now);
+        if (self.drag.active) alpha = @min(alpha, 0.5);
+        card.paint(self.gpa, px, self.win.width, self.win.height, self.factor(), &.{
             .pic = pic.px,
             .pic_w = pic.w,
             .pic_h = pic.h,
@@ -99,8 +110,7 @@ const Quick = struct {
             .notice = if (now < self.notice_until) self.notice else "",
             .alpha = alpha,
         });
-        fui.premultiply(px, self.win.width, self.win.height, .{ .x = 0, .y = 0, .w = @intCast(self.win.width), .h = @intCast(self.win.height) });
-        try self.win.present();
+        try floatwin.presentStraight(&self.win, px);
     }
 
     fn say(self: *Quick, s: []const u8) void {
@@ -110,32 +120,25 @@ const Quick = struct {
     }
 
     fn onEvent(self: *Quick, ev: window.InputEvent) void {
-        const k = self.scale();
         switch (ev) {
             .resize, .frame_done => self.dirty = true,
             .close => self.done = true,
             .pointer_motion => |m| {
-                const h = card.hit(@intFromFloat(m.x / k), @intFromFloat(m.y / k));
+                const h = self.hitAt(m.x, m.y);
                 if (h != null and self.hover == null) self.play_from = sys.monoMs();
                 if (h != self.hover) self.dirty = true;
                 self.hover = h;
-                if (self.pressed == .body and !self.dragging) {
-                    const dx = (m.x - self.press_at[0]) / k;
-                    const dy = (m.y - self.press_at[1]) / k;
-                    if (dx * dx + dy * dy > 36) self.startDrag() catch |err| std.log.warn("quick video: drag failed: {t}", .{err});
+                if (self.press.held() == .body and !self.drag.active and self.press.dragged(m.x, m.y, self.factor())) {
+                    self.press.cancel();
+                    self.startDrag() catch |err| std.log.warn("quick video: drag failed: {t}", .{err});
                 }
                 self.win.setCursor(self.cursor()) catch {};
             },
             .pointer_button => |b| if (b.button == .left) {
-                const h = card.hit(@intFromFloat(b.x / k), @intFromFloat(b.y / k));
+                const h = self.hitAt(b.x, b.y);
                 if (b.pressed) {
-                    self.pressed = h;
-                    self.press_at = .{ b.x, b.y };
-                } else {
-                    const p = self.pressed;
-                    self.pressed = null;
-                    if (p != null and p == h) self.act(h.?);
-                }
+                    self.press.down(h, b.x, b.y);
+                } else if (self.press.up(h)) |t| self.act(t);
                 self.win.setCursor(self.cursor()) catch {};
             },
             else => {},
@@ -146,7 +149,7 @@ const Quick = struct {
     /// pressed); the arrow over the buttons.
     fn cursor(self: *const Quick) window.Cursor {
         if (self.hover != .body) return .arrow;
-        return window.Cursor.hand(self.pressed == .body);
+        return window.Cursor.hand(self.press.held() == .body);
     }
 
     fn act(self: *Quick, c: card.Control) void {
@@ -158,7 +161,7 @@ const Quick = struct {
 
     fn actInner(self: *Quick, c: card.Control) !void {
         switch (c) {
-            .close => self.fade_from = sys.monoMs(),
+            .close => self.life.leave(sys.monoMs()),
             .copy => {
                 try files.copyToClipboard(self.gpa, &self.win, self.info.path);
                 std.log.info("quick video: copied {s}", .{self.info.path});
@@ -185,41 +188,27 @@ const Quick = struct {
     }
 
     fn startDrag(self: *Quick) !void {
-        self.pressed = null;
         const uri = try transfer.fileUriList(self.gpa, self.info.path);
         errdefer self.gpa.free(uri);
         var pbuf: [1200]u8 = undefined;
         const poster = try sys.readFileAlloc(self.gpa, try history.entryPath(&pbuf, self.root, self.id, "thumb.png"), 64 * 1024 * 1024);
-        try self.win.startDrag(0, poster, uri, null);
-        self.dragging = true;
+        try self.drag.start(&self.win, poster, uri, null);
         self.dirty = true;
         std.log.info("quick video: dragging {s}", .{self.info.path});
     }
 
+    /// A finished drag closes the thumbnail; a cancelled one keeps it.
     fn checkDrag(self: *Quick) void {
-        if (!self.dragging) return;
-        switch (self.win.drag_state) {
-            .finished => {
-                self.win.endDrag();
-                self.dragging = false;
-                self.done = true;
-            },
-            .cancelled => {
-                self.win.endDrag();
-                self.dragging = false;
-                self.dirty = true;
-            },
-            else => {},
+        switch (self.drag.poll(&self.win) orelse return) {
+            .finished => self.done = true,
+            .cancelled => self.dirty = true,
         }
     }
 
     fn tick(self: *Quick) void {
         const now = sys.monoMs();
-        if (self.born == 0 or now - self.born < fade_in_ms) self.dirty = true;
-        if (self.fade_from != 0) {
-            self.dirty = true;
-            if (now - self.fade_from >= fade_ms) self.done = true;
-        }
+        if (self.life.busy(now)) self.dirty = true;
+        if (self.life.gone(now)) self.done = true;
         if (self.notice_until != 0 and now >= self.notice_until) {
             self.notice_until = 0;
             self.dirty = true;
@@ -227,21 +216,12 @@ const Quick = struct {
     }
 
     fn open(self: *Quick) !void {
-        const sz = card.windowSize();
-        if (self.win.hasLayerShell()) {
-            try self.win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1], .layer = .{
-                .anchor = .{ .bottom = true, .left = true },
-                .width = sz[0],
-                .height = sz[1],
-                .margin = .{ 0, 0, 8, 8 },
-                .keyboard = .none,
-                .namespace = "shotlet-quick-video",
-            } });
-        } else {
-            try self.win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1] });
-        }
-        self.win.report_leave = true;
-        self.win.setCursor(.arrow) catch {};
+        _ = try floatwin.open(&self.win, .{
+            .size = card.windowSize(),
+            .anchor = .{ .bottom = true, .left = true },
+            .margin = .{ 0, 0, 8, 8 },
+            .namespace = "shotlet-quick-video",
+        });
         const p = card.pad;
         try self.win.setInputRegion(0, &.{.{ .x = p, .y = p, .w = card.card_w, .h = card.card_h }});
     }
@@ -269,6 +249,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
     var q: Quick = .{
         .gpa = gpa,
         .env = env,
+        .th = theme.load(gpa, env, 500),
         .win = try window.Window.init(gpa, env),
         .root = root,
         .id = id,
@@ -283,7 +264,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
     while (!q.done) {
         try q.win.flush();
         var fds = [_]sys.pollfd{.{ .fd = q.win.pollFd(), .events = sys.POLL.IN, .revents = 0 }};
-        _ = try sys.poll(&fds, q.win.pollTimeoutMs(if (q.hover != null or q.fade_from != 0 or sys.monoMs() - q.born < fade_in_ms) 16 else 200));
+        _ = try sys.poll(&fds, q.win.pollTimeoutMs(if (q.hover != null or q.life.busy(sys.monoMs())) 16 else 200));
         while (try q.win.nextEventTimeout(0)) |ev| q.onEvent(ev);
         q.checkDrag();
         q.tick();

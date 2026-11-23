@@ -12,8 +12,6 @@ const clock = @import("../clock.zig");
 const shot = @import("../shot.zig");
 const shell = @import("../../platform/api.zig").shell;
 const sys = @import("../../platform/api.zig").sys;
-const effects = @import("../../gfx/effects.zig");
-const window = @import("../../platform/api.zig").window;
 const fui = @import("../../ui/floatui.zig");
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
@@ -84,7 +82,7 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
         },
         .close => {
             std.log.info("quick access: closed {s}", .{c.kept.id.slice()});
-            if (c.fade_from == 0) c.fade_from = sys.monoMs() - stack.fade_ms / 2;
+            c.life.leave(sys.monoMs());
         },
     }
 }
@@ -164,10 +162,9 @@ pub fn startDrag(self: *Quick, i: usize) !void {
     const k: i32 = @max(1, @as(i32, @intCast((self.win.scale120 + 119) / 120)));
     const iw: u32 = @intCast(160 * k);
     const ih: u32 = @intCast(100 * k);
-    const icon_px = try self.gpa.alloc(u32, @as(usize, iw) * ih);
+    const icon_px = try fui.dragIcon(self.gpa, .{ .px = c.thumb.pixels, .w = c.thumb.width, .h = c.thumb.height }, iw, ih, k);
     defer self.gpa.free(icon_px);
-    try dragIcon(self, c, icon_px, iw, ih, k);
-    try self.win.startDrag(0, data, uri, .{ .pixels = icon_px, .width = iw, .height = ih, .scale = k });
+    try self.drag.start(&self.win, data, uri, .{ .pixels = icon_px, .width = iw, .height = ih, .scale = k });
     self.dragging = i;
     std.log.info("quick access: dragging {s} (file {s})", .{ c.kept.id.slice(), file });
 }
@@ -187,33 +184,17 @@ fn dragFile(self: *Quick, c: *const stack.Card, data: []const u8, file_buf: []u8
     return p;
 }
 
-/// The drag icon into icon_px (iw x ih, premultiplied).
-fn dragIcon(self: *Quick, c: *const stack.Card, icon_px: []u32, iw: u32, ih: u32, k: i32) !void {
-    @memset(icon_px, 0);
-    const pic = try self.gpa.alloc(u32, @as(usize, iw) * ih);
-    defer self.gpa.free(pic);
-    fui.drawImageFill(self.gpa, pic, iw, ih, c.thumb.pixels, c.thumb.width, c.thumb.height);
-    effects.blitRounded(icon_px, iw, ih, pic, iw, ih, 0, 0, @intCast(10 * k));
-    fui.fadeAlpha(icon_px, 0.92);
-    fui.premultiply(icon_px, iw, ih, .{ .x = 0, .y = 0, .w = @intCast(iw), .h = @intCast(ih) });
-}
-
 /// A finished drag removes the card; a cancelled one keeps it.
 pub fn checkDrag(self: *Quick) void {
     const i = self.dragging orelse return;
-    switch (self.win.drag_state) {
+    const out = self.drag.poll(&self.win) orelse return;
+    self.dragging = null;
+    self.dirty = true;
+    switch (out) {
         .finished => {
             std.log.info("quick access: dropped", .{});
-            self.win.endDrag();
-            self.dragging = null;
             if (i < self.cards.items.len) self.remove(i);
         },
-        .cancelled => {
-            std.log.info("quick access: drag cancelled", .{});
-            self.win.endDrag();
-            self.dragging = null;
-            self.dirty = true;
-        },
-        else => {},
+        .cancelled => std.log.info("quick access: drag cancelled", .{}),
     }
 }
