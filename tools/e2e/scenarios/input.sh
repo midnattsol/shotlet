@@ -37,18 +37,18 @@ keyboard_typing() {
     shot 0 typed
     keys ctrl+a ctrl+c
     sleep 0.3
-    check "Spanish text with dead keys and AltGr" eq "$(timeout 5 wl-paste -n)" "ñandú ¿Qué tal? €"
+    check "Spanish text with dead keys and AltGr" eq "$(clip_text)" "ñandú ¿Qué tal? €"
     # key repeat: hold a key past the repeat delay
     keys end
     drv hold l 1500
     sleep 0.3
     shot 0 held
     # text past the selection (x >= 702) is dimmed, as it will be cut
-    check "live text inside the selection is bright" drv find 0 ff453a 30 1 400 230 700 290
-    check "  ... and dimmed past its edge (not exported)" no_find_exact 0 ff453a 30 1 703 230 1600 290
+    check "live text inside the selection is bright" find_on 0 "$PEN_RED" 30 1 400 230 700 290
+    check "  ... and dimmed past its edge (not exported)" no_find_on 0 "$PEN_RED" 30 1 703 230 1600 290
     keys ctrl+a ctrl+c
     sleep 0.3
-    n=$(timeout 5 wl-paste -n | grep -o l | wc -l)
+    n=$(clip_text | grep -o l | wc -l)
     echo "  held 'l' for 1.5 s: $n characters"
     check "held key repeats" test "$n" -gt 10
     check "  ... and stops on release" test "$n" -lt 120
@@ -62,7 +62,7 @@ keyboard_typing() {
 # Ctrl+Z removes the text, Ctrl+Shift+Z brings it back: the first red blob
 # in reading order is the text (y ~260) when it is there, else the
 # toolbar's red swatch below the selection
-red_y() { drv find 0 ff453a 40 && read -r _ y _ <<<"$VAL" && echo "$y"; }
+red_y() { find_on 0 "$PEN_RED" 40 && read -r _ y _ <<<"$VAL" && echo "$y"; }
 keyboard_undo() {
     check "text is drawn" test "$(red_y)" -lt 400
     keys ctrl+z
@@ -74,8 +74,7 @@ keyboard_undo() {
     shot 0 redone
     check "Ctrl+Shift+Z redoes it" test "$(red_y)" -lt 400
     keys enter
-    sleep 1
-    check "  ... the annotated selection" eq "$(clip_png "$OUT/kb.png" && png_size "$OUT/kb.png")" 500x300
+    check "  ... the annotated selection" clip_is kb 500x300
 }
 
 # Shift squares a selection: a 300x100 drag becomes 300x300
@@ -92,8 +91,7 @@ keyboard_shift() {
     sleep 0.3
     shot 0 shift
     keys enter
-    sleep 1
-    check "Shift squares the selection" eq "$(clip_png "$OUT/shift.png" && png_size "$OUT/shift.png")" 300x300
+    check "Shift squares the selection" clip_is shift 300x300
 }
 
 # Space moves the selection while dragging: from 500,300 drag to 600,400;
@@ -113,8 +111,7 @@ keyboard_space() {
     sleep 0.3
     shot 0 space
     keys enter
-    sleep 1
-    check "Space moves the selection while dragging" eq "$(clip_png "$OUT/space.png" && png_size "$OUT/space.png")" 200x200
+    check "Space moves the selection while dragging" clip_is space 200x200
 }
 
 # Esc: first drops the selection, then quits
@@ -155,10 +152,11 @@ keyboard_discard() {
 
 # a save that cannot be written keeps the editor, and the work, open
 keyboard_save_fails() {
-    local cfg=$HOME/.config/shotlet/config locked=$HOME/locked
+    local cfg locked=$HOME/locked
+    cfg=$(cfg_path)
     mkdir -p "$locked" && chmod 555 "$locked"
     cp "$cfg" "$cfg.bak"
-    echo "save_dir=$locked" >>"$cfg"
+    cfg_set "save_dir=$locked"
     run_shotlet savefail
     wait_editor 5
     drag 0 100 100 0 260 220
@@ -188,29 +186,27 @@ keyboard_save() {
 scenario_clipboard() {
     text_editor clip 200
     # paste in: wl-copy offers text the way other apps do
-    timeout 5 wl-copy -- "pegado €ñ¿ 漢字 👍" &
-    sleep 0.5
+    clip_set "pegado €ñ¿ 漢字 👍"
+    sleep 0.3 # (the editor gets the keyboard back from wl-copy)
     keys ctrl+v
     sleep 0.3
     keys ctrl+a ctrl+c
     sleep 0.3
-    check "paste then copy round-trips non-ASCII text" eq "$(timeout 5 wl-paste -n)" "pegado €ñ¿ 漢字 👍"
+    check "paste then copy round-trips non-ASCII text" eq "$(clip_text)" "pegado €ñ¿ 漢字 👍"
     keys home shift+right shift+right shift+right ctrl+x
     sleep 0.3
-    check "Ctrl+X cuts the selected characters" eq "$(timeout 5 wl-paste -n)" "peg"
+    check "Ctrl+X cuts the selected characters" eq "$(clip_text)" "peg"
     keys ctrl+a ctrl+c
     sleep 0.3
-    check "  ... out of the text" eq "$(timeout 5 wl-paste -n)" "ado €ñ¿ 漢字 👍"
+    check "  ... out of the text" eq "$(clip_text)" "ado €ñ¿ 漢字 👍"
     shot 0 text
     keys esc enter
-    sleep 1
-    check "Enter copies the image after text editing" eq "$(clip_png "$OUT/img.png" && png_size "$OUT/img.png")" 500x300
+    check "Enter copies the image after text editing" clip_is img 500x300
     # the image stays pasteable, repeatedly, while shotlet serves it
     check "  ... and pastes again" clip_png "$OUT/img2.png"
     check "  ... as the same bytes" cmp -s "$OUT/img.png" "$OUT/img2.png"
     check "  ... from a still running shotlet" alive
-    timeout 5 wl-copy -- "other" &
-    sleep 0.5
+    clip_set other
     check "shotlet exits once another app takes the clipboard" wait_exit 5
 }
 
@@ -242,7 +238,7 @@ scenario_saveas() {
     shot 0 cancelled
     check "cancelling the chooser writes nothing" eq "$(ls "$HOME/Pictures" | wc -l)" 1
     if alive; then
-        check "  ... and returns to the editor" test "$(drv find 0 ff453a 40 && echo found)" = found
+        check "  ... and returns to the editor" find_on 0 "$PEN_RED" 40
         keys ctrl+shift+s
         wait_chooser 0 15
         sleep 0.5
@@ -260,7 +256,7 @@ scenario_ime() {
     # as preedit, committed syllables become text
     if ! ibus engine 2>/dev/null | grep -q hangul; then
         skip "no IBus Hangul engine (install ibus-hangul)"
-        exit 0
+        return
     fi
     text_editor ime 300
     keys "#122" # Hangul key: Latin -> Hangul mode
@@ -273,8 +269,7 @@ scenario_ime() {
     shot 0 committed
     keys ctrl+a ctrl+c
     sleep 0.3
-    check "IME composition commits Hangul text" eq "$(timeout 5 wl-paste -n)" "한 한글 "
+    check "IME composition commits Hangul text" eq "$(clip_text)" "한 한글 "
     keys esc enter
-    sleep 1
-    check "  ... and the annotated image is copied" clip_png "$OUT/ime.png"
+    check "  ... and the annotated image is copied" wait_until 3 clip_png "$OUT/ime.png"
 }

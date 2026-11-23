@@ -9,5 +9,6 @@ BREEZE_TICK=b4daef   # Breeze's light accent: a ticked checkbox (KDE dialogs)
 DESKTOP_BG=2a5db0    # the plain desktop of the GNOME scenarios (plain_desktop)
 APP_BG=dde7f0        # the drop target's window (start_app droptarget)
 RED=ff2020           # the test pictures' and drawn rectangles' red
+PEN_RED=ff453a       # the editor's default colour (shapes, text), the record dot
 REDACT_BOX=1c1c1e    # the editor's redaction box
 MENU_BG=f2f2f7       # Shotlet's menus (light)

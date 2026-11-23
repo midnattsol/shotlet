@@ -7,9 +7,6 @@
 # then a new login: the picker comes up.
 #   scroll-unavailable
 
-# the notice's "i": the desktop's accent (GNOME's blue)
-notice_badge=3584e4
-
 scenario_scroll_unavailable() {
     drv_ready Meta-0
     drv move 0 800 450
@@ -36,11 +33,9 @@ scroll_refused() {
     check "  ... and on the screen" wait_log 10 "toast: $title: $2"
     sleep 1
     shot 0 "notice-$1"
-    check "  ... a card with the accent's \"i\"" drv find 0 "$notice_badge" 24 16
-    check "  ... no region picker" not_grep "pick a region" "$OUT/$1.log"
-    check "  ... nothing captured" not_grep "capture path:" "$OUT/$1.log"
+    check "  ... a card with the accent's \"i\"" find_on 0 "$ACCENT" 24 16
+    check "  ... no region picker" no_log "pick a region" "$OUT/$1.log"
+    check "  ... nothing captured" no_log "capture path:" "$OUT/$1.log"
     check "  ... no consent dialog" no_dialog
-    # the notice goes by itself
-    sleep 6
-    check "  ... and goes by itself" no_find 0 "$notice_badge"
+    check "  ... and goes by itself" wait_until 10 no_find_on 0 "$ACCENT" 24 10
 }

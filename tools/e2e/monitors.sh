@@ -5,7 +5,7 @@
 # org.gnome.Mutter.DisplayConfig.ApplyMonitorsConfig (temporary method).
 # Prints the resulting layout, one "connector x y w h scale" line each.
 set -eu
-[ -n "${HL_INNER:-}" ] || { echo "monitors.sh: run inside tools/e2e/session.sh" >&2; exit 2; }
+[ "${SHOTLET_E2E_SANDBOX:-}" = gnome ] || { echo "monitors.sh: run inside tools/e2e/session.sh" >&2; exit 2; }
 DC=(--session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig)
 state=$(gdbus call "${DC[@]}" --method org.gnome.Mutter.DisplayConfig.GetCurrentState)
 PY=python3

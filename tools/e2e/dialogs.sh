@@ -1,8 +1,6 @@
 # Portal dialog helpers for tools/e2e.sh (sourced by its inner side).
 
 # --- portal dialogs (xdg-desktop-portal-gnome), found by colour (ACCENT)
-# TODO(wave 2): remove these two old names (scenarios use ACCENT, ACCENT_FILL)
-accent=$ACCENT accent_fill=$ACCENT_FILL
 
 # _button_on MON: an accent-coloured button (at least 40 px wide) on MON,
 # not a selected monitor tile's frame (tall) nor a sliver of something

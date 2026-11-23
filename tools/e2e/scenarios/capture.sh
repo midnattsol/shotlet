@@ -31,7 +31,7 @@ capture_first() {
     check "clipboard holds a PNG while shotlet serves it" clip_png "$OUT/clip.png"
     check "copied PNG has the selection's size" eq "$(png_size "$OUT/clip.png")" 400x300
     check "shotlet keeps serving the clipboard" alive
-    check "restore token stored" grep -q screencast_restore_token "$HOME/.config/shotlet/config"
+    check "restore token stored" cfg_has screencast_restore_token
     check "registered with the portal as $APP_ID" grep -q "portal identity: $APP_ID (registry)" "$SHOT_LOG"
     check "  ... which keys the screen-cast grant" eq "$(perm_apps screencast)" "$APP_ID"
 }
@@ -55,8 +55,7 @@ capture_silent() {
     prev=$first_pid
     drag 0 100 100 0 300 200
     drv key ctrl+c
-    sleep 1
-    check "Ctrl+C copies too" eq "$(clip_png "$OUT/clip3.png" && png_size "$OUT/clip3.png")" 200x100
+    check "Ctrl+C copies too" clip_is clip3 200x100
     SHOT_PID=$prev
     check "previous clipboard server exits when replaced" wait_exit 5
 }
@@ -85,11 +84,11 @@ scenario_cancel() {
     check "Esc in the dialog ends shotlet" wait_exit 5
     check "  ... with status 0" eq "$RC" 0
     check "  ... saying it was cancelled" grep -q "capture cancelled" "$SHOT_LOG"
-    check "  ... without trying the Screenshot portal" not_grep screenshot "$SHOT_LOG"
+    check "  ... without trying the Screenshot portal" no_log screenshot "$SHOT_LOG"
     sleep 1
     shot 0 after
-    check "no further dialog appears" no_find 0 "$accent"
-    check "no restore token stored" not_grep screencast_restore_token "$HOME/.config/shotlet/config"
+    check "no further dialog appears" no_find_on 0 "$ACCENT" 24 10
+    check "no restore token stored" no_log screencast_restore_token "$(cfg_path)"
 }
 
 scenario_multimon() {
@@ -111,10 +110,10 @@ scenario_multimon() {
     shot 1 sel1
     # the "400 × 200" pill (its #f5f5f7 text) only next to the toolbar
     check "size label shown on the toolbar's monitor" drv find 0 f5f5f7 3
-    check "  ... and not repeated on the other" no_find_exact 1 f5f5f7 3
+    check "  ... and not repeated on the other" no_find_on 1 f5f5f7 3
     drv key enter
-    sleep 1
-    check "selection across both monitors is copied whole" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 400x200
+    sleep 1 # (the editor writes its frames as it closes)
+    check "selection across both monitors is copied whole" clip_is clip 400x200
     check "one editor surface per monitor (first)" eq "$(png_size "$OUT/multi-frame.png")" 1600x900
     check "one editor surface per monitor (second)" eq "$(png_size "$OUT/multi-frame-1.png")" 1280x720
 }
@@ -135,35 +134,32 @@ scenario_mixed() {
     shot 0 sel0
     shot 1 sel1
     drv key ctrl+c
-    sleep 1
-    check "mixed-scale selection exported at 2x" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 960x600
+    check "mixed-scale selection exported at 2x" clip_is clip 960x600
     run_shotlet again
     check "a second capture needs no dialog" wait_editor 5
     echo "  warm, through the portal: $(grep -o "startup: .*" "$SHOT_LOG")"
     keys esc
 }
 
-scenario_fractional() { hidpi_scenario; }
-scenario_integer() { hidpi_scenario; }
-# Meta-0 2560x1440 at 1.5 (mutter's nearest: 1.4953) or 2
+scenario_fractional() { hidpi_scenario 1.5; }
+scenario_integer() { hidpi_scenario 2; }
+# hidpi_scenario SCALE: Meta-0 2560x1440 at 1.5 (mutter's nearest: 1.4953)
+# or 2 (without fractional scaling)
 hidpi_scenario() {
-    if [ "$scenario" = integer ]; then
-        "$ROOT/tools/e2e/monitors.sh" Meta-0=2 Meta-1=1 >"$OUT/layout.txt" || fail "monitor layout"
-        export SHOTLET_NO_FRACTIONAL=1 # wl_output.scale + set_buffer_scale
-    else
-        "$ROOT/tools/e2e/monitors.sh" Meta-0=1.5 Meta-1=1 >"$OUT/layout.txt" || fail "monitor layout"
-    fi
+    "$ROOT/tools/e2e/monitors.sh" "Meta-0=$1" Meta-1=1 >"$OUT/layout.txt" || fail "monitor layout"
+    # at 2: wl_output.scale and set_buffer_scale
+    if [ "$1" = 2 ]; then export SHOTLET_NO_FRACTIONAL=1; fi
     drv_ready Meta-0 Meta-1
     drv move 0 1280 720
     run_shotlet hidpi
-    check "both monitors shared" share_dialog 0 "0 1" "$([ "$scenario" = integer ] && echo 2 || echo 1)"
+    check "both monitors shared" share_dialog 0 "0 1" "${1%.*}"
     check "editor opened" wait_editor 10
     drag 0 300 300 0 900 700 0 1500 900
     sleep 0.3
     shot 0 sel
     drv key ctrl+c
-    sleep 0.5
-    check "selection maps 1:1 to physical pixels" eq "$(clip_png "$OUT/clip.png" && png_size "$OUT/clip.png")" 1200x600
+    sleep 0.5 # (the editor writes its frames as it closes)
+    check "selection maps 1:1 to physical pixels" clip_is clip 1200x600
     check "buffer covers the panel exactly" eq "$(png_size "$OUT/hidpi-frame.png")" 2560x1440
     check "the 1x monitor keeps a 1x buffer" eq "$(png_size "$OUT/hidpi-frame-1.png")" 1280x720
     # the toolbar's Copy button (the accent-filled one, wider than the
@@ -174,9 +170,9 @@ hidpi_scenario() {
     sleep 0.3
     shot 0 toolbar
     cx=
-    drv find 0 "$accent_fill" 24 40 && read -r cx cy _ <<<"$VAL"
+    find_on 0 "$ACCENT_FILL" 24 40 && read -r cx cy _ <<<"$VAL"
     check "toolbar Copy button found" test -n "$cx"
     click 0 "$cx" "$cy"
-    sleep 1
-    check "a click on a toolbar button hits it" eq "$(clip_png "$OUT/clip2.png" && png_size "$OUT/clip2.png")" 1200x600
+    sleep 1 # (the clipboard held a copy as large)
+    check "a click on a toolbar button hits it" clip_is clip2 1200x600
 }

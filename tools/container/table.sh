@@ -32,7 +32,6 @@ EOF_TABLE
 
 COMPOSITORS="sway labwc kwin"
 
-_trim() { local s=$1; s=${s#"${s%%[![:space:]]*}"}; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
 # scenario_row NAME: its row in S_COMPS, S_MONS, S_FLAGS, S_DESC; false
 # for no such scenario
 scenario_row() {

@@ -68,6 +68,7 @@ fn addE2e(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
     const wldrive = addDriver(b, "shotlet-wldrive", "tools/container/wldrive.zig", kit, common, test_step);
 
     const run_e2e = addScript(b, "tools/e2e.sh");
+    run_e2e.addArg("--bins");
     run_e2e.addArtifactArg(exe);
     run_e2e.addArtifactArg(drive);
     run_e2e.addArtifactArg(droptarget);

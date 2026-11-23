@@ -67,7 +67,7 @@ ocr_text_command() {
     x0=$(((MW - W) / 2)) y0=$(((MH - H) / 2))
     select_area 0 $((x0 + 2)) $((y0 + 2)) $((x0 + W - 2)) $((y0 + H - 2))
     check "shotlet text reads the region selected" wait_log 60 "copy text: [0-9]+ bytes"
-    check "  ... puts its text on the clipboard" eq "$(timeout 5 wl-paste -n -t 'text/plain;charset=utf-8')" "$EN_TEXT"
+    check "  ... puts its text on the clipboard" eq "$(clip_text 'text/plain;charset=utf-8')" "$EN_TEXT"
     check "  ... shows a toast with the first line" any_log 10 "toast: Copied: Quarterly invoice"
     clip_set "something else"
     wait_exit 5
@@ -79,7 +79,7 @@ ocr_copy_text() {
     wait_editor 10
     keys ctrl+shift+c
     check "Copy text in the editor" wait_log 60 "copy text: [0-9]+ bytes"
-    check "  ... copies the selection's text" eq "$(timeout 5 wl-paste -n)" "$EN_TEXT"
+    check "  ... copies the selection's text" eq "$(clip_text)" "$EN_TEXT"
     check "  ... and the editor stays open" alive
     keys esc esc
     wait_exit 5

@@ -1,16 +1,16 @@
-# Screen recording scenarios (rec-*), sourced by tools/e2e.sh inside the
-# private session, with its helpers (drv, check, shell_wait, ...).
-#
-#   rec-shell    MP4 of an area through the GNOME extension: no dialog,
-#                the size, codec and rate, pictures that change, the
-#                click ripples recorded, StartRecording from another
-#                program refused, the thumbnail and the history entry
-#   rec-gif      the same as a GIF (decoded and checked), and pause
-#   rec-trim     the trim window makes a shorter file
-#   rec-portal   without the extension: the ScreenCast portal, one
-#                consent, then none (restore token)
-
-command -v ffprobe >/dev/null || { skip "no ffprobe"; exit 0; }
+# Screen recording scenarios (sourced by tools/e2e.sh's inner side, with
+# its helpers). The files are checked with ffprobe and ffmpeg.
+#   rec-shell     MP4 of an area through the GNOME extension: no dialog,
+#                 the size, codec and rate, pictures that change, the
+#                 click ripples recorded, sound, StartRecording from
+#                 another program refused, the thumbnail and the history
+#   rec-pick      the picker and the floating control
+#   rec-gif       the same as a GIF (decoded and checked), and pause
+#   rec-trim      the trim window makes a shorter file
+#   rec-settings  Settings' Recording view
+#   rec-portal    without the extension: the ScreenCast portal, one
+#                 consent, then none (restore token)
+#   rec-bench     (manual) CPU, memory and size per encoder path
 
 # probe FILE ENTRIES: one ffprobe value list (csv)
 probe() { ffprobe -v error -select_streams v:0 -show_entries "$2" -of csv=p=0 "$1" 2>/dev/null | head -1; }
@@ -27,18 +27,22 @@ record_moving() { # record_moving NAME AREA SECONDS ARGS...
     wait_exit $((secs + 20))
 }
 saved_file() { grep -o "recording: saved [^ ]*" "$SHOT_LOG" | tail -1 | cut -d' ' -f3; }
-
-case $scenario in
-rec-shell)
-    drv_start Meta-0 || { fail "driver"; exit 1; }
-    drv key esc
+# rec_ready: ffprobe and ffmpeg, the driver, the plain desktop drawn
+rec_ready() {
+    require ffprobe ffmpeg || return 1
+    drv_ready Meta-0
     plain_desktop
-    sleep 1
+    sleep 1 # (the shell repaints the background a moment later)
+}
+
+scenario_rec_shell() {
+    rec_ready || return
     touch "$OUT/marker"
     record_moving rec "200,150,480,320" 3 --clicks
     check "shotlet record exits once done" test "$RC" = 0
     check "  ... through the GNOME integration" grep -q "recording: source GNOME integration" "$SHOT_LOG"
     check "  ... without any consent dialog" no_dialog
+    local f d
     f=$(saved_file)
     check "  ... into the Videos folder" eval '[[ "$f" == "$HOME/Videos/shotlet-"*.mp4 ]]'
     echo "  $(grep -o "recording: saved.*" "$SHOT_LOG")"
@@ -49,8 +53,16 @@ rec-shell)
     check "  ... index at the front (faststart)" eval '[ "$(head -c 64 "$f" | grep -c moov)" = 1 ] || python3 -c "import sys; d=open(sys.argv[1],\"rb\").read(); sys.exit(0 if d.find(b\"moov\") < d.find(b\"mdat\") else 1)" "$f"'
     frame "$f" 0.2 "$OUT/f0.png"; frame "$f" 2.5 "$OUT/f1.png"
     check "  ... and the pictures change (the pointer moves)" test "$(md5sum <"$OUT/f0.png")" != "$(md5sum <"$OUT/f1.png")"
-    drv pixel "$OUT/f0.png" 20 300
-    check "  ... showing the desktop" near "$VAL" "$BG"
+    check "  ... showing the desktop" pixel_near "$OUT/f0.png" 20 300 "$DESKTOP_BG"
+    rec_thumbnail "$f"
+    rec_clicks
+    rec_sound
+    rec_others
+}
+
+# the recording's thumbnail and its Copy (FILE: the recording)
+rec_thumbnail() {
+    local f=$1 types
     check "the thumbnail shows the recording" any_log 10 "quick video: showing"
     check "  ... and the history keeps it" eval 'ls "$XDG_STATE_HOME"/shotlet/history/*/video >/dev/null'
     sleep 1
@@ -63,7 +75,16 @@ rec-shell)
     check "  ... whose Copy offers the file ($types)" eval '[[ "$types" == *text/uri-list* && "$types" == *video/mp4* ]]'
     check "  ... as its uri" eval 'timeout 5 wl-paste -n -t text/uri-list | tr -d "\\r" | grep -qx "file://$f"'
     check "  ... and its bytes" eval 'timeout 5 wl-paste -n -t video/mp4 | cmp -s - "$f"'
-    # clicks are drawn inside the area, and recorded
+}
+
+# blue_over FILE X Y: the pixel is much bluer than red (a click ripple)
+blue_over() { drv pixel "$1" "$2" "$3" && [ $((16#${VAL:6:2} - 16#${VAL:2:2})) -gt 120 ]; }
+# dark_at FILE X Y: the pixel's blue is low (a keystroke label)
+dark_at() { drv pixel "$1" "$2" "$3" && [ $((16#${VAL:6:2})) -lt 90 ]; }
+
+# clicks are drawn inside the area, and recorded
+rec_clicks() {
+    local f t found=0
     run_shotlet clicks record --region "200,150,480,320" --seconds 4 --no-countdown --no-control --clicks --keys
     wait_log 15 "record: recording" && drv sleep 800
     click 0 440 310
@@ -71,50 +92,50 @@ rec-shell)
     keys x
     wait_exit 20
     f=$(saved_file)
-    found=0
     for t in 0.9 1.0 1.1 1.2 1.3 1.4 1.5; do
         frame "$f" "$t" "$OUT/click.png"
-        drv pixel "$OUT/click.png" 240 160 && v=$VAL
-        r=$((16#${v:2:2})) b=$((16#${v:6:2}))
-        drv pixel "$OUT/click.png" 262 160 && w=$VAL
-        rb=$((16#${w:2:2})) bb=$((16#${w:6:2}))
-        if [ $((b - r)) -gt 120 ] || [ $((bb - rb)) -gt 120 ]; then found=1; break; fi
+        if blue_over "$OUT/click.png" 240 160 || blue_over "$OUT/click.png" 262 160; then found=1; break; fi
     done
     check "a click is recorded as a ripple" test "$found" = 1
     found=0
     for t in 2.4 2.6 2.8 3.0 3.2; do
         frame "$f" "$t" "$OUT/key.png"
-        drv pixel "$OUT/key.png" 240 258 && v=$VAL
-        [ $((16#${v:6:2})) -lt 90 ] && { found=1; break; }
+        dark_at "$OUT/key.png" 240 258 && { found=1; break; }
     done
     # keystrokes: mutter hands keys for apps to them before the stage's
     # captured-event, so the label is not drawn for those (known gap)
-    [ "$found" = 1 ] && pass "  ... and a keystroke as a label" || skip "keystroke label: keys to apps do not reach the shell's stage"
-    # sound: the microphone and the system sound, mixed (silence here)
+    if [ "$found" = 1 ]; then pass "  ... and a keystroke as a label"; else skip "keystroke label: keys to apps do not reach the shell's stage"; fi
+}
+
+# sound: the microphone and the system sound, mixed (silence here)
+rec_sound() {
+    local f va
     run_shotlet sound record --region "200,150,480,320" --seconds 3 --no-countdown --no-control --mic --system-audio
     wait_exit 30
     f=$(saved_file)
     check "with sound, the MP4 has an AAC track" eq "$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels -of csv=p=0 "$f")" "aac,48000,2"
     va=$(ffprobe -v error -show_entries stream=duration -of csv=p=0 "$f" | awk 'NR==1{v=$1} NR==2{a=$1} END{printf "%d", (v-a)*1000}')
     check "  ... as long as the picture (${va#-} ms apart)" test "${va#-}" -le 120
-    # another program asking for a screencast is refused
+}
+
+# another program asking for a screencast; stopping with record again
+rec_others() {
     gdbus call --session --dest dev.shotlet.Shell1 --object-path /dev/shotlet/Shell1 \
         --method dev.shotlet.Shell1.StartRecording "{'x': <0>, 'y': <0>, 'w': <100>, 'h': <100>}" >"$OUT/gdbus.txt" 2>&1
     check "StartRecording() from another program is refused" grep -q "AccessDenied" "$OUT/gdbus.txt"
-    # stopping: shotlet record again, while one runs
     run_shotlet long record --region "100,100,320,240" --no-countdown
     wait_log 15 "record: recording"
     sleep 1
     "$BIN" record >"$OUT/again.log" 2>&1
     check "shotlet record again stops the recording" wait_exit 20
     check "  ... and keeps it" grep -q "recording: saved" "$SHOT_LOG"
-    ;;
-rec-pick)
-    # the picker and the floating control, through the extension
-    drv_start Meta-0 || { fail "driver"; exit 1; }
-    drv key esc
-    plain_desktop
-    sleep 1
+}
+
+# the picker and the floating control, through the extension (the
+# record bar d70015, the Record button and the control's dot PEN_RED)
+scenario_rec_pick() {
+    rec_ready || return
+    local bx by f
     run_shotlet pick record
     check "shotlet record asks the extension for the picker" wait_exit 10
     check "  ... which comes up" shell_wait 10 "record: picker up" 1
@@ -122,29 +143,26 @@ rec-pick)
     slow_drag 0 300 200 500 350 700 500
     sleep 0.5
     shot 0 picker
-    check "  ... with the record bar under the area" eval 'drv find 0 d70015 24 60 0 500 1600 900'
+    check "  ... with the record bar under the area" find_on 0 d70015 24 60 0 500 1600 900
     read -r bx by _ <<<"$VAL"
-    drv pixel "$OUT/picker.png" 300 200
-    check "  ... a white handle at its corner, as a capture's" near "$VAL" ffffff
-    check "  ... and no red but the Record button" eval '! drv find 0 ff453a 40 4 250 150 750 515'
+    check "  ... a white handle at its corner, as a capture's" pixel_near "$OUT/picker.png" 300 200 ffffff
+    check "  ... and no red but the Record button" no_find_on 0 "$PEN_RED" 40 4 250 150 750 515
     click 0 "$bx" "$by"
     check "Record starts the countdown" shell_wait 10 "record: recording" 1
     sleep 1
     shot 0 recording
-    check "  ... the control sits below the area" eval 'drv find 0 ff453a 30 4 0 500 1600 900'
-    drv pixel "$OUT/recording.png" 500 350
-    check "  ... and not in it" near "$VAL" "$BG"
+    check "  ... the control sits below the area" find_on 0 "$PEN_RED" 30 4 0 500 1600 900
+    check "  ... and not in it" pixel_near "$OUT/recording.png" 500 350 "$DESKTOP_BG"
     sleep 1
     "$BIN" record --stop >"$OUT/stop.log" 2>&1
     check "shotlet record --stop ends it" shell_wait 15 "recording: saved" 1
     f=$(grep -o "recording: saved [^ ]*" "$HL_SHELL_LOG" | tail -1 | cut -d' ' -f3)
     check "  ... at the picked size" eq "$(probe "$f" stream=width,height)" "400,300"
-    ;;
-rec-gif)
-    drv_start Meta-0 || { fail "driver"; exit 1; }
-    drv key esc
-    plain_desktop
-    sleep 1
+}
+
+scenario_rec_gif() {
+    rec_ready || return
+    local f d n sz
     record_moving gif "300,200,400,240" 3 --gif --fps 15
     f=$(saved_file)
     check "a GIF recording is written" eval '[[ "$f" == *.gif ]] && [ -s "$f" ]'
@@ -157,8 +175,7 @@ rec-gif)
     echo "  GIF: $sz bytes, $n frames"
     check "  ... and small ($sz bytes)" test "$sz" -lt 400000
     frame "$f" 0.1 "$OUT/g0.png"
-    drv pixel "$OUT/g0.png" 20 200
-    check "  ... showing the desktop's colour" near "$VAL" "$BG"
+    check "  ... showing the desktop's colour" pixel_near "$OUT/g0.png" 20 200 "$DESKTOP_BG"
     # pause: the paused time is not in the file
     run_shotlet pause record --region "300,200,400,240" --no-countdown --gif
     wait_log 15 "record: recording"
@@ -171,11 +188,13 @@ rec-gif)
     wait_exit 20
     d=$(duration_ms "$(saved_file)")
     check "a paused recording leaves the pause out ($d ms)" test "$d" -ge 1500 -a "$d" -le 2700
-    ;;
-rec-trim)
-    drv_start Meta-0 || { fail "driver"; exit 1; }
-    drv key esc
+}
+
+scenario_rec_trim() {
+    require ffprobe ffmpeg || return
+    drv_ready Meta-0
     plain_desktop
+    local f id t d
     record_moving trim "200,150,480,320" 4
     f=$(saved_file)
     id=$(basename "$(dirname "$(ls -t "$XDG_STATE_HOME"/shotlet/history/*/video | head -1)")")
@@ -189,36 +208,25 @@ rec-trim)
     run_shotlet trimwin trim "$XDG_STATE_HOME/shotlet/history" "$id"
     wait_log 10 "trim: " && sleep 1.5
     shot 0 trim
-    check "the trim window shows the filmstrip's handles" eval 'drv find 0 ffcc00 20 4'
+    check "the trim window shows the filmstrip's handles" find_on 0 ffcc00 20 4
     # a thumbnail that appeared meanwhile may hold the keyboard: click in
     click 0 800 330
     keys esc
     check "  ... and Esc closes it" wait_exit 5
-    ;;
-rec-settings)
-    # the Recording view; SHOTLET_SETTINGS_FOCUS=n focuses its n-th control
-    drv_start Meta-0 || { fail "driver"; exit 1; }
-    drv key esc
-    cfgf=$HOME/.config/shotlet/config
-    rec_setting() { # rec_setting N KEY...
-        local n=$1; shift
-        SHOTLET_SETTINGS_VIEW=recording SHOTLET_SETTINGS_FOCUS=$n SHOTLET_DUMP_FRAME=$OUT/settings-$n run_shotlet "settings-$n" settings
-        sleep 2
-        keys "$@"
-        sleep 0.5
-        keys esc
-        wait_exit 5
-    }
-    rec_setting 1 enter
-    check "Settings' Recording view switches the format" grep -q "^record_format=gif" "$cfgf"
-    rec_setting 12 space
-    check "  ... and turns the microphone on" grep -q "^record_mic=true" "$cfgf"
-    ;;
-rec-portal)
-    drv_start Meta-0 || { fail "driver"; exit 1; }
-    drv key esc
-    plain_desktop
-    sleep 1
+}
+
+# the Recording view (open_settings: quick.sh)
+scenario_rec_settings() {
+    drv_ready Meta-0
+    SHOTLET_SETTINGS_VIEW=recording open_settings 1 enter
+    check "Settings' Recording view switches the format" cfg_has record_format=gif
+    SHOTLET_SETTINGS_VIEW=recording open_settings 12 space
+    check "  ... and turns the microphone on" cfg_has record_mic=true
+}
+
+scenario_rec_portal() {
+    rec_ready || return
+    local f
     run_shotlet portal record --region "200,150,480,320" --seconds 2 --no-countdown --no-control
     share_dialog 0 || fail "the share dialog"
     check "without the extension, the portal records" wait_exit 30
@@ -229,35 +237,33 @@ rec-portal)
     check "a second recording needs no dialog (restore token)" wait_exit 20
     check "  ... and records" grep -q "recording: saved" "$SHOT_LOG"
     check "  ... with the consent stored once" eq "$(perm_apps screencast)" "$APP_ID"
-    ;;
-rec-bench)
-    # not in the default list: CPU time, peak memory and file size of a
-    # 10 s recording of the whole 1600x900 screen, the pointer moving, per
-    # encoder path (zig build e2e -- rec-bench; a release build is fair)
-    drv_start Meta-0 || { fail "driver"; exit 1; }
-    drv key esc
-    bench() { # bench LABEL ENV... -- ARGS...
-        local label=$1; shift
-        local envs=()
-        while [ "$1" != -- ]; do envs+=("$1"); shift; done
-        shift
-        ( for i in $(seq 1 60); do drv move 0 $((200 + (i % 10) * 120)) $((200 + (i % 7) * 70)) >/dev/null; drv sleep 150 >/dev/null; done ) &
-        local mover=$!
-        local out=$OUT/bench-$label.log t0 t
-        t0=$(date +%s%N)
-        { TIMEFORMAT='%U %S'; time env "${envs[@]}" "$BIN" record --full --seconds 10 --no-countdown --no-control "$@" >"$out" 2>&1; } 2>"$OUT/time-$label.txt"
-        t=$(( ($(date +%s%N) - t0) / 1000000 ))
-        wait "$mover" 2>/dev/null
-        local f cpu
-        f=$(grep -o "recording: saved [^ ]*" "$out" | cut -d' ' -f3)
-        cpu=$(awk '{ printf "%.1f", ($1 + $2) * 100 / 10 }' "$OUT/time-$label.txt")
-        echo "  bench $label: $(grep -o "[0-9]*x[0-9]* at [0-9]* fps, .*" "$out" | head -1); cpu ${cpu}% of a core over 10 s; $(stat -c %s "$f" 2>/dev/null) bytes; wall ${t} ms"
-        check "bench $label recorded" test -s "$f"
-    }
+}
+
+# CPU time, peak memory and file size of a 10 s recording of the whole
+# 1600x900 screen, the pointer moving, per encoder path
+# (zig build e2e -- rec-bench; a release build is fair)
+scenario_rec_bench() {
+    drv_ready Meta-0
     bench vaapi -- --fps 60
     bench libav SHOTLET_ENCODER=libav SHOTLET_NO_VAAPI=1 -- --fps 60
     bench ffmpeg SHOTLET_ENCODER=ffmpeg SHOTLET_NO_VAAPI=1 -- --fps 60
     bench gif -- --gif --fps 15
-    ;;
-*) skip "unknown scenario" ;;
-esac
+}
+
+bench() { # bench LABEL ENV... -- ARGS...
+    local label=$1; shift
+    local envs=()
+    while [ "$1" != -- ]; do envs+=("$1"); shift; done
+    shift
+    ( for i in $(seq 1 60); do drv move 0 $((200 + (i % 10) * 120)) $((200 + (i % 7) * 70)) >/dev/null; drv sleep 150 >/dev/null; done ) &
+    local mover=$!
+    local out=$OUT/bench-$label.log t0 t f cpu
+    t0=$(date +%s%N)
+    { TIMEFORMAT='%U %S'; time env "${envs[@]}" "$BIN" record --full --seconds 10 --no-countdown --no-control "$@" >"$out" 2>&1; } 2>"$OUT/time-$label.txt"
+    t=$((($(date +%s%N) - t0) / 1000000))
+    wait "$mover" 2>/dev/null
+    f=$(grep -o "recording: saved [^ ]*" "$out" | cut -d' ' -f3)
+    cpu=$(awk '{ printf "%.1f", ($1 + $2) * 100 / 10 }' "$OUT/time-$label.txt")
+    echo "  bench $label: $(grep -o "[0-9]*x[0-9]* at [0-9]* fps, .*" "$out" | head -1); cpu ${cpu}% of a core over 10 s; $(stat -c %s "$f" 2>/dev/null) bytes; wall ${t} ms"
+    check "bench $label recorded" test -s "$f"
+}

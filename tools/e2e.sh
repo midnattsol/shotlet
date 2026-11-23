@@ -3,56 +3,49 @@
 # virtual keyboard and pointer, inside a private headless GNOME session
 # (tools/e2e/session.sh). Nothing touches the desktop you are logged into.
 #
-# usage: tools/e2e.sh [SHOTLET DRIVE] [SCENARIO...]
+# usage: tools/e2e.sh [--list] [--bins SHOTLET DRIVE DROPTARGET] [--] [SCENARIO...]
 #        zig build e2e [-- SCENARIO...]
-# SHOTLET/DRIVE default to zig-out/bin/shotlet and zig-out/bin/shotlet-drive
-# (zig build e2e-driver). Scenarios: see `scenarios` below; default all.
-# Prints PASS/FAIL/SKIP per check; exits 1 when anything failed. Skips
-# (exit 0) when gnome-shell, PipeWire or the portals are not installed.
+# The binaries default to zig-out/bin/shotlet, shotlet-drive and
+# shotlet-droptarget (zig build e2e-driver). SCENARIO: a row of
+# tools/e2e/table.sh (--list prints them); default all but the manual ones.
+# Prints PASS/FAIL/SKIP per check (all of them also in results.txt) and a
+# summary line; exits 1 when anything failed, 2 for an unknown scenario.
+# Skips (exit 0) when gnome-shell, PipeWire or the portals are missing.
 # Env: E2E_OUT=dir keeps logs and screenshots there (default: a temp dir,
 #      removed when everything passed).
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-
-scenarios="capture blink blink-ext cancel multimon mixed fractional integer keyboard clipboard saveas daemon fallback ime cursors cursors-drawn quick quick-plain annotate pin history settings shell shell-owner shell-mixed shell-tray shell-terminal modes-screen modes-strip modes-timer modes-window modes-scroll modes-scroll-manual modes-scroll-stops modes-scroll-dark scroll-unavailable modes-keys tools rec-shell rec-pick rec-gif rec-trim rec-settings rec-portal perms perms-shell gnome-install"
+. "$ROOT/tools/e2e-common/table.sh"
+. "$ROOT/tools/e2e/table.sh"
+. "$ROOT/tools/e2e-common/summary.sh"
+# the extension's UUID, and the app id xdg-desktop-portal stores consent
+# under (no test hook: shotlet registers it through
+# org.freedesktop.host.portal.Registry)
+export EXT_UUID=shotlet@midnattsol.github.io APP_ID=io.github.midnattsol.Shotlet
 
 # ---------------------------------------------------------------- inner side
-# (tools/e2e/lib.sh and desktop.sh: the helpers; tools/e2e/scenarios/*.sh:
-# one scenario_NAME function per scenario, dashes as underscores)
+# (tools/e2e/lib.sh, desktop.sh and dialogs.sh: the helpers;
+# tools/e2e/scenarios/*.sh: one scenario_NAME function per scenario)
 
-# the scenario's settings, before anything starts
+# the scenario's settings, before anything starts (its table flags)
 prepare_scenario() {
-    case $scenario in
-    capture | blink* | cancel | multimon | mixed | fractional | integer | keyboard | clipboard | saveas | daemon | fallback | ime | cursors* | shell* | perms* | gnome-install | pin)
-        # these check what happens without the floating thumbnail
-        mkdir -p "$HOME/.config/shotlet"
-        printf 'thumbnail=never\n' >"$HOME/.config/shotlet/config"
-        ;;
-    esac
-    case $scenario in
-    quick | annotate | pin | history | blink-ext)
-        # these load the extension for the floating windows but follow
-        # shotlet started here: its captures go through the portal (the
-        # extension cannot start this shotlet: Capture() is refused)
-        ext_gsettings set shotlet-path "'/nonexistent/shotlet'"
-        ;;
-    esac
+    if scenario_flag nothumb; then cfg_write thumbnail=never; fi
+    # the extension's floating windows, but captures through the portal
+    # (the extension cannot start this shotlet: Capture() is refused)
+    if scenario_flag portal; then ext_gsettings set shotlet-path "'/nonexistent/shotlet'"; fi
 }
 
 run_scenario() {
-    case $scenario in
-    tools) . "$ROOT/tools/e2e/tools.sh" ;; # the editor's extra tools
-    modes-strip) . "$ROOT/tools/e2e/modes.sh"; . "$ROOT/tools/e2e/strip.sh" ;; # the editor's mode strip
-    modes-*) . "$ROOT/tools/e2e/modes.sh" ;; # the capture modes
-    rec-*) . "$ROOT/tools/e2e/record.sh" ;; # screen recording
-    *)
-        if declare -F "scenario_${scenario//-/_}" >/dev/null; then
-            "scenario_${scenario//-/_}"
-        else
-            skip "unknown scenario"
-        fi
-        ;;
-    esac
+    local fn=scenario_${scenario//-/_}
+    declare -F "$fn" >/dev/null || { fail "no function $fn"; return; }
+    "$fn"
+}
+
+# the scenario's end, also when it stops early (exit)
+end_scenario() {
+    stop_shotlet
+    pkill -P $$ 2>/dev/null
+    cp "$HL_SHELL_LOG" "$OUT/shell.log" 2>/dev/null
 }
 
 if [ "${1:-}" = "--inner" ]; then
@@ -63,14 +56,12 @@ if [ "${1:-}" = "--inner" ]; then
     failed=0
     . "$ROOT/tools/e2e/lib.sh"
     . "$ROOT/tools/e2e/desktop.sh"
-    # portal dialogs (xdg-desktop-portal-gnome): wait_button, share_dialog...
     . "$ROOT/tools/e2e/dialogs.sh"
     for f in "$ROOT"/tools/e2e/scenarios/*.sh; do . "$f"; done
+    scenario_row "$scenario" || { fail "no such scenario"; exit 2; }
+    trap end_scenario EXIT
     prepare_scenario
     run_scenario
-    stop_shotlet
-    pkill -P $$ 2>/dev/null
-    cp "$HL_SHELL_LOG" "$OUT/shell.log" 2>/dev/null
     exit $failed
 fi
 
@@ -98,7 +89,7 @@ find_pygtk() {
 # the extension ships its settings schema compiled: it must match the XML
 check_schema() {
     command -v glib-compile-schemas >/dev/null || return 0
-    local sdir=$ROOT/gnome-extension/shotlet@midnattsol.github.io/schemas tmp
+    local sdir=$ROOT/gnome-extension/$EXT_UUID/schemas tmp
     tmp=$(mktemp -d)
     cp "$sdir"/*.gschema.xml "$tmp/" && glib-compile-schemas --strict "$tmp" &&
         if cmp -s "$tmp/gschemas.compiled" "$sdir/gschemas.compiled"; then
@@ -110,76 +101,46 @@ check_schema() {
     rm -rf "$tmp"
 }
 
-# session_env SCENARIO: the session it wants in mons, layout, ibus, apps
-# and exts (monitors, keyboard layout, input method, .desktop files and
-# GNOME Shell extensions)
-session_env() {
-    mons="1600x900" layout=""
-    case $1 in
-        multimon | modes-screen) mons="1600x900 1280x720" ;;
-        mixed | fractional | integer | shell-mixed) mons="2560x1440 1280x720" ;;
-        cursors-drawn) mons="2560x1440" ;;
-        keyboard | clipboard) layout=es ;;
-    esac
-    # GNOME maps windows (and portal callers) to apps through installed
-    # .desktop files whose Exec exists: install Shotlet's, as install.sh does
-    sed "s|^Exec=shotlet|Exec=$BIN|" "$ROOT/io.github.midnattsol.Shotlet.desktop" >"$E2E_OUT/io.github.midnattsol.Shotlet.desktop"
-    ibus= apps=$E2E_OUT/io.github.midnattsol.Shotlet.desktop exts=
-    [ "$1" = ime ] && ibus=hangul
-    case $1 in quick | annotate | pin | history | blink-ext | shell* | perms-shell | modes-* | rec-shell | rec-pick | rec-gif | rec-trim | rec-bench) exts=$ROOT/gnome-extension/shotlet@midnattsol.github.io ;; esac
-}
-
 # run_session SCENARIO: the scenario in a fresh session (its own HOME,
-# portal state, monitors and keyboard layout); returns its exit status
+# portal state, monitors, keyboard layout, input method and extensions,
+# from its row of table.sh); returns its exit status
 run_session() {
-    session_env "$1"
-    HL_MONITORS=$mons HL_LAYOUT=$layout HL_IBUS=$ibus HL_APPS=$apps HL_EXTENSIONS=$exts timeout 300 \
+    scenario_row "$1"
+    local ext=
+    scenario_flag ext && ext=$ROOT/gnome-extension/$EXT_UUID
+    HL_MONITORS=$S_MONS HL_LAYOUT=$(scenario_value layout) HL_IBUS=$(scenario_value ibus) \
+        HL_APPS=$E2E_OUT/$APP_ID.desktop HL_EXTENSIONS=$ext timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$1" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |
-        while IFS= read -r line; do
-            # session services print to the same stream; keep results only
-            case $line in
-                PASS* | FAIL* | SKIP* | "  "*) echo "$line" | tee -a "$E2E_OUT/results.txt" ;;
-                *) echo "$line" >>"$E2E_OUT/stderr.log" ;;
-            esac
-        done
+        result_lines "$E2E_OUT/results.txt" "$E2E_OUT/stderr.log"
     return "${PIPESTATUS[0]}"
 }
 
-# the totals; the logs go unless something failed or E2E_OUT was given
-summary() {
-    local passed failed
-    passed=$(grep -c '^PASS' "$E2E_OUT/results.txt" 2>/dev/null)
-    failed=$(grep -c '^FAIL' "$E2E_OUT/results.txt" 2>/dev/null)
-    if [ "$total_fail" = 0 ] && [ -z "$keep" ]; then
-        rm -rf "$E2E_OUT"
-        echo "e2e: ${passed:-0} passed, ${failed:-0} failed"
-    else
-        echo "e2e: ${passed:-0} passed, ${failed:-0} failed (logs: $E2E_OUT)"
-    fi
-}
-
-BIN=${1:-}
-if [ -n "$BIN" ] && [ -x "$BIN" ] && [ -n "${2:-}" ] && [ -x "$2" ]; then
-    DRIVE=$2; shift 2
-    # zig build e2e passes the drop target too; it is not beside the driver
-    if [ -n "${1:-}" ] && [ -x "$1" ]; then DROPTARGET=$1; shift; fi
-else
-    BIN=$ROOT/zig-out/bin/shotlet DRIVE=$ROOT/zig-out/bin/shotlet-drive
-fi
-DROPTARGET=${DROPTARGET:-$(dirname "$DRIVE")/shotlet-droptarget}
-want=${*:-$scenarios}
+BIN=$ROOT/zig-out/bin/shotlet DRIVE=$ROOT/zig-out/bin/shotlet-drive
+DROPTARGET=$ROOT/zig-out/bin/shotlet-droptarget
+want=()
+while [ $# -gt 0 ]; do
+    case $1 in
+        --list) list_scenarios; exit 0 ;;
+        --bins) BIN=$2 DRIVE=$3 DROPTARGET=$4; shift 4 ;;
+        --) shift; want+=("$@"); break ;;
+        *) want+=("$1"); shift ;;
+    esac
+done
+[ ${#want[@]} -eq 0 ] && read -r -d '' -a want < <(default_scenarios)
+for s in "${want[@]}"; do
+    scenario_row "$s" || { echo "e2e.sh: unknown scenario $s (--list)" >&2; exit 2; }
+done
 
 missing=$(missing_tools)
 if [ -n "$missing" ]; then
     echo "SKIP e2e: missing$missing"
     exit 0
 fi
-for f in "$BIN" "$DRIVE"; do
-    [ -x "$f" ] || { echo "e2e: $f not built (zig build e2e-driver)" >&2; exit 2; }
+for f in "$BIN" "$DRIVE" "$DROPTARGET"; do
+    [ -x "$f" ] || { echo "e2e.sh: $f not built (zig build e2e-driver)" >&2; exit 2; }
 done
-BIN=$(realpath "$BIN") DRIVE=$(realpath "$DRIVE")
-[ -x "$DROPTARGET" ] && DROPTARGET=$(realpath "$DROPTARGET")
+BIN=$(realpath "$BIN") DRIVE=$(realpath "$DRIVE") DROPTARGET=$(realpath "$DROPTARGET")
 PYGTK=$(find_pygtk)
 export PYGTK
 
@@ -189,18 +150,29 @@ mkdir -p "$E2E_OUT"
 E2E_OUT=$(realpath "$E2E_OUT")
 rm -f "$E2E_OUT/results.txt"
 export E2E_BIN=$BIN E2E_DRIVE=$DRIVE E2E_DROPTARGET=$DROPTARGET E2E_OUT
+# GNOME maps windows (and portal callers) to apps through installed
+# .desktop files whose Exec exists: every session gets Shotlet's, as
+# install.sh installs it
+sed "s|^Exec=shotlet|Exec=$BIN|" "$ROOT/$APP_ID.desktop" >"$E2E_OUT/$APP_ID.desktop"
 
 total_fail=0
 check_schema
-for s in $want; do
+for s in "${want[@]}"; do
     run_session "$s"
     rc=$?
     if [ "$rc" = 77 ]; then
-        echo "SKIP $s: no headless session (see $E2E_OUT/stderr.log)"
+        echo "SKIP $s: no headless session (see $E2E_OUT/stderr.log)" | tee -a "$E2E_OUT/results.txt"
     elif [ "$rc" != 0 ]; then
         total_fail=1
-        grep -q "^FAIL $s" "$E2E_OUT/results.txt" || echo "FAIL $s: exit status $rc" | tee -a "$E2E_OUT/results.txt"
+        grep -q "^FAIL $s:" "$E2E_OUT/results.txt" || echo "FAIL $s: exit status $rc" | tee -a "$E2E_OUT/results.txt"
     fi
 done
-summary
+
+echo
+print_summary e2e "$E2E_OUT/results.txt"
+if [ "$total_fail" != 0 ] || [ -n "$keep" ]; then
+    echo "logs and screenshots: $E2E_OUT"
+else
+    rm -rf "$E2E_OUT"
+fi
 exit $total_fail

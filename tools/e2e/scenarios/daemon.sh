@@ -39,16 +39,10 @@ scenario_daemon() {
     check "  ... with status 0" eq "$RC" 0
 }
 
-# wait_permission_window: shotlet's own window (dark, 640 px wide)
-wait_permission_window() {
-    local i
-    for i in $(seq 1 15); do
-        drv find 0 1d2125 0 300 2>/dev/null && return 0
-        alive || return 1
-        sleep 1
-    done
-    return 1
-}
+# wait_permission_window: shotlet's own window (dark, 640 px wide) is up,
+# within 15 s, unless shotlet exits first
+_permission_window() { PERM_WIN=; alive || return 0; find_on 0 1d2125 0 300 && PERM_WIN=1; }
+wait_permission_window() { wait_until 15 _permission_window && [ -n "$PERM_WIN" ]; }
 
 scenario_fallback() {
     # no ScreenCast portal backend: shotlet falls back to the Screenshot
