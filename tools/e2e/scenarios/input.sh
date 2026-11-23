@@ -16,7 +16,7 @@ text_editor() {
     drv sleep "$2"
 }
 
-# Spanish layout (HL_LAYOUT=es): ñ is the key right of L, ´ a dead key
+# Spanish layout (SHOTLET_E2E_LAYOUT=es): ñ is the key right of L, ´ a dead key
 # right of it, ¿ is Shift + the key left of Backspace, ? is Shift + the
 # key right of 0, € is AltGr+E
 scenario_keyboard() {

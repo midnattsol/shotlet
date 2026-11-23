@@ -49,7 +49,7 @@ shell_print() {
     drv key print
     check "Print opens Shotlet's editor" shell_wait 10 "startup: capture=" 1
     t1=$(date +%s%N)
-    echo "  key to editor (measured outside): $(((t1 - t0) / 1000000)) ms; shotlet says: $(grep -o "key press to editor [0-9]*ms.*" "$HL_SHELL_LOG" | tail -1)"
+    echo "  key to editor (measured outside): $(((t1 - t0) / 1000000)) ms; shotlet says: $(grep -o "key press to editor [0-9]*ms.*" "$SHOTLET_E2E_SHELL_LOG" | tail -1)"
     sleep 0.8
     shot 0 editor
     check "  ... without any consent dialog" no_dialog
@@ -115,8 +115,8 @@ scenario_shell_mixed() {
     touch "$OUT/marker"
     drv key print
     check "Print opens the editor on both monitors" shell_wait 10 "startup: capture=" 1
-    check "  ... capturing both" grep -q "monitors=2 through the GNOME integration" "$HL_SHELL_LOG"
-    echo "  $(grep -o "key press to editor [0-9]*ms.*" "$HL_SHELL_LOG" | tail -1)"
+    check "  ... capturing both" grep -q "monitors=2 through the GNOME integration" "$SHOTLET_E2E_SHELL_LOG"
+    echo "  $(grep -o "key press to editor [0-9]*ms.*" "$SHOTLET_E2E_SHELL_LOG" | tail -1)"
     sleep 0.8
     shot 0 editor0
     shot 1 editor1
@@ -141,7 +141,7 @@ scenario_shell_mixed() {
     sleep 1
     drv key print
     check "a second Print captures too" shell_wait 10 "startup: capture=" 2
-    echo "  warm: $(grep -o "key press to editor [0-9]*ms.*" "$HL_SHELL_LOG" | tail -1)"
+    echo "  warm: $(grep -o "key press to editor [0-9]*ms.*" "$SHOTLET_E2E_SHELL_LOG" | tail -1)"
     sleep 0.8
     keys esc
 }

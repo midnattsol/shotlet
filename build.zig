@@ -225,6 +225,8 @@ fn addGnomeExtension(b: *std.Build, m: *std.Build.Module) void {
 /// fails when a source file outgrows the line limit (files still over it
 /// are allowlisted in tools/size-allowlist.txt and may only shrink);
 /// `check-layers` when a file outside the backend reaches into it;
+/// `check-tests` when a file's tests are not reached from the test root
+/// (src/main.zig's `test {}`, through the folders' roots);
 /// `long-fns` lists overlong functions. The limits and the files checked
 /// are tools/sources.sh's.
 fn addGuards(b: *std.Build, test_step: *std.Build.Step) void {
@@ -235,6 +237,10 @@ fn addGuards(b: *std.Build, test_step: *std.Build.Step) void {
     const layers = addScript(b, "tools/check-layers.sh");
     b.step("check-layers", "Fail when a file outside src/platform/linux imports it or names Wayland, D-Bus, keysyms, evdev or GTK accelerators").dependOn(&layers.step);
     test_step.dependOn(&layers.step);
+
+    const tests = addScript(b, "tools/check-tests.sh");
+    b.step("check-tests", "Fail when a source file has tests the test root does not reach, or a test {} block outside src/main.zig").dependOn(&tests.step);
+    test_step.dependOn(&tests.step);
 
     const fns = addScript(b, "tools/long-fns.sh");
     fns.addPassthruArgs();

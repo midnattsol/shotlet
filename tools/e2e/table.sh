@@ -28,15 +28,15 @@ keyboard            | 1600x900           | nothumb layout=es      | typing on a 
 clipboard           | 1600x900           | nothumb layout=es      | text pasted in and copied out, the image served until replaced
 saveas              | 1600x900           | nothumb                | Save As through the portal's file chooser, and cancelling it
 daemon              | 1600x900           | nothumb                | the tray daemon: one at a time, a late tray host, Activate, Quit
-fallback            | 1600x900           | nothumb                | no ScreenCast backend: the Screenshot portal, asked from Shotlet's own window
+fallback            | 1600x900           | nothumb                | no ScreenCast backend: the Screenshot portal, asked from Shotlet's own window (denied, granted)
 ime                 | 1600x900           | nothumb ibus=hangul    | an input method (IBus Hangul): preedit, then committed text
 cursors             | 1600x900           | nothumb                | the editor's cursors (cursor-shape): crosshair, hands, resize arrows
 cursors-drawn       | 2560x1440          | nothumb                | the same drawn by Shotlet at scale 2
-quick               | 1600x900           | ext portal             | the thumbnail kept above by the extension: focus, Copy, click-through, drag out, Pin
+quick               | 1600x900           | ext portal             | the thumbnail kept above by the extension: focus, Copy, click-through, drag out (same-second names), Pin
 quick-plain         | 1600x900           | -                      | the thumbnail as a plain window without the extension
 annotate            | 1600x900           | ext portal             | the thumbnail's Annotate reopens the editor, its Copy updates the capture
-pin                 | 1600x900           | nothumb ext portal     | a pin: where it opens, its menu, opacity, Copy, Lock, Annotate, Close All Pins, dark
-history             | 1600x900           | ext portal             | Recent captures: kept, listed, copied, deleted, cleared, across a restart
+pin                 | 1600x900           | nothumb ext portal     | a pin: where it opens, its menu, opacity, Copy, Lock, Save, Annotate, Close All Pins, dark
+history             | 1600x900           | ext portal             | Recent captures: kept, listed, saved, copied, deleted, cleared, across a restart
 settings            | 1600x900           | -                      | Settings from the keyboard: reset permissions, choices, Clear history, Enable; snapped
 shell               | 1600x900           | nothumb ext            | gnome-integration install and uninstall: Print with no prompt, other callers refused
 shell-owner         | 1600x900           | nothumb ext            | install moves a custom shortcut running shotlet to the extension, uninstall back
@@ -53,8 +53,8 @@ modes-scroll-stops  | 1600x900           | ext                    | why a scroll
 modes-scroll-dark   | 1600x900           | ext                    | the same in the dark appearance
 scroll-unavailable  | 1600x900           | -                      | shotlet scroll without the extension says why and exits 1; works after a new login
 modes-keys          | 1600x900           | ext                    | each mode's key set from the CLI and from Settings; keys GNOME holds stay unbound
-tools               | 1600x900           | -                      | the editor's extra tools on a test picture: picker, ruler, spotlight, crop, magnifier
-rec-shell           | 1600x900           | ext                    | an MP4 through the extension: no dialog, size, rate, clicks, sound, the thumbnail
+tools               | 1600x900           | -                      | the editor's extra tools on a test picture: picker, ruler, spotlight, crop, magnifier; pin refused
+rec-shell           | 1600x900           | ext                    | an MP4 through the extension: no dialog, size, rate, clicks, sound, the thumbnail, one at a time
 rec-pick            | 1600x900           | ext                    | the recording picker and the floating control
 rec-gif             | 1600x900           | ext                    | a GIF recording, and pause
 rec-trim            | 1600x900           | ext                    | the trim window exports a shorter file

@@ -23,9 +23,10 @@ wait_editor() { wait_log "${1:-10}" "startup: capture=" && sleep 0.8; }
 stop_shotlet() { alive && kill "$SHOT_PID" 2>/dev/null; wait "$SHOT_PID" 2>/dev/null; }
 
 # the thumbnail stack's newest card: bottom-left of monitor 0 (MH high),
-# 8 px from the edges plus 28 px of shadow room, 240x150
+# 8 px from the edges plus the 32 px of shadow room the quick window
+# keeps (theme.card_room), 240x150
 card_point() { # card_point DX DY: DX right of, DY up from its bottom-left
-    echo "$((36 + $1)) $((MH - 36 - $2))"
+    echo "$((40 + $1)) $((MH - 40 - $2))"
 }
 
 # stop_kept [WHAT]: end this session's lasting shotlet processes (WHAT: an

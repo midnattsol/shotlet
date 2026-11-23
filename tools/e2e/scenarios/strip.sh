@@ -56,7 +56,7 @@ strip_window_click() {
     shot 0 clicked
     check "  ... the strip gone for the toolbar" eval '! strip_chosen'
     keys enter
-    read -r ww wh <<<"$(grep -o "window clicked: [0-9]*x[0-9]*" "$HL_SHELL_LOG" | tail -1 | grep -o "[0-9]*x[0-9]*" | tr x ' ')"
+    read -r ww wh <<<"$(grep -o "window clicked: [0-9]*x[0-9]*" "$SHOTLET_E2E_SHELL_LOG" | tail -1 | grep -o "[0-9]*x[0-9]*" | tr x ' ')"
     check "  ... and Enter copies it (${ww}x${wh}, the window's frame)" eval 'clip_is win "${ww}x${wh}" 5 && test "${ww:-0}" -ge 640 -a "${ww:-0}" -le 700'
     clip_set nothing
 }

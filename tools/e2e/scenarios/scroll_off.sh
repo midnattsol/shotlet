@@ -29,13 +29,9 @@ scroll_refused() {
     local title="Scrolling capture needs the GNOME integration"
     run_shotlet "$1" scroll
     check "shotlet scroll ($1) exits 1" eval 'wait_exit 10 && eq "$RC" 1'
-    check "  ... saying why on stderr" grep -qF "shotlet scroll: $title. $2." "$OUT/$1.log"
-    check "  ... and on the screen" wait_log 10 "toast: $title: $2"
-    sleep 1
-    shot 0 "notice-$1"
-    check "  ... a card with the accent's \"i\"" find_on 0 "$ACCENT" 24 16
+    problem_reported "$1" scroll "$title" "$2"
     check "  ... no region picker" no_log "pick a region" "$OUT/$1.log"
     check "  ... nothing captured" no_log "capture path:" "$OUT/$1.log"
     check "  ... no consent dialog" no_dialog
-    check "  ... and goes by itself" wait_until 10 no_find_on 0 "$ACCENT" 24 10
+    check "  ... and goes by itself" card_gone
 }

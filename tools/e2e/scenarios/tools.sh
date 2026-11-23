@@ -105,7 +105,7 @@ tools_crop() {
     check "  ... and undo brings the whole picture back" clip_is uncrop 1600x900
 }
 
-# --- shotlet edit FILE; shotlet pin: the clipboard's image
+# --- shotlet edit FILE; shotlet pin: the clipboard's image, and none
 tools_edit_pin() {
     run_shotlet edit edit "$IMG"
     check "edit FILE opens the picture" wait_log 10 "edit: showing .*picture.png \(1600x900\)"
@@ -113,13 +113,24 @@ tools_edit_pin() {
     keys enter
     sleep 1 # (the clipboard held a picture as large)
     check "  ... all of it selected: Enter copies it whole" clip_is edit 1600x900
-    timeout 5 wl-copy -t image/png <"$OUT/crop.png" &
-    sleep 0.8
+    tools_pin_nothing
+    clip_set_png "$OUT/crop.png"
     run_shotlet pin pin
     check "pin with no file pins the clipboard's image" wait_log 10 "pin: showing the clipboard \(1300x700"
     sleep 0.5
     shot 0 pinned
     edit_close
+}
+
+# shotlet pin with text on the clipboard: refused (exit 1), saying why
+# on stderr and on the screen (owner decision 4)
+tools_pin_nothing() {
+    clip_set "no picture here"
+    run_shotlet pin-nothing pin
+    check "pin with no image on the clipboard exits 1" eval 'wait_exit 10 && eq "$RC" 1'
+    problem_reported pin-nothing pin "No image on the clipboard" "Copy an image, then pin it"
+    check "  ... no pin" no_log "pin: showing" "$OUT/pin-nothing.log"
+    check "  ... and the card goes by itself" card_gone
 }
 
 # --- the magnifier waits for Ctrl and leaves nothing behind: swept over

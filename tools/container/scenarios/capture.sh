@@ -5,7 +5,7 @@
 #   probe  capture  multimon  rotated  portal  record
 
 scenario_probe() {
-    if [ -n "${CTR_PROBE:-}" ]; then eval "$CTR_PROBE"; fi
+    if [ -n "${SHOTLET_E2E_PROBE:-}" ]; then eval "$SHOTLET_E2E_PROBE"; fi
     wayland-info >"$OUT/wayland-info.txt" 2>&1
     drv monitors; echo "monitors: $VAL"
     shot 0 probe && echo "shot: $VAL"

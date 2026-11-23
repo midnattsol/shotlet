@@ -3,7 +3,7 @@
 # extension, Annotate, the history panel and the settings window.
 #   quick  quick-plain  settings  annotate  history
 
-# with the Shotlet GNOME Shell extension (HL_EXTENSIONS)
+# with the Shotlet GNOME Shell extension (SHOTLET_E2E_EXTENSIONS)
 scenario_quick() {
     quick_cfg
     drv_ready Meta-0
@@ -77,8 +77,32 @@ quick_drop_file() {
     check "  ... and as a file (text/uri-list)" app_said 5 "^drop text/uri-list [0-9]+ file:///" droptarget
     f=$(grep -o "file://[^ ]*" "$OUT/drop.log" | head -1 | sed 's|^file://||')
     check "  ... naming a PNG named after the capture time" eq "$(png_size "$f")" 500x300
+    quick_drag_same_second "$f"
     # only the one started above: the path is also in this script's argv
     kill "$DROP_PID" 2>/dev/null
+}
+
+# another capture from the same second (the last one's history entry
+# with another picture, shown through `shotlet quick`), dragged out: the
+# file it offers is its own, beside FIRST (the file dropped before),
+# which stays as it was. (Which app takes the drop does not matter here:
+# the file is written when the drag starts.)
+quick_drag_same_second() {
+    local first=$1 hist=$XDG_STATE_HOME/shotlet/history id twin f sum
+    sum=$(md5sum <"$first")
+    id=$(ls "$hist" | tail -1)
+    twin=${id%-*}-0000e2e2
+    cp -r "$hist/$id" "$hist/$twin"
+    drv mkpng "$hist/$twin/image.png" 500 300 "$RED" plain
+    n=$(shown_count)
+    "$BIN" quick "$hist" "$twin" -1 >"$OUT/twin.log" 2>&1 &
+    new_card "$n"
+    drag_card_out
+    any_log 5 "quick access: dragging $twin"
+    f=$(cat "$OUT"/*.log | grep -o "quick access: dragging $twin (file [^)]*" | head -1 | sed 's/.*(file //')
+    check "a capture from the same second is dragged as a file of its own" eq "$f" "${first%.png}-2.png"
+    check "  ... with its own picture" pixel_near "$f" 250 150 "$RED" 4
+    check "  ... the first one's file unchanged" eq "$(md5sum <"$first")" "$sum"
 }
 
 # pin: a second capture, pinned
@@ -269,9 +293,12 @@ history_kept() {
     check "  ... the saved one with its path" test $? = 0
 }
 
-# the Recent captures panel: Enter copies, Delete removes
+# the Recent captures panel: Ctrl+S saves (as the editor does: copied
+# too with copy_on_save, and a notification), Enter copies, Delete removes
 history_panel() {
-    stop_kept quick
+    stop_kept quick # (nothing serves the clipboard now)
+    cfg_set copy_on_save=true
+    notify_watch
     SHOTLET_DUMP_FRAME=$OUT/panel run_shotlet panel history
     check "Recent captures lists both" wait_log 5 "history: 2 captures"
     check "  ... search on, or shown disabled without Tesseract" wait_log 5 "text search off|text search on"
@@ -280,6 +307,7 @@ history_panel() {
     keys tab
     sleep 0.2
     shot 0 picked
+    history_save
     keys enter
     sleep 0.5
     check "Enter copies the picked capture" wait_log 5 "history: copied"
@@ -290,6 +318,16 @@ history_panel() {
     shot 0 after-delete
     keys esc esc
     wait_exit 5
+}
+
+history_save() {
+    local f
+    keys ctrl+s
+    check "Ctrl+S saves the picked capture" wait_log 5 "history: saved to "
+    f=$(grep -o "history: saved to .*" "$SHOT_LOG" | tail -1 | cut -d' ' -f4-)
+    check "  ... as a new file in Pictures" eval '[[ "$f" == "$HOME/Pictures/shotlet-"*.png ]] && eq "$(ls "$HOME/Pictures" | wc -l)" 2'
+    check "  ... copied too (copy_on_save)" wait_until 3 clip_holds "$f"
+    check "  ... and a notification says where" notified 5 "Saved to $f"
 }
 
 # the panel's Clear history (in the footer, away from close) asks first:

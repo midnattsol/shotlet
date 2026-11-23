@@ -45,7 +45,7 @@ run_scenario() {
 end_scenario() {
     stop_shotlet
     pkill -P $$ 2>/dev/null
-    cp "$HL_SHELL_LOG" "$OUT/shell.log" 2>/dev/null
+    cp "$SHOTLET_E2E_SHELL_LOG" "$OUT/shell.log" 2>/dev/null
 }
 
 if [ "${1:-}" = "--inner" ]; then
@@ -78,11 +78,13 @@ missing_tools() {
     echo "$missing"
 }
 
-# a Python with GTK 4 bindings plays "another app" (python3-gi, gir1.2-gtk-4.0)
-find_pygtk() {
+# find_python [CODE]: the first Python, the system's before PATH's (a
+# virtualenv lacks the distribution's modules), that runs CODE (default:
+# any); nothing without one
+find_python() {
     local p
     for p in /usr/bin/python3 python3; do
-        "$p" -c 'import gi; gi.require_version("Gtk", "4.0")' 2>/dev/null && { echo "$p"; return; }
+        "$p" -c "${1:-pass}" 2>/dev/null && { echo "$p"; return; }
     done
 }
 
@@ -108,8 +110,8 @@ run_session() {
     scenario_row "$1"
     local ext=
     scenario_flag ext && ext=$ROOT/gnome-extension/$EXT_UUID
-    HL_MONITORS=$S_MONS HL_LAYOUT=$(scenario_value layout) HL_IBUS=$(scenario_value ibus) \
-        HL_APPS=$E2E_OUT/$APP_ID.desktop HL_EXTENSIONS=$ext timeout 300 \
+    SHOTLET_E2E_MONITORS=$S_MONS SHOTLET_E2E_LAYOUT=$(scenario_value layout) SHOTLET_E2E_IBUS=$(scenario_value ibus) \
+        SHOTLET_E2E_APPS=$E2E_OUT/$APP_ID.desktop SHOTLET_E2E_EXTENSIONS=$ext timeout 300 \
         "$ROOT/tools/e2e/session.sh" "$ROOT/tools/e2e.sh" --inner "$1" \
         2> >(grep -v -e '^dbus-daemon\[' >>"$E2E_OUT/stderr.log") |
         result_lines "$E2E_OUT/results.txt" "$E2E_OUT/stderr.log"
@@ -141,8 +143,11 @@ for f in "$BIN" "$DRIVE" "$DROPTARGET"; do
     [ -x "$f" ] || { echo "e2e.sh: $f not built (zig build e2e-driver)" >&2; exit 2; }
 done
 BIN=$(realpath "$BIN") DRIVE=$(realpath "$DRIVE") DROPTARGET=$(realpath "$DROPTARGET")
-PYGTK=$(find_pygtk)
-export PYGTK
+# E2E_PYTHON runs the helpers' scripts (monitors.sh); PYGTK, a Python
+# with GTK 4 bindings, plays "another app" (python3-gi, gir1.2-gtk-4.0)
+E2E_PYTHON=$(find_python)
+PYGTK=$(find_python 'import gi; gi.require_version("Gtk", "4.0")')
+export E2E_PYTHON PYGTK
 
 keep=${E2E_OUT:+1}
 E2E_OUT=${E2E_OUT:-$(mktemp -d -t shotlet-e2e-out.XXXXXX)}

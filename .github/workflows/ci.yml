@@ -33,6 +33,12 @@ jobs:
         # the Zig sources the guards check (tools/sources.sh: src build.zig tools)
         run: . tools/sources.sh && zig fmt --check $zig_roots
 
+      - name: Source guards
+        # also part of `zig build test`; run first so a failure is named:
+        # file sizes, the platform layer, every test file reached from
+        # the test root (tools/check-tests.sh, python3)
+        run: zig build check-size check-layers check-tests
+
       - name: Run tests
         # includes a portal integration test on a private dbus-daemon
         # (skipped automatically where dbus-daemon is missing)

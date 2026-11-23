@@ -15,7 +15,7 @@
 #                      .desktop file and KWin refuses it
 scenario_table() {
     cat <<'EOF_TABLE'
-probe     | -               | 1600x900                         | -          | debugging: wayland-info, the outputs, a screenshot; runs $CTR_PROBE
+probe     | -               | 1600x900                         | -          | debugging: wayland-info, the outputs, a screenshot; runs $SHOTLET_E2E_PROBE
 capture   | sway labwc kwin | 1600x900                         | -          | direct capture, no dialog: the selection copied, the window in it
 multimon  | sway labwc kwin | 1600x900 1280x720@2              | -          | two outputs (wlroots: scale 1 and 2): the editor on both, each copies its own pixels
 rotated   | sway            | 1600x900/90 1280x720/flipped-180 | -          | turned and flipped outputs come out the way they show

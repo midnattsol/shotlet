@@ -10,7 +10,7 @@ for f in "$CTR"/scenarios/*.sh; do . "$f"; done
 run_scenario() {
     local fn=scenario_${1//-/_}
     declare -F "$fn" >/dev/null || { fail "no function $fn"; return; }
-    if [ "$1" = probe ] && [ -n "${CTR_PROBE0:-}" ]; then eval "$CTR_PROBE0"; fi
+    if [ "$1" = probe ] && [ -n "${SHOTLET_E2E_PROBE0:-}" ]; then eval "$SHOTLET_E2E_PROBE0"; fi
     drv_start || { fail "input driver"; return; }
     mon_size
     "$fn"

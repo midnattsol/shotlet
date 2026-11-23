@@ -23,7 +23,7 @@ E2E_TAG="$COMP $SCEN"
 case " $COMPOSITORS " in *" $COMP "*) ;; *) echo "inner.sh: unknown compositor $COMP" >&2; exit 2 ;; esac
 scenario_row "$SCEN" || { fail "no such scenario"; exit 2; }
 # what this container cannot run
-if [ -z "${CTR_RENDER_NODE:-}" ]; then
+if [ -z "${SHOTLET_E2E_RENDER_NODE:-}" ]; then
     if [ "$COMP" = kwin ]; then
         skip "KWin without a GPU render node composites with QPainter: no screenshots, no screencasts"
         exit 0
@@ -33,13 +33,13 @@ if [ -z "${CTR_RENDER_NODE:-}" ]; then
     fi
 fi
 
-if [ -z "${CTR_INNER:-}" ]; then
+if [ -z "${SHOTLET_E2E_INNER:-}" ]; then
     [ "${SHOTLET_E2E_SANDBOX:-}" = container ] || { echo "inner.sh: only inside the container" >&2; exit 2; }
     export HOME=${HOME:-/tmp/home}
     mkdir -p "$HOME"
     sandbox_env container
-    # (CTR_INNER: the second pass, inside the private bus)
-    export CTR_INNER=1
+    # (SHOTLET_E2E_INNER: the second pass, inside the private bus)
+    export SHOTLET_E2E_INNER=1
     exec dbus-run-session -- "$0" "$@" 2> >(grep --line-buffered -v '^dbus-daemon\[' >&2)
 fi
 
@@ -99,7 +99,7 @@ NMON=$#
 
 mkdir -p "$XDG_CONFIG_HOME/xdg-desktop-portal" "$XDG_CONFIG_HOME/xdg-desktop-portal-wlr"
 xkbcli compile-keymap --layout us >"$HOME/keymap.xkb"
-export WLDRIVE_KEYMAP=$HOME/keymap.xkb
+export SHOTLET_E2E_KEYMAP=$HOME/keymap.xkb
 
 # wlr-randr: size, place and scale the headless outputs left to right
 # (WxH[@SCALE][/TRANSFORM], e.g. 1600x900/90)
@@ -131,8 +131,8 @@ outputs_up() { [ "$(wlr-randr 2>/dev/null | grep -c '^HEADLESS-')" -ge "$NMON" ]
 # (xdg-desktop-portal-wlr needs dmabuf-capable screencopy), else pixman
 wlr_env() {
     export WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1
-    if [ -n "${CTR_RENDER_NODE:-}" ]; then
-        export WLR_RENDERER=gles2 WLR_RENDER_DRM_DEVICE=$CTR_RENDER_NODE
+    if [ -n "${SHOTLET_E2E_RENDER_NODE:-}" ]; then
+        export WLR_RENDERER=gles2 WLR_RENDER_DRM_DEVICE=$SHOTLET_E2E_RENDER_NODE
     else
         export WLR_RENDERER=pixman
     fi
@@ -181,10 +181,10 @@ EOF
         # authorized by their .desktop files, as on a real desktop
         # OpenGL on the render node when there is one (screenshots and
         # screencasts need it), else QPainter
-        [ -n "${CTR_RENDER_NODE:-}" ] || export KWIN_COMPOSE=Q
+        [ -n "${SHOTLET_E2E_RENDER_NODE:-}" ] || export KWIN_COMPOSE=Q
         export QT_QPA_PLATFORM=wayland
         mode=${1%@*}
-        QT_LOGGING_RULES="${CTR_KWIN_LOG:-}" kwin_wayland --virtual --no-lockscreen --socket wayland-kw --output-count "$NMON" \
+        QT_LOGGING_RULES="${SHOTLET_E2E_KWIN_LOG:-}" kwin_wayland --virtual --no-lockscreen --socket wayland-kw --output-count "$NMON" \
             --width "${mode%x*}" --height "${mode#*x}" >"$OUT/compositor.log" 2>&1 & pids+=($!)
         wait_socket "$XDG_RUNTIME_DIR/wayland-kw" 10 || { fail "kwin did not start"; tail "$OUT/compositor.log" >&2; exit 1; }
         export WAYLAND_DISPLAY=wayland-kw
@@ -212,7 +212,7 @@ case $COMP in
 esac
 # xdg-desktop-portal's test hook naming the client's app (a real session
 # derives it from the app's systemd scope): restore tokens are per app
-export XDG_DESKTOP_PORTAL_TEST_APP_ID=${CTR_PORTAL_APP_ID:-shotlet}
+export XDG_DESKTOP_PORTAL_TEST_APP_ID=${SHOTLET_E2E_PORTAL_APP_ID:-shotlet}
 vars=()
 for v in HOME XDG_RUNTIME_DIR XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME \
     XDG_CACHE_HOME XDG_CURRENT_DESKTOP XDG_SESSION_TYPE WAYLAND_DISPLAY LANG \

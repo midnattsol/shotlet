@@ -8,9 +8,7 @@ set -eu
 [ "${SHOTLET_E2E_SANDBOX:-}" = gnome ] || { echo "monitors.sh: run inside tools/e2e/session.sh" >&2; exit 2; }
 DC=(--session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig)
 state=$(gdbus call "${DC[@]}" --method org.gnome.Mutter.DisplayConfig.GetCurrentState)
-PY=python3
-[ -x /usr/bin/python3 ] && PY=/usr/bin/python3
-plan=$("$PY" -I - "$state" "$@" <<'EOF'
+plan=$("${E2E_PYTHON:?monitors.sh: no Python (tools/e2e.sh sets E2E_PYTHON)}" -I - "$state" "$@" <<'EOF'
 import re, sys
 state, wants = sys.argv[1], sys.argv[2:]
 serial = re.match(r"\(uint32 (\d+)", state).group(1)

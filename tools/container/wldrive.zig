@@ -8,7 +8,7 @@
 //! monitor's buffer pixels; `keysym`, `film` and `cut` are Mutter's only.
 //!
 //! - wlroots: zwlr_virtual_pointer_v1 + zwp_virtual_keyboard_v1 for input
-//!   (the keymap file in WLDRIVE_KEYMAP), zwlr_screencopy_v1 for pictures
+//!   (the keymap file in SHOTLET_E2E_KEYMAP), zwlr_screencopy_v1 for pictures
 //!   of an output.
 //! - KWin: org_kde_kwin_fake_input for input and org.kde.KWin.ScreenShot2
 //!   over D-Bus for pictures. Both are restricted, and KWin grants them as
@@ -77,7 +77,7 @@ fn setupInput(d: *Driver, vars: *const std.process.Environ.Map) !void {
         try d.conn.request(d.g.vp_mgr, proto.vp_mgr.create_virtual_pointer, &.{ .{ .object = d.g.seat }, .{ .new_id = d.pointer } });
         d.keyboard = d.conn.newId();
         try d.conn.request(d.g.vk_mgr, proto.vk_mgr.create_virtual_keyboard, &.{ .{ .object = d.g.seat }, .{ .new_id = d.keyboard } });
-        const path = vars.get("WLDRIVE_KEYMAP") orelse return fail("WLDRIVE_KEYMAP: an xkb keymap file is needed", .{});
+        const path = vars.get("SHOTLET_E2E_KEYMAP") orelse return fail("SHOTLET_E2E_KEYMAP: an xkb keymap file is needed", .{});
         try d.uploadKeymap(path);
     } else {
         return fail("no virtual input: neither wlroots' virtual pointer/keyboard nor KWin's fake input", .{});
