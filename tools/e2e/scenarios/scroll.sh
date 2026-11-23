@@ -77,32 +77,6 @@ scroll_editor() {
     check "  ... the marker band exactly once" eq "$(drv runs "$OUT/tall.png" 5 ff00ff 8 && echo "$VAL")" 1
 }
 
-# scroll_cover MON: a second capture of all of monitor MON (a click),
-# where the control has no room beside the region and sits over it:
-# left out of the frames, it does not stop the matching
-scroll_cover() {
-    local s th
-    echo "goto 0" >"$OUT/page.ctl"
-    sleep 0.5
-    clip_set nothing
-    ext_gap
-    drv key ctrl+super+print
-    check "a second picker" shell_wait 10 "scrolling capture: pick a region" 2
-    shell_wait 20 "area picker: up" 2
-    sleep 1
-    click "$1" 1900 1000
-    sleep 0.5
-    keys enter
-    check "all of the monitor scrolls to the end of the page, the control over it" shell_wait 90 "stopped: end_of_page" 2
-    check "  ... and opens in the editor" shell_wait 10 "startup: capture=" 2
-    sleep 1.5
-    keys enter
-    check "  ... which copies it" wait_until 10 clip_png "$OUT/cover.png"
-    s=$(png_size "$OUT/cover.png"); th=${s#*x}
-    check "  ... taller than the monitor (${s})" test "${th:-0}" -gt 3000
-    check "  ... the marker band exactly once" eq "$(drv runs "$OUT/cover.png" 5 ff00ff 8 && echo "$VAL")" 1
-}
-
 scenario_modes_scroll_manual() {
     modes_start Meta-0
     mode_cfg copy scroll_auto=false
@@ -361,7 +335,8 @@ scroll_cover() {
     check "  ... and opens in the editor" shell_wait 10 "startup: capture=" 2
     sleep 1.5
     keys enter
-    check "  ... which copies it" wait_until 10 clip_png "$OUT/cover.png"
+    # (a 3840x4600 PNG: a while to encode in a debug build)
+    check "  ... which copies it" wait_until 30 clip_png "$OUT/cover.png"
     s=$(png_size "$OUT/cover.png"); th=${s#*x}
     check "  ... taller than the monitor (${s})" test "${th:-0}" -gt 3000
     check "  ... the marker band exactly once" eq "$(drv runs "$OUT/cover.png" 5 ff00ff 8 && echo "$VAL")" 1
