@@ -73,7 +73,7 @@ pub fn paint(gpa: std.mem.Allocator, buf: []u32, bw: u32, bh: u32, k: f64, v: *c
     var cv = render.Canvas.init(card, cw, ch);
     badge(&cv, k, v);
     if (v.hovered) controls(&cv, k, v);
-    if (v.notice.len > 0) fui.notice(&cv, .{ .x = 0, .y = 0, .w = @intCast(cw), .h = @intCast(ch) }, v.notice, k, v.th);
+    if (v.notice.len > 0) fui.notice(&cv, .ofSize(cw, ch), v.notice, k, v.th);
     const at = px(pad, k);
     fui.compositeFaded(gpa, .{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ at, at }, 12 * k, v.th.card_shadow, v.alpha, k) catch {};
 }

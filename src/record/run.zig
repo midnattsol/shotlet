@@ -15,7 +15,7 @@ const sys = @import("../platform/api.zig").sys;
 const window = @import("../platform/api.zig").window;
 const settings_mod = @import("settings.zig");
 const session = @import("session.zig");
-const region = @import("region.zig");
+const geom = @import("../geom.zig");
 const ctlsock = @import("ctlsock.zig");
 const control_mod = @import("../ui/recui/control.zig");
 const cli = @import("cli.zig");
@@ -24,11 +24,11 @@ const Env = env_mod.Env;
 /// Record `a.area` (or the monitor for --full); `picked` is the area the
 /// picker returned, when it ran. A recording that cannot start or be
 /// kept is reported (app/report.zig) and ends the process with status 1.
-pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Settings, picked: ?region.Rect) !void {
+pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Settings, picked: ?geom.Rect) !void {
     record(gpa, env, a, set, picked) catch |err| return report.exitIfReported(err);
 }
 
-fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Settings, picked: ?region.Rect) !void {
+fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Settings, picked: ?geom.Rect) !void {
     var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
     var cfg = config.load(gpa, env.home);
@@ -153,7 +153,7 @@ fn sleepCountdown(seconds: u32) bool {
 
 /// The whole monitor: the first one the compositor lists (the picker
 /// knows better; this is for `--full` from a script).
-fn fullArea(gpa: std.mem.Allocator, env: Env) !region.Rect {
+fn fullArea(gpa: std.mem.Allocator, env: Env) !geom.Rect {
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
     for (win.outputList()) |o| {

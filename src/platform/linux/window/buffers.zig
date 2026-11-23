@@ -107,7 +107,7 @@ pub fn presentDamaged(w: *Window, idx: u8, damage: ?Rect) !void {
         s.committed_scale = s.int_scale;
     }
     try c.request(s.wl_surface, wl.wl_surface.attach, &.{ .{ .object = b.id }, .{ .int = 0 }, .{ .int = 0 } });
-    const d = damage orelse Rect{ .x = 0, .y = 0, .w = @intCast(s.width), .h = @intCast(s.height) };
+    const d = damage orelse Rect.ofSize(s.width, s.height);
     try c.request(s.wl_surface, wl.wl_surface.damage_buffer, &.{
         .{ .int = d.x }, .{ .int = d.y }, .{ .int = d.w }, .{ .int = d.h },
     });

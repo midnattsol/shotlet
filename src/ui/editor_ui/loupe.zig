@@ -184,7 +184,7 @@ fn paneShowing(ed: *const Editor, p: Point) u8 {
     for (ed.panes[0..ed.n_panes], 0..) |pane, i| {
         if (!pane.alive) continue;
         const b = pane.view.toBuf(p);
-        const r: Rect = .{ .x = 0, .y = 0, .w = @intCast(pane.width), .h = @intCast(pane.height) };
+        const r: Rect = .ofSize(pane.width, pane.height);
         if (r.contains(b.x, b.y) and (i == ed.mouse_pane or best == ed.mouse_pane)) best = @intCast(i);
     }
     return best;
@@ -311,7 +311,7 @@ fn grown(r: Rect, anchor: Point, k: f64) Rect {
     const y0 = anchor.y + scale.px(r.y - anchor.y, k);
     const x1 = anchor.x + scale.px(r.right() - anchor.x, k);
     const y1 = anchor.y + scale.px(r.bottom() - anchor.y, k);
-    return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+    return .fromEdges(x0, y0, x1, y1);
 }
 
 /// `p` on the picture's pixel corners (where a selection's edge can be).

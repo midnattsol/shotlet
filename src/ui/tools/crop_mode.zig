@@ -87,13 +87,13 @@ pub fn apply(ed: *Editor) !void {
     if (r.eql(ed.doc.imageRect()) or r.w < 2 or r.h < 2) return;
     try ed.settle();
     const st = &ed.tools.crops;
-    const after = try st.adopt(ed.alloc, try crop.cropImage(ed.alloc, ed.img, r));
+    const after = try st.adopt(ed.alloc, try ed.img.crop(ed.alloc, r));
     const mark = st.next_mark;
     st.next_mark += 1;
     try st.entries.append(ed.alloc, .{ .mark = mark, .rect = r, .before = ed.img, .after = after });
     try ed.doc.checkpointMarked(mark);
     crop.moveShapes(ed.doc.shapes.items, r);
-    ed.doc.sel = .{ .x = 0, .y = 0, .w = @intCast(after.width), .h = @intCast(after.height) };
+    ed.doc.sel = .ofSize(after.width, after.height);
     try ed.replaceImage(after);
     std.log.info("crop: {d}x{d} at {d},{d}", .{ r.w, r.h, r.x, r.y });
 }
@@ -105,7 +105,7 @@ pub fn afterHistory(ed: *Editor, undone: bool) !void {
     if (mark == 0) return;
     const e = ed.tools.crops.find(mark) orelse return;
     const img = if (undone) e.before else e.after;
-    ed.doc.sel = if (undone) e.rect else .{ .x = 0, .y = 0, .w = @intCast(img.width), .h = @intCast(img.height) };
+    ed.doc.sel = if (undone) e.rect else .ofSize(img.width, img.height);
     try ed.replaceImage(img);
 }
 

@@ -17,7 +17,6 @@ pub const Region = model.Region;
 
 pub const Ui = widgets.Ui;
 pub const Card = widgets.Card;
-pub const Row = widgets.Row;
 pub const groupTitle = widgets.groupTitle;
 pub const beginCard = widgets.beginCard;
 pub const rowBegin = widgets.rowBegin;

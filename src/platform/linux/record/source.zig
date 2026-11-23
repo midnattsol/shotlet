@@ -10,6 +10,7 @@ const gnome = @import("../gnome.zig");
 const shell1 = @import("../gnome/shell1.zig");
 const portal = @import("../portal.zig");
 const region = @import("../../../record/region.zig");
+const geom = @import("../../../geom.zig");
 const switches = @import("../../api/switches.zig");
 const rememberToken = @import("../capture/screencast.zig").rememberToken;
 const sys = @import("../sys.zig");
@@ -22,8 +23,8 @@ pub const Source = struct {
     cap: *pwstream.Capture,
     node: u32,
     /// the stream's logical rectangle, and the part of it to keep
-    stream_rect: region.Rect,
-    crop: ?region.Rect,
+    stream_rect: geom.Rect,
+    crop: ?geom.Rect,
     session: ?portal.ScreenCastSession = null,
 
     pub fn label(self: *const Source) []const u8 {
@@ -94,9 +95,9 @@ fn openSession(gpa: std.mem.Allocator, bus: *dbus.Connection, prev_token: ?[]con
 /// The stream showing most of the area. A portal that gives no position
 /// (or size) has one monitor at the origin, as the screenshots saw it
 /// (the first stream is taken when none overlaps).
-fn pickStream(streams: []const portal.Stream, area: region.Rect) ?struct { node: u32, rect: region.Rect } {
+fn pickStream(streams: []const portal.Stream, area: geom.Rect) ?struct { node: u32, rect: geom.Rect } {
     if (streams.len == 0) return null;
-    var rects: [max_outputs]region.Rect = undefined;
+    var rects: [max_outputs]geom.Rect = undefined;
     const n = @min(streams.len, rects.len);
     for (streams[0..n], 0..) |s, i| {
         const pos = s.position orelse .{ 0, 0 };
@@ -117,5 +118,5 @@ test "the stream holding the area is picked" {
     try std.testing.expectEqual(@as(u32, 9), p.node);
     const lone = [_]portal.Stream{.{ .node_id = 3 }};
     const q = pickStream(&lone, .{ .x = 10, .y = 10, .w = 30, .h = 20 }).?;
-    try std.testing.expectEqual(region.Rect{ .x = 0, .y = 0, .w = 0, .h = 0 }, q.rect);
+    try std.testing.expectEqual(geom.Rect{ .x = 0, .y = 0, .w = 0, .h = 0 }, q.rect);
 }

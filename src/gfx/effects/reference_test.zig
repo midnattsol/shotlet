@@ -2,8 +2,8 @@
 //! versions.
 
 const std = @import("std");
-const Rect = @import("rect.zig").Rect;
-const clip = @import("rect.zig").clip;
+const Rect = @import("../../geom.zig").Rect;
+const clip = Rect.clip;
 const boxBlur = @import("blur.zig").boxBlur;
 const composite = @import("composite.zig");
 const over = composite.over;

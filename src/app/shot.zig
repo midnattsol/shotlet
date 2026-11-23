@@ -402,7 +402,7 @@ fn fromMonitorFiles(gpa: std.mem.Allocator, list: []const u8) !capture.Capture {
         defer gpa.free(data);
         imgs[n] = try png.decode(gpa, data);
         const im = &imgs[n];
-        parts[n] = .{ .pixels = im.pixels, .width = im.width, .height = im.height, .logical = .{ .x = x, .y = 0, .w = im.width, .h = im.height } };
+        parts[n] = .{ .pixels = im.pixels, .width = im.width, .height = im.height, .logical = .{ .x = x, .y = 0, .w = @intCast(im.width), .h = @intCast(im.height) } };
         x += @intCast(im.width);
         n += 1;
     }

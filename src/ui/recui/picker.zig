@@ -25,8 +25,9 @@ const scale = @import("../scale.zig");
 const press = @import("../press.zig");
 const focus = @import("../focus.zig");
 const material = @import("../material.zig");
-const Rect = selmod.Rect;
-const Point = selmod.Point;
+const geom = @import("../../geom.zig");
+const Rect = geom.Rect;
+const Point = geom.Point;
 
 pub const Result = union(enum) { area: Rect, cancelled };
 

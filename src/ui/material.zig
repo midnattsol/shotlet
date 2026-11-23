@@ -178,7 +178,7 @@ pub fn frost(gpa: std.mem.Allocator, behind: []const u32, src: Rect, r: Rect, bl
     const small = try gpa.alloc(u32, sw * sh);
     defer gpa.free(small);
     halve(behind, @intCast(src.w), @intCast(src.h), small, sw, sh);
-    try effects.softBlur(gpa, small, @intCast(sw), @intCast(sh), .{ .x = 0, .y = 0, .w = @intCast(sw), .h = @intCast(sh) }, @intCast(@max(1, @divTrunc(blur_px, 2))));
+    try effects.softBlur(gpa, small, @intCast(sw), @intCast(sh), .ofSize(@intCast(sw), @intCast(sh)), @intCast(@max(1, @divTrunc(blur_px, 2))));
     // saturate a little, like vibrancy, and tint, at the small size;
     // then scale up
     for (small) |*p| p.* = Canvas.blendPixel(saturate(p.*), tint);

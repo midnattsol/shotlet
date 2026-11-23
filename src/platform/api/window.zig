@@ -12,7 +12,9 @@ pub const max_surfaces = 8;
 /// limit for the whole program).
 pub const max_outputs = 16;
 
-pub const Rect = struct { x: i32, y: i32, w: i32, h: i32 };
+/// Logical rectangles (input regions, the text cursor): the program's one
+/// integer rectangle (src/geom.zig).
+pub const Rect = @import("../../geom.zig").Rect;
 
 const keys = @import("keys.zig");
 pub const KeyCode = keys.Code;

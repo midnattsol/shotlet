@@ -23,6 +23,7 @@ const scale = @import("../scale.zig");
 const theme = @import("../theme.zig");
 const text = @import("../../gfx/text.zig");
 const region = @import("../../record/region.zig");
+const geom = @import("../../geom.zig");
 const engine_mod = @import("../../record/engine.zig");
 const ctlsock = @import("../../record/ctlsock.zig");
 const draw = @import("control_draw.zig");
@@ -44,7 +45,7 @@ pub const Control = struct {
     state: draw.State = .{},
     last_draw_ms: i64 = 0,
 
-    pub fn open(gpa: std.mem.Allocator, env: Env, bus: *desktop.Session, area: region.Rect) !Control {
+    pub fn open(gpa: std.mem.Allocator, env: Env, bus: *desktop.Session, area: geom.Rect) !Control {
         text.init(gpa);
         errdefer text.deinit();
         var c: Control = .{ .gpa = gpa, .win = try window.Window.init(gpa, env), .bus = bus, .pos = .{ 0, 0 }, .layer = false };
@@ -170,8 +171,8 @@ pub const Control = struct {
     }
 };
 
-fn monitorOf(win: *window.Window, area: region.Rect) region.Rect {
-    var rects: [window.max_outputs]region.Rect = undefined;
+fn monitorOf(win: *window.Window, area: geom.Rect) geom.Rect {
+    var rects: [window.max_outputs]geom.Rect = undefined;
     var n: usize = 0;
     for (win.outputList()) |o| {
         if (o.id == 0) continue;
@@ -186,7 +187,7 @@ fn monitorOf(win: *window.Window, area: region.Rect) region.Rect {
 /// Top-left of the control window: the pill centred `gap` under the
 /// area, else above it, else inside its bottom edge; the window on the
 /// area's monitor.
-pub fn place(area: region.Rect, mon: region.Rect) [2]i32 {
+pub fn place(area: geom.Rect, mon: geom.Rect) [2]i32 {
     const sz = draw.windowSize();
     const w: i32 = @intCast(sz[0]);
     const h: i32 = @intCast(sz[1]);
@@ -200,15 +201,15 @@ pub fn place(area: region.Rect, mon: region.Rect) [2]i32 {
 }
 
 /// Whether the control would sit inside the area (it would be recorded).
-pub fn inside(area: region.Rect, mon: region.Rect) bool {
+pub fn inside(area: geom.Rect, mon: geom.Rect) bool {
     const p = place(area, mon);
     const pill = draw.pillRect();
-    const r: region.Rect = .{ .x = p[0] + pill.x, .y = p[1] + pill.y, .w = pill.w, .h = pill.h };
+    const r: geom.Rect = .{ .x = p[0] + pill.x, .y = p[1] + pill.y, .w = pill.w, .h = pill.h };
     return r.intersect(area) != null;
 }
 
 test "the control goes under the area, else above, else inside" {
-    const mon: region.Rect = .{ .x = 0, .y = 0, .w = 1600, .h = 900 };
+    const mon: geom.Rect = .{ .x = 0, .y = 0, .w = 1600, .h = 900 };
     const below = place(.{ .x = 100, .y = 100, .w = 400, .h = 300 }, mon);
     try std.testing.expectEqual(@as(i32, 400 + 18), below[1] + draw.pillRect().y);
     try std.testing.expect(!inside(.{ .x = 100, .y = 100, .w = 400, .h = 300 }, mon));

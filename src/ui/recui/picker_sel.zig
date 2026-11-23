@@ -4,9 +4,10 @@
 
 const std = @import("std");
 const region = @import("../../record/region.zig");
+const geom = @import("../../geom.zig");
 
-pub const Rect = region.Rect;
-pub const Point = struct { x: i32, y: i32 };
+const Rect = geom.Rect;
+const Point = geom.Point;
 
 /// 0..7: corners and edges, clockwise from the top-left
 pub const Handle = u3;

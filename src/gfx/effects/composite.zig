@@ -2,10 +2,10 @@
 //! blits and the `over` operator. Pixels are 0xAARRGGBB, row-major.
 
 const std = @import("std");
-const rect = @import("rect.zig");
-const Rect = rect.Rect;
-const clip = rect.clip;
-const dim = rect.dim;
+const geom = @import("../../geom.zig");
+const Rect = geom.Rect;
+const clip = Rect.clip;
+const dim = geom.dim;
 const color_mod = @import("../color.zig");
 const sdf = @import("../render/sdf.zig");
 

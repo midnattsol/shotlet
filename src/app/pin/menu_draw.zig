@@ -35,7 +35,7 @@ pub fn draw(gpa: std.mem.Allocator, dst: fui.Surface, k: f64, th: Theme, st: *co
     var cv = fui.Canvas.init(card, mw, mh);
     const rad = theme.menu_radius * f;
     @memset(card, th.material_solid);
-    material.hairline(&cv, .{ .x = 0, .y = 0, .w = @intCast(mw), .h = @intCast(mh) }, rad, material.hairlineColor(th, f));
+    material.hairline(&cv, .ofSize(mw, mh), rad, material.hairlineColor(th, f));
     drawRows(&cv, f, th, st, marks);
     // the card and its shadow, faded as one
     try fui.compositeFaded(gpa, dst, .{ .px = card, .w = mw, .h = mh }, .{ px(st.at[0], k), px(st.at[1], k) }, rad, th.card_shadow, a, k);

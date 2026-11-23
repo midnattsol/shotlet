@@ -109,7 +109,7 @@ pub fn paint(gpa: std.mem.Allocator, buf: []u32, bw: u32, bh: u32, k: f64, st: *
         .recording => paintRecording(&cv, k, st, look),
     }
     const radius = ff(ch) / 2;
-    material.hairline(&cv, .{ .x = 0, .y = 0, .w = @intCast(cw), .h = @intCast(ch) }, radius, look.line);
+    material.hairline(&cv, .ofSize(cw, ch), radius, look.line);
     fui.place(gpa, .{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ px(pad, k), px(pad, k) }, radius, st.th.card_shadow, k);
 }
 

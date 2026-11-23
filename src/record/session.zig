@@ -15,11 +15,11 @@ const engine_mod = @import("engine.zig");
 const source_mod = @import("../platform/api.zig").record;
 const settings_mod = @import("settings.zig");
 const keepvid = @import("keepvid.zig");
-const region = @import("region.zig");
+const geom = @import("../geom.zig");
 const Env = env_mod.Env;
 
 pub const Request = struct {
-    area: region.Rect,
+    area: geom.Rect,
     /// write here instead of a new file in the Videos folder
     out: ?[]const u8 = null,
 };

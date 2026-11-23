@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const sync = @import("../sync.zig");
-const region = @import("region.zig");
+const geom = @import("../geom.zig");
 const media = @import("../platform/api.zig").record;
 
 pub const Latest = struct {
@@ -24,8 +24,8 @@ pub const Latest = struct {
     first_ns: i64 = 0,
     /// the logical area (in the stream's logical rect) to keep, or null
     /// for the whole frame
-    crop: ?region.Rect = null,
-    stream_rect: region.Rect = .{ .x = 0, .y = 0, .w = 1, .h = 1 },
+    crop: ?geom.Rect = null,
+    stream_rect: geom.Rect = .{ .x = 0, .y = 0, .w = 1, .h = 1 },
     frozen: bool = false,
 
     pub fn deinit(self: *Latest) void {
@@ -34,11 +34,11 @@ pub const Latest = struct {
 
     /// The pixel area of a w x h frame to keep (the size is fixed by the
     /// first frame: later ones of another size are cropped or padded).
-    fn area(self: *const Latest, w: u32, h: u32) ?region.Rect {
-        const c = self.crop orelse return .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) };
+    fn area(self: *const Latest, w: u32, h: u32) ?geom.Rect {
+        const c = self.crop orelse return .ofSize(w, h);
         var r = self.stream_rect;
         if (r.w <= 0 or r.h <= 0) r = .{ .x = r.x, .y = r.y, .w = @intCast(w), .h = @intCast(h) };
-        return region.toPixels(c, r, w, h);
+        return geom.toFramePixels(c, r, w, h);
     }
 
     /// PipeWire callback: copy the area out of the mapped buffer.
@@ -89,7 +89,7 @@ pub const Latest = struct {
 };
 
 /// Copy area `a` of `raw` into dst (w x h), as 0xFFRRGGBB.
-fn copyArea(dst: []u32, w: u32, h: u32, raw: *const media.Raw, a: region.Rect) void {
+fn copyArea(dst: []u32, w: u32, h: u32, raw: *const media.Raw, a: geom.Rect) void {
     const cw = @min(w, @as(u32, @intCast(a.w)));
     const ch = @min(h, @as(u32, @intCast(a.h)));
     const swap = switch (raw.format) {

@@ -3,20 +3,10 @@
 
 const std = @import("std");
 const png = @import("../gfx/png.zig");
+const geom = @import("../geom.zig");
 
-pub const Monitor = struct {
-    /// pixel rectangle of this monitor inside `Capture.image`
-    x: u32,
-    y: u32,
-    w: u32,
-    h: u32,
-    /// the monitor in the compositor's logical layout, as the ScreenCast
-    /// portal reports it (stream `position` and `size`); null when unknown,
-    /// as with --from or the Screenshot portal
-    logical: ?Logical = null,
-
-    pub const Logical = struct { x: i32, y: i32, w: u32, h: u32 };
-};
+/// A monitor's place in the image and in the logical layout (geom.zig).
+pub const Monitor = geom.Monitor;
 
 pub const Capture = struct {
     image: png.Image,
@@ -45,7 +35,7 @@ pub const Part = struct {
     width: u32,
     height: u32,
     /// logical rect from the portal; null when it did not say
-    logical: ?Monitor.Logical = null,
+    logical: ?geom.Rect = null,
 };
 
 /// Largest stitched image we build (about 1 GiB of pixels).

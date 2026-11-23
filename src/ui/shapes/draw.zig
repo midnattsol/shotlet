@@ -14,7 +14,7 @@ const ruler = @import("../tools/ruler.zig");
 const spotlight = @import("../tools/spotlight.zig");
 
 const Canvas = render.Canvas;
-const Point = geometry.Point;
+const Point = @import("../../geom.zig").Point;
 const Xform = geometry.Xform;
 const Shape = model.Shape;
 const TextCursor = draw_text.TextCursor;
@@ -72,17 +72,16 @@ fn drawRect(canvas: *Canvas, s: *const Shape, xf: Xform, tf: f64) void {
 /// Blur, pixelate or redact the pixels under the shape's frame.
 fn drawRedaction(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform) void {
     const r = xf.rect(s.frame());
-    const area: effects.Rect = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     switch (s.tool) {
         .blur => {
             const rad: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(s.blurRadius())) * xf.scale))));
-            effects.blur(alloc, canvas.px, @intCast(canvas.w), @intCast(canvas.h), area, rad) catch {};
+            effects.blur(alloc, canvas.px, @intCast(canvas.w), @intCast(canvas.h), r, rad) catch {};
         },
         .pixelate => {
             const blk: i32 = @max(2, @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(s.pixelBlock())) * xf.scale))));
             raster.pixelateAligned(canvas, r, blk);
         },
-        else => effects.redact(canvas.px, @intCast(canvas.w), @intCast(canvas.h), area, s.color),
+        else => effects.redact(canvas.px, @intCast(canvas.w), @intCast(canvas.h), r, s.color),
     }
 }
 

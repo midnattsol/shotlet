@@ -9,7 +9,7 @@ const desktop = @import("../platform/api.zig").desktop;
 const media = @import("../platform/api.zig").record;
 const shell = @import("../platform/api.zig").shell;
 const env_mod = @import("../app/env.zig");
-const region = @import("region.zig");
+const geom = @import("../geom.zig");
 const ctlsock = @import("ctlsock.zig");
 const run_mod = @import("run.zig");
 const picker = @import("../ui/recui/picker.zig");
@@ -24,7 +24,7 @@ const Env = env_mod.Env;
 const Settings = config.Record;
 
 pub const Args = struct {
-    area: ?region.Rect = null,
+    area: ?geom.Rect = null,
     full: bool = false,
     seconds: ?u32 = null,
     out: ?[]const u8 = null,
@@ -161,7 +161,7 @@ test "record options read from the command line" {
     defer arena.deinit();
     var s: Settings = .{};
     const a = try options(&try parsed(arena.allocator(), &.{ "record", "--region", "10,20,300,200", "--gif", "--fps", "12", "--seconds", "2", "--no-countdown", "--keys" }), &s);
-    try std.testing.expectEqual(region.Rect{ .x = 10, .y = 20, .w = 300, .h = 200 }, a.area.?);
+    try std.testing.expectEqual(geom.Rect{ .x = 10, .y = 20, .w = 300, .h = 200 }, a.area.?);
     try std.testing.expectEqual(@as(u32, 12), s.gif_fps);
     try std.testing.expectEqual(@as(?u32, 2), a.seconds);
     try std.testing.expectEqual(@as(u32, 0), s.countdown);

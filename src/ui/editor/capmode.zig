@@ -197,7 +197,7 @@ fn screen(ed: *Editor) void {
 pub fn monitorAtPointer(ed: *const Editor) Rect {
     const ip = ed.imgAt(ed.mouse);
     for (ed.monitors) |m| {
-        const r: Rect = .{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) };
+        const r = m.pixelRect();
         if (r.contains(ip.x, ip.y)) return r;
     }
     return ed.doc.imageRect();

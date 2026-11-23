@@ -6,7 +6,7 @@ const std = @import("std");
 const types = @import("../api/record.zig");
 const desktop = @import("desktop.zig");
 const config = @import("../../app/config.zig");
-const region = @import("../../record/region.zig");
+const geom = @import("../../geom.zig");
 
 pub const Want = types.Want;
 pub const VideoFormat = types.VideoFormat;
@@ -47,8 +47,8 @@ pub const Stream = struct {
 pub const Source = struct {
     cap: *Stream,
     node: u32,
-    stream_rect: region.Rect,
-    crop: ?region.Rect,
+    stream_rect: geom.Rect,
+    crop: ?geom.Rect,
 
     pub fn label(self: *const Source) []const u8 {
         _ = self;

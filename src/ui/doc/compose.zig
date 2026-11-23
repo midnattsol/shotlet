@@ -24,7 +24,7 @@ pub fn composeRegion(
     skip: ?usize,
     region: Rect,
 ) !void {
-    const full: Rect = .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) };
+    const full: Rect = .ofSize(w, h);
     const r = Rect.intersect(region, full) orelse return;
     var margin: i32 = 0;
     for (list, 0..) |*s, i| {
@@ -66,7 +66,7 @@ pub fn composeRegion(
 /// Paint `s` over the layer as the new topmost shape: no recompose of
 /// what lies under it, so committing a stroke costs only the stroke.
 pub fn paintOnTop(alloc: std.mem.Allocator, layer: []u32, w: u32, h: u32, s: *const Shape) !void {
-    const full: Rect = .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) };
+    const full: Rect = .ofSize(w, h);
     const r = Rect.intersect(s.bounds(), full) orelse return;
     const e = Rect.intersect(r.expand(s.readMargin()), full).?;
     const ew: usize = @intCast(e.w);
@@ -100,7 +100,7 @@ pub const Exported = struct {
 /// Crop `crop` (inside the image) from the native layer and frame it if
 /// beautify is on. Caller owns the pixels.
 pub fn exportImage(alloc: std.mem.Allocator, layer: []const u32, w: u32, h: u32, crop: Rect, b: Beautify) !Exported {
-    const full: Rect = .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) };
+    const full: Rect = .ofSize(w, h);
     const c = Rect.intersect(crop, full) orelse full;
     const cw: u32 = @intCast(c.w);
     const ch: u32 = @intCast(c.h);

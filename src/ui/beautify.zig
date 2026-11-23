@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const effects = @import("../gfx/effects.zig");
+const geom = @import("../geom.zig");
 
 pub const Background = struct {
     from: u32,
@@ -75,9 +76,9 @@ pub const Beautify = struct {
         _ = alloc;
         const g = self.geometry(w, h);
         const bg = self.background();
-        const full: effects.Rect = .{ .x = 0, .y = 0, .w = @intCast(g.out_w), .h = @intCast(g.out_h) };
+        const full: geom.Rect = .ofSize(g.out_w, g.out_h);
         effects.gradient(dst, g.out_w, g.out_h, full, bg.from, bg.to);
-        const inner: effects.Rect = .{ .x = @intCast(g.pad), .y = @intCast(g.pad), .w = @intCast(w), .h = @intCast(h) };
+        const inner: geom.Rect = .{ .x = @intCast(g.pad), .y = @intCast(g.pad), .w = @intCast(w), .h = @intCast(h) };
         if (g.shadow_blur > 0) effects.dropShadow(dst, g.out_w, g.out_h, inner, g.shadow_blur, g.shadow_dy, 0x70000000);
         effects.blitRounded(dst, g.out_w, g.out_h, shot, w, h, inner.x, inner.y, g.radius);
     }

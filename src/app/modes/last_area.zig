@@ -11,7 +11,7 @@
 const std = @import("std");
 const capture = @import("../capture.zig");
 const statefile = @import("../statefile.zig");
-const Rect = @import("geom.zig").Rect;
+const Rect = @import("../../geom.zig").Rect;
 
 const max_layouts = 8;
 

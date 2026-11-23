@@ -9,9 +9,8 @@ const desktop = @import("desktop.zig");
 const capture = @import("../../app/capture.zig");
 const config = @import("../../app/config.zig");
 const mode = @import("../../app/modes/mode.zig");
-const geom = @import("../../app/modes/geom.zig");
+const geom = @import("../../geom.zig");
 const png = @import("../../gfx/png.zig");
-const Rect = @import("../../ui/shapes.zig").Rect;
 const Env = @import("../../app/env.zig").Env;
 
 pub const Path = types.Path;
@@ -38,7 +37,7 @@ pub fn screens(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, cfg: *conf
 
 pub const max_windows = 64;
 /// The windows' frames when `cap` was taken (image pixels, owned).
-pub fn windows(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, cap: *const capture.Capture, shell_id: ?[]const u8) []Rect {
+pub fn windows(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, cap: *const capture.Capture, shell_id: ?[]const u8) []geom.Rect {
     _ = .{ gpa, env, s, cap, shell_id };
     return &.{};
 }

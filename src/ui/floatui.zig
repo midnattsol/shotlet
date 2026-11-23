@@ -9,7 +9,7 @@
 //! and the card is then placed with its rounded corners.
 //!
 //! Stable API:
-//!   premultiply(px, w, h, r), fadeAlpha(px, f), blitOver(...), clipRect
+//!   premultiply(px, w, h, r), fadeAlpha(px, f), blitOver(...)
 //!   textCentered(canvas, r, size, color, style, s)
 //!   Surface, Image                      a straight-alpha buffer; pixels to read
 //!   place(gpa, dst, card, at, radius, shadow, k)   an opaque card with
@@ -25,6 +25,7 @@
 const std = @import("std");
 const render = @import("../gfx/render.zig");
 const effects = @import("../gfx/effects.zig");
+const Rect = @import("../geom.zig").Rect;
 const text = @import("../gfx/text.zig");
 const icons = @import("icons.zig");
 const theme = @import("theme.zig");
@@ -32,7 +33,6 @@ const card = @import("floatui/card.zig");
 const overlay = @import("floatui/overlay.zig");
 
 pub const Canvas = render.Canvas;
-pub const Rect = effects.Rect;
 
 pub const Surface = card.Surface;
 pub const Image = card.Image;
@@ -54,13 +54,9 @@ pub const scrimPill = overlay.scrimPill;
 pub const scrimPillWidth = overlay.scrimPillWidth;
 pub const scrim_pill_h = overlay.scrim_pill_h;
 
-pub fn clipRect(r: Rect, w: u32, h: u32) ?Rect {
-    return effects.clip(r, w, h);
-}
-
 /// Straight to premultiplied alpha, in place, over `r`.
 pub fn premultiply(px: []u32, w: u32, h: u32, r: Rect) void {
-    const c = effects.clip(r, w, h) orelse return;
+    const c = r.clip(w, h) orelse return;
     var y = c.y;
     while (y < c.y + c.h) : (y += 1) {
         const row = px[@as(usize, @intCast(y)) * w + @as(usize, @intCast(c.x)) ..][0..@intCast(c.w)];
@@ -92,7 +88,7 @@ pub fn fadeAlpha(px: []u32, f: f64) void {
 
 /// `src` (straight alpha, sw x sh) over `dst` at x, y.
 pub fn blitOver(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32, x: i32, y: i32) void {
-    const c = effects.clip(.{ .x = x, .y = y, .w = @intCast(sw), .h = @intCast(sh) }, dw, dh) orelse return;
+    const c = Rect.clip(.{ .x = x, .y = y, .w = @intCast(sw), .h = @intCast(sh) }, dw, dh) orelse return;
     var yy = c.y;
     while (yy < c.y + c.h) : (yy += 1) {
         const sy: usize = @intCast(yy - y);
@@ -104,7 +100,7 @@ pub fn blitOver(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32
 }
 
 /// Text centred in `r` (vertically by line height).
-pub fn textCentered(c: *Canvas, r: @import("shapes.zig").Rect, size: f64, color: u32, style: text.Style, s: []const u8) void {
+pub fn textCentered(c: *Canvas, r: Rect, size: f64, color: u32, style: text.Style, s: []const u8) void {
     const tw = text.widthStyled(size, style, s);
     const th = text.heightStyled(size, style);
     text.drawStyled(c, r.x + @divTrunc(r.w - tw, 2), r.y + @divTrunc(r.h - th, 2), size, color, style, s);

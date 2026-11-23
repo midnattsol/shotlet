@@ -39,7 +39,7 @@ pub const Document = struct {
     }
 
     pub fn imageRect(self: *const Document) Rect {
-        return .{ .x = 0, .y = 0, .w = @intCast(self.width), .h = @intCast(self.height) };
+        return .ofSize(self.width, self.height);
     }
 
     /// What gets exported: the selection clipped to the image, or exactly

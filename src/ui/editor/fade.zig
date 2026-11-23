@@ -50,7 +50,7 @@ pub fn enterLevel(ed: *Editor) ?u32 {
     ed.enter.done = true;
     for (ed.panes[0..ed.n_panes]) |*p| {
         if (!p.alive) continue;
-        const all: Rect = .{ .x = 0, .y = 0, .w = @intCast(p.width), .h = @intCast(p.height) };
+        const all: Rect = .ofSize(p.width, p.height);
         for (&p.pending) |*q| q.add(all);
     }
     return null;
@@ -85,7 +85,7 @@ const Frames = struct {
             if (!p.alive or n == 0 or p.last_frame.len != n) continue;
             f.from[i] = try ed.alloc.dupe(u32, p.last_frame);
             f.plain[i] = try ed.alloc.alloc(u32, n);
-            const all: Rect = .{ .x = 0, .y = 0, .w = @intCast(p.width), .h = @intCast(p.height) };
+            const all: Rect = .ofSize(p.width, p.height);
             view_mod.resample(ed.img.pixels, ed.img.width, ed.img.height, p.view, f.plain[i], p.width, p.height, all);
             f.shown[i] = false;
         }

@@ -35,7 +35,7 @@ pub fn begin(ed: *Editor) void {
     const p = &ed.panes[ed.tb_pane];
     if (p.last_frame.len != @as(usize, p.width) * p.height) return;
     const foot = material.shadowFootprint(ed, ed.pop_rect, ed.theme.popover_shadow);
-    const r = Rect.intersect(foot, .{ .x = 0, .y = 0, .w = @intCast(p.width), .h = @intCast(p.height) }) orelse return;
+    const r = Rect.intersect(foot, .ofSize(p.width, p.height)) orelse return;
     const px = ed.alloc.alloc(u32, @intCast(r.w * r.h)) catch return;
     const rw: usize = @intCast(r.w);
     for (0..@intCast(r.h)) |yy| {

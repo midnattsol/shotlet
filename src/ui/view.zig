@@ -104,7 +104,7 @@ pub fn monitorView(mon: Rect, bw: u32, bh: u32) View {
 /// picks the nearest pixel, so zoomed screenshots stay sharp.
 pub fn resample(src: []const u32, sw: u32, sh: u32, view: View, dst: []u32, dw: u32, dh: u32, region: Rect) void {
     @setRuntimeSafety(false);
-    const r = Rect.intersect(region, .{ .x = 0, .y = 0, .w = @intCast(dw), .h = @intCast(dh) }) orelse return;
+    const r = Rect.intersect(region, .ofSize(dw, dh)) orelse return;
     const n = view.taps();
     const inv = 1.0 / view.scale;
     const swi: i64 = sw;

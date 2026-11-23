@@ -61,7 +61,7 @@ fn paintFrame(ed: *Editor, s: Rect, fr: Rect, shot: []const u32) void {
     const g_img = ed.beautify.geometry(@intCast(@max(1, sel.w)), @intCast(@max(1, sel.h)));
     const k = ed.pn().view.scale;
     paintBackground(ed, fr, k);
-    const inner: effects.Rect = .{ .x = s.x - fr.x, .y = s.y - fr.y, .w = s.w, .h = s.h };
+    const inner: Rect = .{ .x = s.x - fr.x, .y = s.y - fr.y, .w = s.w, .h = s.h };
     const blur: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(g_img.shadow_blur)) * k));
     if (blur > 0) effects.dropShadow(ed.pn().bcache, fw, fh, inner, blur, @intFromFloat(@round(@as(f64, @floatFromInt(g_img.shadow_dy)) * k)), 0x70000000);
     const rad: u32 = @intFromFloat(@round(@as(f64, @floatFromInt(g_img.radius)) * k));

@@ -1,4 +1,5 @@
-//! Logical to physical pixels, one way for every surface. A surface's
+//! Logical to physical pixels, one way for every surface (a capture's
+//! logical layout against its image pixels is src/geom.zig). A surface's
 //! scale is `scale120` (120 = 100%); lengths are designed in logical
 //! pixels and drawn at `k` = scale120 / 120 physical pixels each.
 //!
@@ -12,7 +13,7 @@
 //!   ff(v) f64                 an integer as f64
 
 const std = @import("std");
-const Rect = @import("shapes.zig").Rect;
+const Rect = @import("../geom.zig").Rect;
 
 /// The factor from logical to physical pixels.
 pub fn of(scale120: u32) f64 {
@@ -36,9 +37,7 @@ pub inline fn px(v: anytype, k: f64) i32 {
 /// The logical rect `r` in physical pixels, by its edges: two rects that
 /// touch in logical pixels touch in physical ones too.
 pub fn rect(r: Rect, k: f64) Rect {
-    const x = px(r.x, k);
-    const y = px(r.y, k);
-    return .{ .x = x, .y = y, .w = px(r.right(), k) - x, .h = px(r.bottom(), k) - y };
+    return .fromEdges(px(r.x, k), px(r.y, k), px(r.right(), k), px(r.bottom(), k));
 }
 
 /// The physical coordinate `v` (a pointer position) in logical pixels:

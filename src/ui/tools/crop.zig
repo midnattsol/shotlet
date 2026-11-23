@@ -24,18 +24,6 @@ pub fn ratio(a: Aspect) ?f64 {
     };
 }
 
-/// The pixels of `img` inside `r` (which lies inside it).
-pub fn cropImage(alloc: std.mem.Allocator, img: *const png.Image, r: Rect) !png.Image {
-    const w: u32 = @intCast(r.w);
-    const h: u32 = @intCast(r.h);
-    const px = try alloc.alloc(u32, @as(usize, w) * h);
-    for (0..h) |y| {
-        const src = (@as(usize, @intCast(r.y)) + y) * img.width + @as(usize, @intCast(r.x));
-        @memcpy(px[y * w ..][0..w], img.pixels[src..][0..w]);
-    }
-    return .{ .width = w, .height = h, .pixels = px };
-}
-
 /// Shapes keep their place on the picture when its corner moves to `r`'s.
 pub fn moveShapes(list: []Shape, r: Rect) void {
     for (list) |*s| s.translate(-r.x, -r.y);
@@ -139,7 +127,7 @@ test "cropping keeps the annotations on their pixels" {
     for (&px, 0..) |*p, i| p.* = @intCast(i);
     const img: png.Image = .{ .width = 8, .height = 6, .pixels = &px };
     const r = Rect{ .x = 2, .y = 1, .w = 5, .h = 4 };
-    var out = try cropImage(alloc, &img, r);
+    var out = try img.crop(alloc, r);
     defer out.deinit(alloc);
     try testing.expectEqual(@as(u32, 5), out.width);
     try testing.expectEqual(@as(u32, 4), out.height);

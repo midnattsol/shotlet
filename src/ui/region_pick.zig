@@ -43,7 +43,7 @@ const Pane = struct {
     }
 
     fn bounds(self: *const Pane) Rect {
-        return .{ .x = 0, .y = 0, .w = @intCast(self.w), .h = @intCast(self.h) };
+        return .ofSize(self.w, self.h);
     }
 };
 
@@ -76,9 +76,9 @@ pub const Picker = struct {
         for (self.cap.monitors) |m| {
             const l = m.logical orelse continue;
             if (l.x == sf.x and l.y == sf.y and l.w == sf.out_w and l.h == sf.out_h)
-                return view_mod.monitorView(.{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) }, w, h);
+                return view_mod.monitorView(m.pixelRect(), w, h);
         }
-        return View.fit(self.cap.image.width, self.cap.image.height, .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) }, 8);
+        return View.fit(self.cap.image.width, self.cap.image.height, .ofSize(w, h), 8);
     }
 
     fn prepare(self: *Picker, i: usize, w: u32, h: u32) !void {

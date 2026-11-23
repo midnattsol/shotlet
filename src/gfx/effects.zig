@@ -3,15 +3,14 @@
 //! rectangle to the buffer, so callers may pass rectangles partly (or
 //! entirely) outside, with any coordinates.
 //!
-//! Facade over effects/{rect, blur, composite}.zig.
+//! Facade over effects/{blur, composite}.zig; rectangles are geom.Rect
+//! (src/geom.zig), clipped with Rect.clip.
 
 const std = @import("std");
-const rect = @import("effects/rect.zig");
 const blur_ = @import("effects/blur.zig");
 const composite = @import("effects/composite.zig");
+const Rect = @import("../geom.zig").Rect;
 
-pub const Rect = rect.Rect;
-pub const clip = rect.clip;
 pub const blur = blur_.blur;
 pub const softBlur = blur_.softBlur;
 pub const redact = composite.redact;
@@ -57,7 +56,7 @@ test "blur hides detail and noise stays faint" {
     var plain = px;
     const area: Rect = .{ .x = 0, .y = 0, .w = W, .h = H };
     try blur(alloc, &px, W, H, area, 12);
-    try boxBlur(alloc, &plain, W, H, clip(area, W, H).?, 12);
+    try boxBlur(alloc, &plain, W, H, area.clip(W, H).?, 12);
     var lo: u32 = 255;
     var hi: u32 = 0;
     for (px, plain, 0..) |p, q, i| {

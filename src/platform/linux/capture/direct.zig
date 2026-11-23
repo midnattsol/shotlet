@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const capture = @import("../../../app/capture.zig");
+const geom = @import("../../../geom.zig");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
@@ -316,7 +317,7 @@ pub fn probe(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []const u
 }
 
 /// Where an output's picture goes in the stitched capture (at least 1x1).
-fn logicalOf(o: *const Output) capture.Monitor.Logical {
+fn logicalOf(o: *const Output) geom.Rect {
     const r = o.logicalRect();
-    return .{ .x = r.x, .y = r.y, .w = @intCast(@max(1, r.w)), .h = @intCast(@max(1, r.h)) };
+    return .{ .x = r.x, .y = r.y, .w = @max(1, r.w), .h = @max(1, r.h) };
 }

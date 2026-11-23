@@ -2,13 +2,13 @@
 //! hit testing, resizing) and the colour palette.
 
 const std = @import("std");
-const geometry = @import("geometry.zig");
+const geom = @import("../../geom.zig");
 const textbox = @import("../textbox.zig");
 const ruler = @import("../tools/ruler.zig");
 const spotlight = @import("../tools/spotlight.zig");
 
-const Rect = geometry.Rect;
-const Point = geometry.Point;
+const Rect = geom.Rect;
+const Point = geom.Point;
 
 pub const Tool = enum {
     select,

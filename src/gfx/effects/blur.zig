@@ -3,9 +3,8 @@
 
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
-const rect = @import("rect.zig");
-const Rect = rect.Rect;
-const clip = rect.clip;
+const Rect = @import("../../geom.zig").Rect;
+const clip = Rect.clip;
 
 // Box passes work on 16 byte lanes at once: four pixels of a row in the
 // vertical pass, the same pixel of four rows in the horizontal one.

@@ -25,7 +25,7 @@ pub fn viewFor(ed: *Editor, idx: u8) View {
     const surfs = ed.win.surfaceList();
     if (ed.monitors.len > 1 and surfs.len > 1 and idx < surfs.len) {
         const sf = surfs[idx];
-        if (monitorOf(ed, idx)) |m| return view_mod.monitorView(.{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) }, sf.width, sf.height);
+        if (monitorOf(ed, idx)) |m| return view_mod.monitorView(m.pixelRect(), sf.width, sf.height);
     }
     // a tall image (a scrolling capture) fits the width and scrolls
     if (tall_view.isTall(ed.img.width, ed.img.height, ed.screenRect()))
@@ -158,7 +158,7 @@ fn refreshAll(ed: *Editor, r: Rect) void {
 pub fn dirtyAll(ed: *Editor, comptime whole: bool) void {
     for (ed.panes[0..ed.n_panes]) |*p| {
         if (!p.alive) continue;
-        if (whole) p.content_dirty.add(.{ .x = 0, .y = 0, .w = @intCast(p.width), .h = @intCast(p.height) });
+        if (whole) p.content_dirty.add(.ofSize(p.width, p.height));
         p.bcache_valid = false;
         p.gen +%= 1;
     }

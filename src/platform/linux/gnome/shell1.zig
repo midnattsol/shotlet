@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
-const geom = @import("../../../app/modes/geom.zig");
+const geom = @import("../../../geom.zig");
 const mode = @import("../../../app/modes/mode.zig");
 const region = @import("../../../record/region.zig");
 
@@ -203,7 +203,7 @@ fn readStringInto(reply: *const dbus.Message, out: []u8) ![]u8 {
 // record shortcut.
 
 pub const RecordOptions = struct {
-    area: region.Rect,
+    area: geom.Rect,
     cursor: bool = true,
     clicks: bool = false,
     keys: bool = false,

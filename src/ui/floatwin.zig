@@ -67,7 +67,7 @@ pub fn canDraw(win: *const window.Window) bool {
 /// Convert the back buffer `px` (drawn in straight alpha) to the
 /// premultiplied alpha the surface wants, and present it.
 pub fn presentStraight(win: *window.Window, px: []u32) !void {
-    floatui.premultiply(px, win.width, win.height, .{ .x = 0, .y = 0, .w = @intCast(win.width), .h = @intCast(win.height) });
+    floatui.premultiply(px, win.width, win.height, .ofSize(win.width, win.height));
     try win.present();
 }
 

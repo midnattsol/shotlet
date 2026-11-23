@@ -5,10 +5,11 @@
 //! (image -> canvas), so the same code renders the native-resolution
 //! export layer and the scaled on-screen preview.
 //!
-//! Facade over shapes/: geometry (Point, Rect, Xform), model (Tool,
-//! Shape, palette), draw and draw_text (the painter), raster (rings,
-//! ellipses, pixelation) and handles (selection handles).
+//! Facade over shapes/: geometry (Xform), model (Tool, Shape, palette),
+//! draw and draw_text (the painter), raster (rings, ellipses, pixelation)
+//! and handles (selection handles); Point and Rect are src/geom.zig's.
 
+const geom = @import("../geom.zig");
 const geometry = @import("shapes/geometry.zig");
 const model = @import("shapes/model.zig");
 const draw = @import("shapes/draw.zig");
@@ -16,8 +17,8 @@ const draw_text = @import("shapes/draw_text.zig");
 const raster = @import("shapes/raster.zig");
 const handles = @import("shapes/handles.zig");
 
-pub const Point = geometry.Point;
-pub const Rect = geometry.Rect;
+pub const Point = geom.Point;
+pub const Rect = geom.Rect;
 pub const Xform = geometry.Xform;
 
 pub const Tool = model.Tool;

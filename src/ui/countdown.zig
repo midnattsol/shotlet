@@ -34,7 +34,7 @@ fn draw(win: *window.Window, th: theme.Theme, left: u32) !void {
     var cv = render.Canvas.init(card, bw, bh);
     var buf: [4]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, "{d}", .{left}) catch "";
-    fui.textCentered(&cv, .{ .x = 0, .y = 0, .w = @intCast(bw), .h = @intCast(bh) }, 60 * k, o.fg, text.Style.semibold.num(), s);
+    fui.textCentered(&cv, .ofSize(bw, bh), 60 * k, o.fg, text.Style.semibold.num(), s);
     const px = try win.backBuffer();
     @memset(px, 0);
     fui.place(win.alloc, .{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, radius * k, null, k);

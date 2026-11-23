@@ -18,12 +18,12 @@ const sys = @import("../sys.zig");
 const gnome = @import("../gnome.zig");
 const shell1 = @import("../gnome/shell1.zig");
 const kde = @import("../kde.zig");
-const geom = @import("../../../app/modes/geom.zig");
+const geom = @import("../../../geom.zig");
 const env_mod = @import("../../../app/env.zig");
 const kwin = @import("../kde/winrects.zig");
 
 /// In image pixels, as the editor takes them.
-pub const Rect = @import("../../../ui/shapes.zig").Rect;
+const Rect = geom.Rect;
 
 /// The most windows kept (the topmost ones).
 pub const max_windows = 64;
@@ -52,32 +52,13 @@ pub fn toImage(gpa: std.mem.Allocator, mons: []const capture.Monitor, flat: []co
     errdefer list.deinit(gpa);
     var i: usize = 0;
     while (i + 4 <= flat.len) : (i += 4) {
-        const l: geom.Rect = .{ .x = flat[i], .y = flat[i + 1], .w = flat[i + 2], .h = flat[i + 3] };
+        const l: Rect = .{ .x = flat[i], .y = flat[i + 1], .w = flat[i + 2], .h = flat[i + 3] };
         if (l.w <= 0 or l.h <= 0) continue;
-        const r = spanImage(mons, l) orelse continue;
+        const r = geom.spanToImage(mons, l) orelse continue;
         if (r.w < 8 or r.h < 8) continue;
-        try list.append(gpa, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
+        try list.append(gpa, r);
     }
     return list.toOwnedSlice(gpa);
-}
-
-/// The union of `l`'s part on each monitor, in image pixels.
-fn spanImage(mons: []const capture.Monitor, l: geom.Rect) ?geom.Rect {
-    var acc: ?geom.Rect = null;
-    for (mons) |m| {
-        const ml = m.logical orelse continue;
-        const lm: geom.Rect = .{ .x = ml.x, .y = ml.y, .w = @intCast(ml.w), .h = @intCast(ml.h) };
-        const part = geom.Rect.intersect(l, lm) orelse continue;
-        const px = geom.logicalToImage(&.{m}, part) orelse continue;
-        acc = if (acc) |a| unite(a, px) else px;
-    }
-    return acc;
-}
-
-fn unite(a: geom.Rect, b: geom.Rect) geom.Rect {
-    const x0 = @min(a.x, b.x);
-    const y0 = @min(a.y, b.y);
-    return .{ .x = x0, .y = y0, .w = @max(a.x + a.w, b.x + b.w) - x0, .h = @max(a.y + a.h, b.y + b.h) - y0 };
 }
 
 const testing = std.testing;

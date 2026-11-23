@@ -2,10 +2,10 @@
 //! nudging, and the point of one the magnifier looks at.
 
 const std = @import("std");
-const geometry = @import("geometry.zig");
+const geom = @import("../../geom.zig");
 
-const Rect = geometry.Rect;
-const Point = geometry.Point;
+const Rect = geom.Rect;
+const Point = geom.Point;
 
 pub fn handlePoints(s: Rect) [8]Point {
     const mx = s.x + @divTrunc(s.w, 2);
@@ -69,7 +69,7 @@ pub fn resizeWithHandle(orig: Rect, handle: u3, m: Point) Rect {
         },
         7 => x0 = m.x,
     }
-    return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+    return .fromEdges(x0, y0, x1, y1);
 }
 
 /// The edges handle `h` moves, per axis: -1 the left (top), 1 the right

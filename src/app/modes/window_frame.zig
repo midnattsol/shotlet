@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const effects = @import("../../gfx/effects.zig");
+const geom = @import("../../geom.zig");
 const png = @import("../../gfx/png.zig");
 const doc_mod = @import("../../ui/doc.zig");
 
@@ -19,7 +20,7 @@ pub fn withShadow(gpa: std.mem.Allocator, win: png.Image, pad: u32) !png.Image {
     const h = win.height + 2 * pad;
     const px = try gpa.alloc(u32, @as(usize, w) * h);
     @memset(px, 0);
-    const r: effects.Rect = .{ .x = @intCast(pad), .y = @intCast(pad), .w = @intCast(win.width), .h = @intCast(win.height) };
+    const r: geom.Rect = .{ .x = @intCast(pad), .y = @intCast(pad), .w = @intCast(win.width), .h = @intCast(win.height) };
     effects.dropShadow(px, w, h, r, pad * 3 / 4, @intCast(pad / 4), 0x66000000);
     blitOver(px, w, win, pad, pad);
     return .{ .width = w, .height = h, .pixels = px };
@@ -39,9 +40,9 @@ pub fn beautified(gpa: std.mem.Allocator, win: png.Image, b: doc_mod.Beautify) !
     const g = b.geometry(win.width, win.height);
     const px = try gpa.alloc(u32, @as(usize, g.out_w) * g.out_h);
     const bg = b.background();
-    const full: effects.Rect = .{ .x = 0, .y = 0, .w = @intCast(g.out_w), .h = @intCast(g.out_h) };
+    const full: geom.Rect = .ofSize(g.out_w, g.out_h);
     effects.gradient(px, g.out_w, g.out_h, full, bg.from, bg.to);
-    const inner: effects.Rect = .{ .x = @intCast(g.pad), .y = @intCast(g.pad), .w = @intCast(win.width), .h = @intCast(win.height) };
+    const inner: geom.Rect = .{ .x = @intCast(g.pad), .y = @intCast(g.pad), .w = @intCast(win.width), .h = @intCast(win.height) };
     if (g.shadow_blur > 0) effects.dropShadow(px, g.out_w, g.out_h, inner, g.shadow_blur, g.shadow_dy, 0x70000000);
     blitOver(px, g.out_w, win, g.pad, g.pad);
     return .{ .width = g.out_w, .height = g.out_h, .pixels = px };

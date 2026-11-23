@@ -21,7 +21,7 @@ const relaunch = @import("../relaunch.zig");
 const deliver_mod = @import("../deliver.zig");
 const doc_mod = @import("../../ui/doc.zig");
 const window = @import("../../platform/api.zig").window;
-const geom = @import("geom.zig");
+const geom = @import("../../geom.zig");
 const last_area = @import("last_area.zig");
 const mode = @import("mode.zig");
 const settings = @import("settings.zig");
@@ -65,7 +65,7 @@ pub fn afterCapture(c: Ctx, cap: *capture.Capture, req: mode.Request) !Outcome {
     return switch (req.mode) {
         .area => .{ .edit = .{ .modes = true } },
         .previous => .{ .edit = .{ .sel = previous(c, cap) } },
-        .fullscreen => instant(c, cap, geom.pixelRect(cap.monitors[geom.monitorAt(cap.monitors, req.pointer)]), false),
+        .fullscreen => instant(c, cap, cap.monitors[geom.monitorAt(cap.monitors, req.pointer)].pixelRect(), false),
         .screens => instant(c, cap, fullRect(cap), false),
         .window => try windowShot(c, cap),
         .scroll => try scrolling(c, cap),
@@ -73,7 +73,7 @@ pub fn afterCapture(c: Ctx, cap: *capture.Capture, req: mode.Request) !Outcome {
 }
 
 fn fullRect(cap: *const capture.Capture) geom.Rect {
-    return .{ .x = 0, .y = 0, .w = @intCast(cap.image.width), .h = @intCast(cap.image.height) };
+    return .ofSize(cap.image.width, cap.image.height);
 }
 
 fn previous(c: Ctx, cap: *const capture.Capture) ?geom.Rect {

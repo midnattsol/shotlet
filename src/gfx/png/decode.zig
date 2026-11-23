@@ -8,6 +8,7 @@ const std = @import("std");
 const flate = std.compress.flate;
 const chunks = @import("chunks.zig");
 const unfilter = @import("filters.zig").unfilter;
+const Rect = @import("../../geom.zig").Rect;
 
 pub const Image = struct {
     width: u32,
@@ -18,6 +19,20 @@ pub const Image = struct {
     pub fn deinit(self: *Image, alloc: std.mem.Allocator) void {
         alloc.free(self.pixels);
         self.* = undefined;
+    }
+
+    /// A copy of the pixels inside `r`, clipped to the image;
+    /// error.OutsideImage when nothing of it is left.
+    pub fn crop(self: *const Image, alloc: std.mem.Allocator, r: Rect) !Image {
+        const c = r.clip(self.width, self.height) orelse return error.OutsideImage;
+        const w: u32 = @intCast(c.w);
+        const h: u32 = @intCast(c.h);
+        const px = try alloc.alloc(u32, @as(usize, w) * h);
+        for (0..h) |y| {
+            const src = (@as(usize, @intCast(c.y)) + y) * self.width + @as(usize, @intCast(c.x));
+            @memcpy(px[y * w ..][0..w], self.pixels[src..][0..w]);
+        }
+        return .{ .width = w, .height = h, .pixels = px };
     }
 };
 
@@ -416,4 +431,16 @@ test "adam7 interlaced decode matches the same image non-interlaced" {
     const seed2 = try buildTestPng(alloc, 21, 9, 3, 2, true, plte[0..12], testSample(2));
     defer alloc.free(seed2);
     try fuzzDecode(alloc, seed2, 1500, 6);
+}
+
+test "crop clips to the image and refuses what lies outside" {
+    var px: [4 * 3]u32 = undefined;
+    for (&px, 0..) |*p, i| p.* = @intCast(i);
+    const img: Image = .{ .width = 4, .height = 3, .pixels = &px };
+    var out = try img.crop(std.testing.allocator, .{ .x = 2, .y = -1, .w = 5, .h = 3 });
+    defer out.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(u32, 2), out.width);
+    try std.testing.expectEqual(@as(u32, 2), out.height);
+    try std.testing.expectEqualSlices(u32, &.{ 2, 3, 6, 7 }, out.pixels);
+    try std.testing.expectError(error.OutsideImage, img.crop(std.testing.allocator, .{ .x = 4, .y = 0, .w = 2, .h = 2 }));
 }

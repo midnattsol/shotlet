@@ -1,12 +1,12 @@
 //! The screen recording seam's platform-neutral types: what to record,
 //! and the pictures and sound a source delivers (on its own threads).
 
-const region = @import("../../record/region.zig");
+const geom = @import("../../geom.zig");
 
 /// What to record: an area of the desktop (logical), and whether the
 /// source should show clicks and key presses where it can.
 pub const Want = struct {
-    area: region.Rect,
+    area: geom.Rect,
     clicks: bool = false,
     keys: bool = false,
 };

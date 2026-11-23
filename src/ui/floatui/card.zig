@@ -62,7 +62,7 @@ fn shadowCache(key: ShadowKey) *material.ShadowCache {
 /// then over `dst`: cards fading in and out, or dimmed while dragged.
 pub fn compositeFaded(gpa: std.mem.Allocator, dst: Surface, card: Image, at: [2]i32, radius: f64, sh: ?theme.Shadow, alpha: f64, k: f64) !void {
     if (alpha <= 0.001) return;
-    const box: Rect = .{ .x = 0, .y = 0, .w = @intCast(card.w), .h = @intCast(card.h) };
+    const box: Rect = .ofSize(card.w, card.h);
     const fr = if (sh) |s| material.shadowFootprint(box, s, k) else box;
     const lw: u32 = @intCast(fr.w);
     const lh: u32 = @intCast(fr.h);
@@ -182,7 +182,7 @@ pub fn dragIcon(gpa: std.mem.Allocator, src: Image, w: u32, h: u32, k: i32) ![]u
     drawImage(gpa, .{ .px = pic, .w = w, .h = h }, src, .auto, letterbox);
     effects.blitRounded(out, w, h, pic, w, h, 0, 0, @floatFromInt(10 * @max(1, k)));
     pixels.fadeAlpha(out, 0.92);
-    pixels.premultiply(out, w, h, .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) });
+    pixels.premultiply(out, w, h, .ofSize(w, h));
     return out;
 }
 

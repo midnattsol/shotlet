@@ -18,6 +18,7 @@ const timeline = @import("timeline.zig");
 const frames_mod = @import("frames.zig");
 const audio = @import("audio.zig");
 const region = @import("region.zig");
+const geom = @import("../geom.zig");
 const strip_mod = @import("strip.zig");
 const sync = @import("../sync.zig");
 
@@ -32,8 +33,8 @@ pub const Options = struct {
     vaapi: ?[:0]const u8 = null,
     /// the logical area to keep, inside the stream's logical rect; null
     /// keeps the whole stream
-    crop: ?region.Rect = null,
-    stream_rect: region.Rect = .{ .x = 0, .y = 0, .w = 1, .h = 1 },
+    crop: ?geom.Rect = null,
+    stream_rect: geom.Rect = .{ .x = 0, .y = 0, .w = 1, .h = 1 },
 };
 
 pub const Done = struct {

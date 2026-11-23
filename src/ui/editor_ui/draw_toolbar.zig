@@ -145,7 +145,7 @@ fn drawBackgroundSwatch(self: *const Editor, canvas: *Canvas, r: Rect) void {
         for (0..s) |yy| for (0..s) |xx| {
             px[yy * s + xx] = if ((xx / cell + yy / cell) % 2 == 0) 0xFFFFFFFF else 0xFFB8BEC6;
         };
-    } else effects.gradient(&px, s, s, .{ .x = 0, .y = 0, .w = @intCast(s), .h = @intCast(s) }, bg.from, bg.to);
+    } else effects.gradient(&px, s, s, .ofSize(s, s), bg.from, bg.to);
     effects.blitRounded(canvas.px, @intCast(canvas.w), @intCast(canvas.h), &px, s, s, r.x, r.y, 5 * self.uf());
     shapes_mod.roundRectRing(canvas, .{ .x = r.x, .y = r.y, .w = @intCast(s), .h = @intCast(s) }, 5 * self.uf(), 1, 0x40808080);
 }

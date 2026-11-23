@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const capture = @import("../../../app/capture.zig");
+const geom = @import("../../../geom.zig");
 const png = @import("../../../gfx/png.zig");
 const sys = @import("../sys.zig");
 
@@ -27,6 +28,11 @@ pub const LogicalMonitor = struct {
     w: u32,
     h: u32,
     scale: f64,
+
+    /// Where it is (sizes are at most 65535: parseLayout checks).
+    fn rect(m: LogicalMonitor) geom.Rect {
+        return .{ .x = m.x, .y = m.y, .w = @intCast(m.w), .h = @intCast(m.h) };
+    }
 };
 
 /// `--from-shell` and its companions.
@@ -125,7 +131,7 @@ pub fn build(gpa: std.mem.Allocator, monitors: []const LogicalMonitor, pieces: [
     try assignPieces(monitors, pieces, owner[0..pieces.len]);
     var parts: [max_pieces]capture.Part = undefined;
     for (pieces, images, 0..) |p, im, i| {
-        parts[i] = .{ .pixels = im.pixels, .width = im.width, .height = im.height, .logical = .{ .x = p.x, .y = p.y, .w = p.w, .h = p.h } };
+        parts[i] = .{ .pixels = im.pixels, .width = im.width, .height = im.height, .logical = p.rect() };
     }
     var cap = try capture.stitch(gpa, parts[0..pieces.len]);
     errdefer cap.deinit(gpa);
@@ -142,7 +148,7 @@ pub fn build(gpa: std.mem.Allocator, monitors: []const LogicalMonitor, pieces: [
             x1 = @max(x1, pm.x + pm.w);
             y1 = @max(y1, pm.y + pm.h);
         }
-        out.* = .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0, .logical = .{ .x = m.x, .y = m.y, .w = m.w, .h = m.h } };
+        out.* = .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0, .logical = m.rect() };
     }
     gpa.free(cap.monitors);
     cap.monitors = mons;

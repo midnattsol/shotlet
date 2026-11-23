@@ -13,7 +13,7 @@ const text = @import("../gfx/text.zig");
 const bidi = @import("../gfx/bidi.zig");
 const utf8 = @import("../gfx/utf8.zig");
 
-pub const Point = struct { x: i32, y: i32 };
+const Point = @import("../geom.zig").Point;
 
 pub const Line = struct {
     /// bytes [start, end) of the line; `end` includes the spaces a soft

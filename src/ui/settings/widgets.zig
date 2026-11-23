@@ -10,6 +10,7 @@ const text = @import("../../gfx/text.zig");
 const theme_mod = @import("../theme.zig");
 const icons = @import("../icons.zig");
 const shapes = @import("../shapes.zig");
+const Rect = @import("../../geom.zig").Rect;
 const scale = @import("../scale.zig");
 const menukit = @import("../menukit.zig");
 const barkit = @import("../barkit.zig");
@@ -63,8 +64,6 @@ pub const Card = struct {
     h: i32 = 0,
 };
 
-pub const Row = struct { x: i32, y: i32, w: i32, h: i32 };
-
 pub fn groupTitle(ui: *Ui, x: i32, y: i32, w: i32, title: []const u8, link: ?[]const u8) !i32 {
     const h = ui.sc(20);
     ui.label(x + ui.sc(2), y, h, 14, ui.th.text, .semibold, title);
@@ -87,9 +86,9 @@ pub fn beginCard(ui: *Ui, x: i32, y: i32, w: i32, h: i32) Card {
 }
 
 /// The next row of `card`, `h` tall, under a separator.
-pub fn rowBegin(ui: *Ui, card: *Card, h: i32) Row {
+pub fn rowBegin(ui: *Ui, card: *Card, h: i32) Rect {
     if (card.n > 0) ui.c.fillRect(card.x, card.y + card.h, card.w, 1, ui.th.line);
-    const r = Row{ .x = card.x, .y = card.y + card.h, .w = card.w, .h = h };
+    const r = Rect{ .x = card.x, .y = card.y + card.h, .w = card.w, .h = h };
     card.n += 1;
     card.h += h;
     return r;
@@ -99,7 +98,7 @@ pub fn endCard(card: *const Card) i32 {
     return card.y + card.h;
 }
 
-pub fn rowTitle(ui: *Ui, r: Row, title: []const u8, subtitle: ?[]const u8) void {
+pub fn rowTitle(ui: *Ui, r: Rect, title: []const u8, subtitle: ?[]const u8) void {
     const x = r.x + ui.sc(16);
     if (subtitle) |s| {
         const t1 = text.height(ui.fs(15));
@@ -130,7 +129,7 @@ pub fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8,
 
 /// A chip button on the right of row `r`: barkit's `list` look, its
 /// content 12 px in (long labels keep their tail).
-pub fn chipButton(ui: *Ui, r: Row, hit: Hit, icon: ?icons.Icon, label_s: []const u8, bold: bool) !void {
+pub fn chipButton(ui: *Ui, r: Rect, hit: Hit, icon: ?icons.Icon, label_s: []const u8, bold: bool) !void {
     var face: barkit.Face = .{ .mark = if (icon) |ic| .{ .glyph = .{ .icon = ic } } else null, .strong = bold, .inset = 12 };
     const lf = barkit.labelFont(ui.f, .list, face);
     var buf: [300]u8 = undefined;
@@ -142,7 +141,7 @@ pub fn chipButton(ui: *Ui, r: Row, hit: Hit, icon: ?icons.Icon, label_s: []const
 }
 
 /// A chip button whose right edge is `right_gap` in from the row's.
-pub fn chipButtonAt(ui: *Ui, r: Row, hit: Hit, label_s: []const u8, right_gap: i32) !void {
+pub fn chipButtonAt(ui: *Ui, r: Rect, hit: Hit, label_s: []const u8, right_gap: i32) !void {
     const face: barkit.Face = .{ .label = label_s, .inset = 14 };
     const bw = barkit.faceWidth(ui.f, .list, face) + ui.sc(28);
     const bh = ui.sc(34);
@@ -150,13 +149,13 @@ pub fn chipButtonAt(ui: *Ui, r: Row, hit: Hit, label_s: []const u8, right_gap: i
 }
 
 /// A `list` button in `b`, hovered under the pointer, and its region.
-fn listButton(ui: *Ui, b: shapes.Rect, hit: Hit, face: barkit.Face) !void {
+fn listButton(ui: *Ui, b: Rect, hit: Hit, face: barkit.Face) !void {
     const hov: f64 = if (ui.hovered(b.x, b.y, b.w, b.h)) 1 else 0;
     barkit.button(&ui.c, b, ui.f, ui.th, .list, hov, face);
     try ui.add(.{ .x = b.x, .y = b.y, .w = b.w, .h = b.h, .hit = hit, .radius = barkit.window_radius });
 }
 
-pub fn swatchRow(ui: *Ui, r: Row, selected: u3) !void {
+pub fn swatchRow(ui: *Ui, r: Rect, selected: u3) !void {
     const th = ui.th;
     const d = ui.sc(24);
     const gap = ui.sc(8);
@@ -178,7 +177,7 @@ fn stepButtons(ui: *Ui, x: i32, by: i32, bs: i32, val_w: i32, minus: Hit, plus: 
     try listButton(ui, .{ .x = x + bs + val_w, .y = by, .w = bs, .h = bs }, plus, .{ .mark = .{ .glyph = .{ .icon = .plus } } });
 }
 
-pub fn sizeStepper(ui: *Ui, r: Row, value: i32, color: u32) !void {
+pub fn sizeStepper(ui: *Ui, r: Rect, value: i32, color: u32) !void {
     const bs = ui.sc(34);
     const val_w = ui.sc(64);
     var x = r.x + r.w - ui.sc(16) - 2 * bs - val_w;
@@ -196,7 +195,7 @@ pub fn sizeStepper(ui: *Ui, r: Row, value: i32, color: u32) !void {
 }
 
 /// - value + on the right of row `r`.
-pub fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !void {
+pub fn valueStepper(ui: *Ui, r: Rect, value: []const u8, minus: Hit, plus: Hit) !void {
     const bs = ui.sc(34);
     const val_w = @max(ui.sc(64), ui.width(15, text.Style.regular.num(), value) + ui.sc(20));
     const x = r.x + r.w - ui.sc(16) - 2 * bs - val_w;
@@ -208,7 +207,7 @@ pub fn valueStepper(ui: *Ui, r: Row, value: []const u8, minus: Hit, plus: Hit) !
 
 /// Key caps right-aligned in row `r` (on the accent while a binding is
 /// being set); returns their left edge.
-pub fn keyCaps(ui: *Ui, r: Row, caps: []const []const u8, look: menukit.CapLook) i32 {
+pub fn keyCaps(ui: *Ui, r: Rect, caps: []const []const u8, look: menukit.CapLook) i32 {
     const ch = ui.sc(26);
     const gap = ui.sc(4);
     const fs = ui.fs(13);

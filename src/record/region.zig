@@ -1,55 +1,10 @@
-//! The recorded area: a rectangle in the compositor's logical layout,
-//! mapped onto a stream's pixels, and the encoded size (even for H.264,
-//! scaled down to the maximum width for GIFs).
+//! The recorded area (a geom.Rect in the compositor's logical layout;
+//! geom.toFramePixels maps it onto a stream's pixels): the monitor that
+//! holds it, and the encoded size (even for H.264, scaled down to the
+//! maximum width for GIFs).
 
 const std = @import("std");
-
-/// Logical (compositor) coordinates, or pixels where said.
-pub const Rect = struct {
-    x: i32,
-    y: i32,
-    w: i32,
-    h: i32,
-
-    pub fn right(self: Rect) i32 {
-        return self.x + self.w;
-    }
-
-    pub fn bottom(self: Rect) i32 {
-        return self.y + self.h;
-    }
-
-    pub fn intersect(a: Rect, b: Rect) ?Rect {
-        const x0 = @max(a.x, b.x);
-        const y0 = @max(a.y, b.y);
-        const x1 = @min(a.right(), b.right());
-        const y1 = @min(a.bottom(), b.bottom());
-        if (x1 <= x0 or y1 <= y0) return null;
-        return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
-    }
-
-    pub fn area(self: Rect) i64 {
-        return @as(i64, self.w) * self.h;
-    }
-};
-
-/// The pixels of a `fw` x `fh` frame showing logical `mon` that hold
-/// `region` (clipped to the monitor), or null when they do not meet.
-pub fn toPixels(region: Rect, mon: Rect, fw: u32, fh: u32) ?Rect {
-    const r = region.intersect(mon) orelse return null;
-    const sx = @as(f64, @floatFromInt(fw)) / @as(f64, @floatFromInt(mon.w));
-    const sy = @as(f64, @floatFromInt(fh)) / @as(f64, @floatFromInt(mon.h));
-    const x0: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.x - mon.x)) * sx));
-    const y0: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.y - mon.y)) * sy));
-    const x1: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.right() - mon.x)) * sx));
-    const y1: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.bottom() - mon.y)) * sy));
-    const cx0 = std.math.clamp(x0, 0, @as(i32, @intCast(fw)));
-    const cy0 = std.math.clamp(y0, 0, @as(i32, @intCast(fh)));
-    const cx1 = std.math.clamp(x1, 0, @as(i32, @intCast(fw)));
-    const cy1 = std.math.clamp(y1, 0, @as(i32, @intCast(fh)));
-    if (cx1 <= cx0 or cy1 <= cy0) return null;
-    return .{ .x = cx0, .y = cy0, .w = cx1 - cx0, .h = cy1 - cy0 };
-}
+const Rect = @import("../geom.zig").Rect;
 
 /// H.264 4:2:0 wants even sizes: drop the odd last row or column.
 pub fn evenSize(w: u32, h: u32) [2]u32 {
@@ -75,20 +30,6 @@ pub fn bestMonitor(region: Rect, mons: []const Rect) ?usize {
         }
     }
     return best;
-}
-
-test "a region maps onto a scaled monitor's pixels" {
-    const mon: Rect = .{ .x = 1600, .y = 0, .w = 1280, .h = 720 };
-    // scale 2: twice the pixels
-    const px = toPixels(.{ .x = 1700, .y = 50, .w = 200, .h = 100 }, mon, 2560, 1440).?;
-    try std.testing.expectEqual(Rect{ .x = 200, .y = 100, .w = 400, .h = 200 }, px);
-    // clipped at the monitor's edge
-    const c = toPixels(.{ .x = 1500, .y = 600, .w = 200, .h = 400 }, mon, 1280, 720).?;
-    try std.testing.expectEqual(Rect{ .x = 0, .y = 600, .w = 100, .h = 120 }, c);
-    try std.testing.expect(toPixels(.{ .x = 0, .y = 0, .w = 10, .h = 10 }, mon, 1280, 720) == null);
-    // fractional 1.5
-    const f = toPixels(.{ .x = 1601, .y = 1, .w = 3, .h = 3 }, mon, 1920, 1080).?;
-    try std.testing.expectEqual(Rect{ .x = 2, .y = 2, .w = 4, .h = 4 }, f);
 }
 
 test "sizes for the encoders" {

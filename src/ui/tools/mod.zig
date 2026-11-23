@@ -187,7 +187,7 @@ pub fn initShape(ed: *const Editor, s: *Shape) void {
 fn logicalScale(ed: *const Editor, p: Point) u32 {
     for (ed.monitors) |m| {
         const l = m.logical orelse continue;
-        const r = Rect{ .x = @intCast(m.x), .y = @intCast(m.y), .w = @intCast(m.w), .h = @intCast(m.h) };
+        const r = m.pixelRect();
         if (!r.contains(p.x, p.y) or l.w == 0) continue;
         const k = @as(f64, @floatFromInt(m.w)) / @as(f64, @floatFromInt(l.w));
         return if (@abs(k - 1) < 0.01) 0 else @intFromFloat(@round(k * 1000));

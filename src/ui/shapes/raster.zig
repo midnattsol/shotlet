@@ -5,7 +5,7 @@ const std = @import("std");
 const render = @import("../../gfx/render.zig");
 const sdf = @import("../../gfx/render/sdf.zig");
 const color_mod = @import("../../gfx/color.zig");
-const Rect = @import("geometry.zig").Rect;
+const Rect = @import("../../geom.zig").Rect;
 
 const Canvas = render.Canvas;
 

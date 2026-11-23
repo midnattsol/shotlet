@@ -8,7 +8,7 @@
 const std = @import("std");
 const wl = @import("../wayland.zig");
 const sys = @import("../sys.zig");
-const geom = @import("../../../app/modes/geom.zig");
+const geom = @import("../../../geom.zig");
 
 const vp_mgr = wl.zwlr_virtual_pointer_manager_v1;
 const vp = wl.zwlr_virtual_pointer_v1;
