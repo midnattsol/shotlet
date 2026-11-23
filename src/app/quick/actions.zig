@@ -31,21 +31,35 @@ pub fn act(self: *Quick, i: usize, a: Action) void {
 
 /// A short word over card i ("Copied"); the card stays a while for it.
 pub fn notice(self: *Quick, i: usize, s: []const u8) void {
-    self.cards.items[i].notice.show(s, sys.monoMs(), notice_mod.word_ms);
-    noticed(self, i);
-}
-
-/// "Saved · Show in Files" over card i, a link to its file.
-fn noticeSaved(self: *Quick, i: usize) void {
     const c = &self.cards.items[i];
-    c.notice.showSaved(c.meta.saved, sys.monoMs());
-    noticed(self, i);
-}
-
-fn noticed(self: *Quick, i: usize) void {
-    const c = &self.cards.items[i];
+    c.notice.show(s, sys.monoMs(), notice_mod.word_ms);
     c.deadline_ms = @max(c.deadline_ms, c.notice.until + 1500);
     self.dirty = true;
+}
+
+/// Card i was saved: "✓ Saved", then the card goes (as CleanShot X's
+/// overlay does); Alt held keeps it, as CleanShot's Option does.
+fn saved(self: *Quick, i: usize) void {
+    const c = &self.cards.items[i];
+    const now = sys.monoMs();
+    self.dirty = true;
+    if (self.win.alt) {
+        log.info("saved, kept open (Alt)", .{});
+        c.notice.showSaved(now, notice_mod.word_ms);
+        c.deadline_ms = @max(c.deadline_ms, c.notice.until + 1500);
+        return;
+    }
+    c.notice.showSaved(now, notice_mod.end_ms);
+    c.ending = true;
+    c.deadline_ms = now + notice_mod.end_ms;
+}
+
+/// What Show in Files shows: the saved file, else the capture as kept
+/// in the history (a file on disk too, as macOS's thumbnail always has
+/// one to show).
+fn shownFile(c: *const stack.Card, buf: *env_mod.PathBuf) ![]const u8 {
+    if (c.meta.saved.len > 0 and (sys.fileSize(c.meta.saved) catch null) != null) return c.meta.saved;
+    return history.entryPath(buf, c.kept.root(), c.kept.id.slice(), history.File.image.name());
 }
 
 /// Card i's capture, for deliver.zig.
@@ -69,7 +83,7 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
             try entry(self, i).copy(ctx(self));
             notice(self, i, "Copied");
         },
-        .save, .save_as => if (try entry(self, i).save(ctx(self), if (a == .save_as) .ask else .folder)) noticeSaved(self, i),
+        .save, .save_as => if (try entry(self, i).save(ctx(self), if (a == .save_as) .ask else .folder)) saved(self, i),
         .annotate => {
             if (!c.editable) return;
             entry(self, i).edit(self.env);
@@ -80,10 +94,11 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
             self.remove(i);
         },
         // the file manager takes over: the card goes, as after Annotate
-        // (a problem card says why when none answered; the card stays)
+        // (it stays, and a problem card says why, when none answered)
         .show_in_files => {
-            if (c.meta.saved.len == 0) return;
-            if (deliver.showInFiles(self.gpa, self.env, self.bus_(), c.meta.saved, "quick access")) c.life.leave(sys.monoMs());
+            var buf: env_mod.PathBuf = undefined;
+            const path = try shownFile(c, &buf);
+            if (deliver.showInFiles(self.gpa, self.env, self.bus_(), path, "quick access")) c.life.leave(sys.monoMs());
         },
         .close => {
             log.info("closed {s}", .{c.kept.id.slice()});
@@ -92,16 +107,15 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
     }
 }
 
-/// What control `c` of card i does.
-fn controlAction(self: *const Quick, i: usize, c: Control) ?Action {
-    const pills = layout.pillActions(self.cards.items[i].meta.saved.len > 0);
+/// What control `c` of a card does.
+fn controlAction(c: Control) ?Action {
+    const pills = layout.pill_actions;
     return switch (c) {
         .close => .close,
         .annotate => .annotate,
         .pin => .pin,
         .primary => pills[0],
         .secondary => pills[1],
-        .notice => .show_in_files,
         else => null,
     };
 }
@@ -110,7 +124,7 @@ pub fn activate(self: *Quick, h: Hit) void {
     switch (h.control) {
         .menu => act(self, h.card, layout.menu_items[h.item].action),
         .hint => enableGnome(self),
-        else => if (h.card < self.cards.items.len) if (controlAction(self, h.card, h.control)) |a| act(self, h.card, a),
+        else => if (h.card < self.cards.items.len) if (controlAction(h.control)) |a| act(self, h.card, a),
     }
 }
 

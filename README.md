@@ -294,20 +294,19 @@ says what happened, "Copied" or "Saved · name.png". On hover:
 
 | Control | Action |
 | --- | --- |
-| Save / Copy | until it is saved: save to the screenshots folder / copy again |
-| Copy / Show in Files | once saved: copy again / open its folder with it selected (the thumbnail then goes) |
-| right-click | menu, with Save As... |
+| Save | save to the screenshots folder: "✓ Saved", and the thumbnail goes (hold `Alt` to keep it) |
+| Copy | copy again; the thumbnail stays |
+| right-click | menu: Copy, Save, Save As... (which ends it too), Show in Files, Annotate, Pin, Close |
 | pencil | annotate: reopens the editor with the annotations still editable |
 | pin | pin the capture to the screen |
 | × | close |
 | drag | drop the image into any app (offered as `image/png` and as a file, `text/uri-list`) |
 
-Right after a save the thumbnail says "Saved · Show in Files" for a few
-seconds (longer while the pointer rests on it): click it, or press
-`Enter` or `Space`, and the file manager opens with the file selected
-and the thumbnail goes, as with Show in Files. When no file manager
-answers (`org.freedesktop.FileManager1`), a card says so and where the
-file is, and the thumbnail stays.
+Show in Files opens the file manager with the file selected (the saved
+one; before a save, the capture as Recent captures keeps it) and the
+thumbnail goes. When no file manager answers
+(`org.freedesktop.FileManager1`), a card says so and where the file is,
+and the thumbnail stays.
 
 Keyboard (after clicking it): `Ctrl+C`, `Ctrl+S`, `Ctrl+Shift+S`, `E`
 annotate, `P` pin, `Esc`/`Delete` close, `Tab` and `Enter` to reach every
@@ -497,9 +496,10 @@ The file goes to the `record_dir` setting, else your Videos folder
 and is kept in Recent captures. Its thumbnail shows the first picture and
 the length, and plays a filmstrip under the pointer: Copy puts the file on
 the clipboard (`text/uri-list`, and the bytes as `video/mp4` or
-`image/gif`), Save as… copies it elsewhere (then "Saved · Show in Files"
-opens the copy in the file manager, as on a screenshot's thumbnail;
-`Esc` closes the thumbnail), dragging drops the file into
+`image/gif`), Save as… copies it elsewhere and the thumbnail goes (hold
+`Alt` to keep it), its right-click menu has Show in Files (the copy once
+saved, else the recording) as well, `Ctrl+C`, `Ctrl+S` and `Esc` work
+while the pointer is on it, dragging drops the file into
 another app, and the scissors open the trim window (drag the start and
 end handles on the filmstrip, play the range, Save trimmed: a new
 `…-trim.mp4` next to the original).

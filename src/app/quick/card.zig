@@ -12,6 +12,7 @@ const floatwin = @import("../../ui/floatwin.zig");
 const icons = @import("../../ui/icons.zig");
 const scale = @import("../../ui/scale.zig");
 const theme = @import("../../ui/theme.zig");
+const cardmenu = @import("../../ui/cardmenu.zig");
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
 
@@ -94,11 +95,7 @@ fn drawCard(self: *Quick, dst: fui.Surface, i: usize, r: Rect, now: i64) !void {
         if (shown < 1) drawStatus(&cv, c, k, self.th);
         if (shown > 0) try drawControls(self, card, pic, cw, ch, i, .{ .hovered = hovered, .focused = focused }, shown);
     }
-    const on_link: fui.State = .{
-        .hot = hovered and self.hover.?.control == .notice,
-        .focused = focused and self.focus.?.control == .notice,
-    };
-    c.notice.draw(&cv, .{ .x = 0, .y = 0, .w = r.w, .h = r.h }, now, on_link, k, self.th);
+    c.notice.draw(&cv, .{ .x = 0, .y = 0, .w = r.w, .h = r.h }, now, k, self.th);
     var alpha = c.life.alpha(now);
     if (dragged) alpha = @min(alpha, 0.5);
     try fui.compositeFaded(self.gpa, dst, .{ .px = card, .w = cw, .h = ch }, .{ r.x, r.y }, card_radius * k, self.th.card_shadow, alpha, k);
@@ -122,10 +119,9 @@ fn drawControls(self: *Quick, card: []u32, pic: []const u32, cw: u32, ch: u32, i
         fui.roundButton(&dv, ff(cr.x + round_r) * k, ff(cr.y + round_r) * k, round_r * k, icon, st, k, self.th);
     }
     // the two pills along the bottom: the primary one in the accent
-    for ([_]Control{ .primary, .secondary }, layout.pillActions(c.meta.saved.len > 0)) |ctl, a| {
+    for ([_]Control{ .primary, .secondary }, layout.pill_actions) |ctl, a| {
         const look: fui.PillLook = if (ctl == .primary) .primary else .light;
-        const size: f64 = if (a == .show_in_files) 12 else 13;
-        fui.pillButton(&dv, scale.rect(layout.controlRect(ctl), k), a.label(), look, size, .{ .hot = hv == ctl, .focused = fo == ctl }, k, self.th);
+        fui.pillButton(&dv, scale.rect(layout.controlRect(ctl), k), a.label(), look, 13, .{ .hot = hv == ctl, .focused = fo == ctl }, k, self.th);
     }
     effects.mixRows(card, card, deco, @intFromFloat(@round(shown * 256)));
 }
@@ -148,18 +144,10 @@ fn drawStatus(cv: *Canvas, c: *const Card, k: f64, th: Theme) void {
     fui.scrimPill(cv, r, shown, .check, .pill, k, th);
 }
 
-/// The right-click menu over the card's picture.
+/// The right-click menu over the card's picture (ui/cardmenu.zig).
 fn drawMenu(self: *const Quick, cv: *Canvas, c: *const Card, i: usize) void {
-    const k = self.factor();
-    const th = self.th;
-    cv.fillRect(0, 0, @intCast(cv.w), @intCast(cv.h), th.scrim(.pill));
-    const top = layout.menuTop();
-    for (layout.menu_items, 0..) |item, j| {
-        const row = scale.rect(.{ .x = 8, .y = top + @as(i32, @intCast(j)) * layout.menu_row, .w = card_w - 16, .h = layout.menu_row }, k);
-        const on = if (self.hover) |h| h.card == i and h.control == .menu and h.item == j else false;
-        if (on) cv.fillRoundRectAA(row.x, row.y, row.w, row.h, 5 * k, theme.withAlpha(th.on_scrim, 0x40));
-        const dim = item.action == .annotate and !c.editable;
-        const fs = 12.5 * k;
-        text.draw(cv, row.x + px(10, k), row.y + @divTrunc(row.h - text.height(fs), 2), fs, if (dim) th.on_scrim_dim else th.on_scrim, item.label);
-    }
+    var items: [layout.menu_items.len]cardmenu.Item = undefined;
+    for (layout.menu_items, &items) |item, *it| it.* = .{ .label = item.label, .dim = item.action == .annotate and !c.editable };
+    const hot: ?usize = if (self.hover) |h| (if (h.card == i and h.control == .menu) h.item else null) else null;
+    cardmenu.draw(cv, &items, hot, card_w, self.factor(), self.th);
 }

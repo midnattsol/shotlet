@@ -34,7 +34,7 @@ cursors             | 1600x900           | nothumb                | the editor's
 cursors-drawn       | 2560x1440          | nothumb                | the same drawn by Shotlet at scale 2
 quick               | 1600x900           | ext portal             | the thumbnail kept above by the extension: focus, Copy, click-through, drag out (same-second names), Pin
 quick-plain         | 1600x900           | -                      | the thumbnail as a plain window without the extension
-quick-saved         | 1600x900           | ext portal             | the thumbnails' "Saved · Show in Files" link: ShowItems by click and Enter, the recording's card, a refusal
+quick-saved         | 1600x900           | ext portal             | saving from the thumbnails ends them (Alt keeps them), Copy keeps; the menus' Show in Files (ShowItems), a refusal
 annotate            | 1600x900           | ext portal             | the thumbnail's Annotate reopens the editor, its Copy updates the capture
 pin                 | 1600x900           | nothumb ext portal     | a pin: where it opens, its menu, opacity, Copy, Lock, Save, Annotate, Close All Pins, dark
 history             | 1600x900           | ext portal             | Recent captures: kept, listed, saved, copied, deleted, cleared, across a restart

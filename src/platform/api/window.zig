@@ -70,8 +70,6 @@ pub const Cursor = enum {
     grab,
     /// while dragging it (closed hand)
     grabbing,
-    /// over a link (a pointing hand)
-    pointer,
     text,
     resize_nwse,
     resize_nesw,

@@ -47,8 +47,7 @@ pub const dragIcon = card.dragIcon;
 
 pub const State = overlay.State;
 pub const notice = overlay.notice;
-pub const noticeLink = overlay.noticeLink;
-pub const noticeRect = overlay.noticeRect;
+pub const noticeDone = overlay.noticeDone;
 pub const roundButton = overlay.roundButton;
 pub const PillLook = overlay.PillLook;
 pub const pillButton = overlay.pillButton;

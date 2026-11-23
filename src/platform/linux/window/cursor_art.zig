@@ -130,7 +130,6 @@ fn art(kind: Cursor) Art {
         .text => text,
         .grab => grab,
         .grabbing => grabbing,
-        .pointer => pointer,
         .resize_ew => resize,
         .resize_ns => turned(1),
         .resize_nwse => turned(0.5),
@@ -182,25 +181,6 @@ const grabbing: Art = .{
         .{ .capsule = .{ .a = .{ 7.2, 14.5 }, .b = .{ 10.8, 14.5 }, .r = 0.45 } },
         .{ .capsule = .{ .a = .{ 10.8, 14.5 }, .b = .{ 11.8, 16.4 }, .r = 0.45 } },
     },
-};
-
-/// A pointing hand: the index finger up, the others curled, the thumb
-/// out to the left; it clicks at the fingertip.
-const pointer: Art = .{
-    .parts = &.{
-        .{ .capsule = .{ .a = .{ 9.6, 13 }, .b = .{ 9.6, 3.6 }, .r = 1.4 } },
-        .{ .capsule = .{ .a = .{ 12.9, 12.6 }, .b = .{ 12.9, 10.6 }, .r = 1.4 } },
-        .{ .capsule = .{ .a = .{ 16, 12.8 }, .b = .{ 16, 11.2 }, .r = 1.4 } },
-        .{ .capsule = .{ .a = .{ 18.9, 13.4 }, .b = .{ 18.9, 12.2 }, .r = 1.3 } },
-        .{ .capsule = .{ .a = .{ 8.4, 17 }, .b = .{ 5, 13.4 }, .r = 1.4 } },
-        .{ .box = .{ .c = .{ 14.2, 16.6 }, .h = .{ 5.8, 4.4 }, .r = 3 } },
-    },
-    .cuts = &.{
-        .{ .capsule = .{ .a = .{ 11.3, 11.6 }, .b = .{ 11.3, 13.4 }, .r = 0.4 } },
-        .{ .capsule = .{ .a = .{ 14.5, 11.6 }, .b = .{ 14.5, 13.4 }, .r = 0.4 } },
-        .{ .capsule = .{ .a = .{ 17.5, 12 }, .b = .{ 17.5, 13.6 }, .r = 0.4 } },
-    },
-    .hot = .{ 9.6, 2.4 },
 };
 
 /// A double arrow along x; turned for the other directions.

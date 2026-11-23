@@ -192,7 +192,7 @@ pub fn showInFiles(gpa: std.mem.Allocator, env: Env, bus: ?*desktop.Bus, path: [
     }
     std.log.warn("{s}: no file manager showed {s}: {t}", .{ who, path, err.? });
     var buf: [2200]u8 = undefined;
-    const body = std.fmt.bufPrint(&buf, "The file is saved as {s}", .{path}) catch "The file is saved";
+    const body = std.fmt.bufPrint(&buf, "The file is at {s}", .{path}) catch "The file is on disk";
     report.problem(env, "Couldn\u{2019}t open the file manager", body);
     return false;
 }

@@ -1,6 +1,8 @@
 //! The video thumbnail card (record/quickvid.zig): the first picture,
 //! the duration (and "GIF") in a badge; on hover the filmstrip plays and
-//! Copy / Save as… / trim / close show, as on the screenshot thumbnail.
+//! Copy / Save as… / trim / close show, as on the screenshot thumbnail;
+//! a right-click opens its menu (ui/cardmenu.zig, as the screenshot
+//! card's), with Show in Files.
 
 const std = @import("std");
 const fui = @import("../floatui.zig");
@@ -11,15 +13,24 @@ const press = @import("../press.zig");
 const control_draw = @import("control_draw.zig");
 const Rect = @import("../shapes.zig").Rect;
 const Notice = @import("../notice.zig").Notice;
+const cardmenu = @import("../cardmenu.zig");
 
 pub const card_w = 240;
 pub const card_h = 150;
 /// room around the card for its shadow (theme card_shadow)
 pub const pad = theme.card_room;
 
-/// `notice`: "Saved · Show in Files" while it shows (ui/notice.zig;
-/// quickvid finds it, it is not in `hit`)
-pub const Control = enum { body, close, trim, copy, save_as, notice };
+/// `show_in_files`: only in the menu
+pub const Control = enum { body, close, trim, copy, save_as, show_in_files };
+
+/// the right-click menu's rows
+pub const menu_items = [_]struct { label: []const u8, control: Control }{
+    .{ .label = "Copy", .control = .copy },
+    .{ .label = "Save as\u{2026}", .control = .save_as },
+    .{ .label = "Show in Files", .control = .show_in_files },
+    .{ .label = "Trim", .control = .trim },
+    .{ .label = "Close", .control = .close },
+};
 
 pub const View = struct {
     /// the picture shown (first frame, or a strip picture on hover)
@@ -30,9 +41,11 @@ pub const View = struct {
     gif: bool,
     hover: ?Control = null,
     hovered: bool = false,
-    /// "Copied", "Saved · Show in Files" over the card, as at `now`
+    /// "Copied", "✓ Saved" over the card, as at `now`
     notice: ?*const Notice = null,
     now: i64 = 0,
+    /// the right-click menu instead of the controls
+    menu: bool = false,
     alpha: f64 = 1,
     /// the desktop's appearance (the controls over the picture look the
     /// same in both; the card behind a narrow picture follows it)
@@ -50,7 +63,7 @@ pub fn controlRect(c: Control) Rect {
         .trim => .{ .x = card_w - 8 - 26, .y = 8, .w = 26, .h = 26 },
         .copy => .{ .x = 8, .y = card_h - 8 - 30, .w = pw, .h = 30 },
         .save_as => .{ .x = 8 + pw + 6, .y = card_h - 8 - 30, .w = pw, .h = 30 },
-        .body, .notice => .{ .x = 0, .y = 0, .w = card_w, .h = card_h },
+        .body, .show_in_files => .{ .x = 0, .y = 0, .w = card_w, .h = card_h },
     };
 }
 
@@ -61,20 +74,13 @@ const targets = blk: {
     break :blk t;
 };
 
-/// What is under a logical point of the window.
-pub fn hit(x: i32, y: i32) ?Control {
-    return press.hitTest(Control, &targets, x - pad, y - pad);
-}
-
-/// Where the notice is centred, in the card: between the hovered
-/// duration badge and the buttons, which it would touch in the middle.
-const notice_area: Rect = .{ .x = 0, .y = 8 + 26 + 6 + 24, .w = card_w, .h = card_h - 8 - 30 - (8 + 26 + 6 + 24) };
-
-/// The same, the notice's link (while `n` shows one) over the card first.
-pub fn hitWith(n: *const Notice, x: i32, y: i32, now: i64) ?Control {
-    const area: Rect = .{ .x = pad + notice_area.x, .y = pad + notice_area.y, .w = notice_area.w, .h = notice_area.h };
-    if (n.hit(area, x, y, now)) return .notice;
-    return hit(x, y);
+/// What is under a logical point of the window (`menu`: the menu is
+/// open, its rows take the card).
+pub fn hit(x: i32, y: i32, menu: bool) ?Control {
+    const c = press.hitTest(Control, &targets, x - pad, y - pad) orelse return null;
+    if (!menu) return c;
+    const row = cardmenu.rowAt(menu_items.len, card_h, y - pad) orelse return .body;
+    return menu_items[row].control;
 }
 
 const px = scale.px;
@@ -88,9 +94,13 @@ pub fn paint(gpa: std.mem.Allocator, buf: []u32, bw: u32, bh: u32, k: f64, v: *c
     defer gpa.free(card);
     fui.drawImage(gpa, .{ .px = card, .w = cw, .h = ch }, .{ .px = v.pic, .w = v.pic_w, .h = v.pic_h }, .auto, theme.Opaque.of(v.th).panel);
     var cv = render.Canvas.init(card, cw, ch);
-    badge(&cv, k, v);
-    if (v.hovered) controls(&cv, k, v);
-    if (v.notice) |n| n.draw(&cv, scale.rect(notice_area, k), v.now, .{ .hot = v.hover == .notice }, k, v.th);
+    if (v.menu) {
+        drawMenu(&cv, k, v);
+    } else {
+        badge(&cv, k, v);
+        if (v.hovered) controls(&cv, k, v);
+    }
+    if (v.notice) |n| n.draw(&cv, .ofSize(cw, ch), v.now, k, v.th);
     const at = px(pad, k);
     fui.compositeFaded(gpa, .{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ at, at }, 12 * k, v.th.card_shadow, v.alpha, k) catch {};
 }
@@ -109,6 +119,16 @@ fn badge(cv: *render.Canvas, k: f64, v: *const View) void {
     fui.scrimPill(cv, .{ .x = x, .y = y, .w = w, .h = h }, s, .play, .strong, k, v.th);
 }
 
+fn drawMenu(cv: *render.Canvas, k: f64, v: *const View) void {
+    var items: [menu_items.len]cardmenu.Item = undefined;
+    var hot: ?usize = null;
+    for (menu_items, &items, 0..) |m, *it, i| {
+        it.* = .{ .label = m.label };
+        if (v.hover == m.control) hot = i;
+    }
+    cardmenu.draw(cv, &items, hot, card_w, k, v.th);
+}
+
 fn controls(cv: *render.Canvas, k: f64, v: *const View) void {
     cv.fillRect(0, 0, cv.w, cv.h, v.th.scrim(.soft));
     for ([_]Control{ .close, .trim }) |c| {
@@ -122,23 +142,21 @@ fn controls(cv: *render.Canvas, k: f64, v: *const View) void {
     }
 }
 
-test "the Saved link takes the card's middle while it shows" {
-    var n: Notice = .{};
-    try std.testing.expectEqual(@as(?Control, .body), hitWith(&n, pad + 120, pad + 75, 0));
-    n.showSaved("/v.mp4", 0);
-    const text = @import("../../gfx/text.zig");
-    text.init(std.testing.allocator);
-    defer text.deinit();
-    if (!text.available()) return error.SkipZigTest;
-    try std.testing.expectEqual(@as(?Control, .notice), hitWith(&n, pad + 120, pad + 75, 0));
-    try std.testing.expectEqual(@as(?Control, .copy), hitWith(&n, pad + 20, pad + card_h - 20, 0));
-    try std.testing.expectEqual(@as(?Control, .body), hitWith(&n, pad + 120, pad + 75, 10_000));
+test "card controls hit" {
+    try std.testing.expectEqual(@as(?Control, .close), hit(pad + 10, pad + 10, false));
+    try std.testing.expectEqual(@as(?Control, .trim), hit(pad + card_w - 20, pad + 10, false));
+    try std.testing.expectEqual(@as(?Control, .copy), hit(pad + 20, pad + card_h - 20, false));
+    try std.testing.expectEqual(@as(?Control, .body), hit(pad + 120, pad + 70, false));
+    try std.testing.expect(hit(2, 2, false) == null);
 }
 
-test "card controls hit" {
-    try std.testing.expectEqual(@as(?Control, .close), hit(pad + 10, pad + 10));
-    try std.testing.expectEqual(@as(?Control, .trim), hit(pad + card_w - 20, pad + 10));
-    try std.testing.expectEqual(@as(?Control, .copy), hit(pad + 20, pad + card_h - 20));
-    try std.testing.expectEqual(@as(?Control, .body), hit(pad + 120, pad + 70));
-    try std.testing.expect(hit(2, 2) == null);
+test "the menu's rows take the card while it is open" {
+    const t = cardmenu.top(menu_items.len, card_h);
+    const row = cardmenu.row_h;
+    try std.testing.expectEqual(@as(?Control, .copy), hit(pad + 120, pad + t + 2, true));
+    try std.testing.expectEqual(@as(?Control, .show_in_files), hit(pad + 120, pad + t + 2 * row + 2, true));
+    try std.testing.expectEqual(@as(?Control, .close), hit(pad + 120, pad + t + 4 * row + 2, true));
+    // the buttons' places are rows or nothing now; outside the card, null
+    try std.testing.expectEqual(@as(?Control, .body), hit(pad + 10, pad + 2, true));
+    try std.testing.expect(hit(2, 2, true) == null);
 }

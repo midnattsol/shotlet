@@ -64,31 +64,51 @@ scenario_quick() {
     quick_saved_link
 }
 
-# no file manager here: the card's "Saved · Show in Files" link, clicked
-# or with Enter, says so with a problem card, and the card stays
+# Save ends the card, Alt held keeps it; the menu's Show in Files with
+# no file manager here says so on a problem card, and the card stays
 _lines() { cat "$OUT"/*.log 2>/dev/null | grep -c "$1"; }
 _lines_more() { [ "$(_lines "$1")" -gt "$2" ]; }
-quick_saved_link() {
+# saved_capture NAME [alt]: a capture, saved from its card's Save
+saved_capture() {
     local x y n
-    n=$(_lines "quick access: added\\|quick access: showing")
-    red_capture shotlet-second
-    wait_until 5 _lines_more "quick access: added\\|quick access: showing" "$n"
+    n=$(_lines "quick access: added\|quick access: showing")
+    red_capture "$1"
+    wait_until 5 _lines_more "quick access: added\|quick access: showing" "$n"
     wait_until 5 card_red
     hover_card
-    read -r x y <<<"$(card_point 60 23)" # Save: the first button until saved
-    click 0 "$x" "$y"
-    check "the card's Save saves" any_log 5 "quick access: saved to "
-    # (the click gave the card the keyboard)
-    keys enter
-    check "with no file manager, Enter on Saved says so on a problem card" \
-        any_log 5 "toast: Couldn.{1,3}t open the file manager: The file is saved as "
+    # labwc gives a layer surface the keyboard on a click without the
+    # modifiers already held: a click on the picture first (it does
+    # nothing) so that Alt pressed after it is seen
+    [ "${2:-}" = alt ] && drv click && drv sleep 200
+    n=$(_lines "quick access: saved to ")
+    read -r x y <<<"$(card_point 60 23)" # Save: the first button
+    drv move 0 "$x" "$y"
+    drv sleep 150
+    if [ "${2:-}" = alt ]; then
+        drv key alt down && drv sleep 150 && drv click && drv sleep 150 && drv key alt up
+    else
+        drv click
+    fi
+    wait_until 5 _lines_more "quick access: saved to " "$n"
+}
+quick_saved_link() {
+    local x y
+    saved_capture shotlet-second
+    check "the card's Save saves" any_log 1 "quick access: saved to "
+    check "  ... and the card goes" wait_until 3 eval '! card_red'
+    saved_capture shotlet-third alt
+    check "with Alt held, Save keeps the card" any_log 3 "quick access: saved, kept open \(Alt\)"
+    drv move 0 $((MW / 2)) $((MH / 3))
+    sleep 1.5
+    check "  ... on screen" card_red
     hover_card
-    shot 0 saved-link
-    check "  ... Saved is a link (the pointing hand)" any_log 2 "cursor: pointer via cursor-shape"
-    n=$(_lines "no file manager showed")
-    read -r x y <<<"$(card_point 120 75)"
+    drv click right
+    sleep 0.4
+    shot 0 menu
+    read -r x y <<<"$(card_point 120 75)" # the menu's middle row: Show in Files
     click 0 "$x" "$y"
-    check "  ... and so does a click on it" wait_until 5 _lines_more "no file manager showed" "$n"
+    check "with no file manager, the menu's Show in Files says so on a problem card" \
+        any_log 5 "toast: Couldn.{1,3}t open the file manager: The file is at "
     sleep 1
     shot 0 no-file-manager
     drv move 0 $((MW / 2)) $((MH / 3))

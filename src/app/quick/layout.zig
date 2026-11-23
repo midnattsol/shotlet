@@ -5,6 +5,7 @@
 const std = @import("std");
 const Rect = @import("../../ui/shapes.zig").Rect;
 const theme = @import("../../ui/theme.zig");
+const cardmenu = @import("../../ui/cardmenu.zig");
 
 // layout, logical pixels
 pub const card_w = 240;
@@ -18,15 +19,15 @@ pub const edge = 8;
 pub const hint_h = 52;
 pub const max_cards = 5;
 
-/// `primary` and `secondary`: the two buttons along the bottom, whose
-/// actions depend on the card (pillActions); `notice`: "Saved · Show in
-/// Files" while it shows (ui/notice.zig; Quick.hitAt finds it).
-pub const Control = enum { body, close, annotate, pin, primary, secondary, menu, hint, notice };
+/// `primary` and `secondary`: the two buttons along the bottom
+/// (pill_actions).
+pub const Control = enum { body, close, annotate, pin, primary, secondary, menu, hint };
 
 pub const menu_items = [_]struct { label: []const u8, action: Action }{
     .{ .label = "Copy", .action = .copy },
     .{ .label = "Save", .action = .save },
     .{ .label = "Save As...", .action = .save_as },
+    .{ .label = "Show in Files", .action = .show_in_files },
     .{ .label = "Annotate", .action = .annotate },
     .{ .label = "Pin to screen", .action = .pin },
     .{ .label = "Close", .action = .close },
@@ -54,11 +55,8 @@ pub const Action = enum {
     }
 };
 
-/// The bottom buttons: Save comes first until the capture is saved, then
-/// Copy, with Show in Files beside it.
-pub fn pillActions(saved: bool) [2]Action {
-    return if (saved) .{ .copy, .show_in_files } else .{ .save, .copy };
-}
+/// The bottom buttons: Save (which ends the card) and Copy.
+pub const pill_actions = [2]Action{ .save, .copy };
 
 /// What is under a logical point.
 pub const Hit = struct { card: usize = 0, control: Control, item: u8 = 0 };
@@ -87,10 +85,10 @@ pub fn controlRect(c: Control) Rect {
     };
 }
 
-pub const menu_row = 22;
+pub const menu_row = cardmenu.row_h;
 
 pub fn menuTop() i32 {
-    return @divTrunc(card_h - @as(i32, menu_items.len) * menu_row, 2);
+    return cardmenu.top(menu_items.len, card_h);
 }
 
 /// Hit test at logical x, y with n cards (menu: whether each card shows
@@ -102,8 +100,7 @@ pub fn hitTest(x: i32, y: i32, h: i32, n: usize, menus: []const bool, hint: bool
         const lx = x - r.x;
         const ly = y - r.y;
         if (i < menus.len and menus[i]) {
-            const row = @divFloor(ly - menuTop(), menu_row);
-            if (row >= 0 and row < menu_items.len) return .{ .card = i, .control = .menu, .item = @intCast(row) };
+            if (cardmenu.rowAt(menu_items.len, card_h, ly)) |row| return .{ .card = i, .control = .menu, .item = @intCast(row) };
             return .{ .card = i, .control = .body };
         }
         for ([_]Control{ .close, .annotate, .pin, .primary, .secondary }) |c| {
@@ -131,9 +128,9 @@ test "layout: newest card in the corner, controls where the mockup has them" {
     try t.expectEqual(Control.pin, hitTest(r0.x + card_w - 14, r0.y + 14, h, 2, &none, false).?.control);
     try t.expectEqual(Control.primary, hitTest(r0.x + 20, r0.y + card_h - 20, h, 2, &none, false).?.control);
     try t.expectEqual(Control.secondary, hitTest(r0.x + card_w - 20, r0.y + card_h - 20, h, 2, &none, false).?.control);
-    // until saved, Save leads; then Copy and Show in Files
-    try t.expectEqual(Action.save, pillActions(false)[0]);
-    try t.expectEqual(Action.show_in_files, pillActions(true)[1]);
+    // Save, then Copy; Show in Files is in the menu
+    try t.expectEqual(Action.save, pill_actions[0]);
+    try t.expectEqual(Action.copy, pill_actions[1]);
     try t.expectEqual(Control.body, hitTest(r0.x + 120, r0.y + 70, h, 2, &none, false).?.control);
     try t.expectEqual(@as(usize, 1), hitTest(r0.x + 120, cardRect(1, h).y + 70, h, 2, &none, false).?.card);
     // the shadow margin is not a card
@@ -143,6 +140,8 @@ test "layout: newest card in the corner, controls where the mockup has them" {
     const m = hitTest(r0.x + 50, r0.y + menuTop() + menu_row * 2 + 5, h, 2, &menus, false).?;
     try t.expectEqual(Control.menu, m.control);
     try t.expectEqual(Action.save_as, menu_items[m.item].action);
+    const s = hitTest(r0.x + 50, r0.y + menuTop() + menu_row * 3 + 5, h, 2, &menus, false).?;
+    try t.expectEqual(Action.show_in_files, menu_items[s.item].action);
 }
 
 /// The GNOME hint's pill, above the cards.

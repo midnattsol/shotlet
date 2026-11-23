@@ -3,6 +3,7 @@
 comptime {
     _ = @import("badge.zig");
     _ = @import("barkit.zig");
+    _ = @import("cardmenu.zig");
     _ = @import("caret.zig");
     _ = @import("dim.zig");
     _ = @import("doc.zig");

@@ -115,6 +115,7 @@ pub const Window = struct {
 
     ctrl: bool = false,
     shift: bool = false,
+    alt: bool = false,
     current_cursor: Cursor = .crosshair,
 
     /// events not handed out yet

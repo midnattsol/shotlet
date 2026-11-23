@@ -34,11 +34,12 @@ pub fn updateDevice(w: *Window, has_keyboard: bool) !void {
 }
 
 /// The Key event for evdev `code` in the active layout; updates the
-/// window's ctrl/shift.
+/// window's ctrl/shift/alt.
 pub fn translate(w: *Window, code: u32, pressed: bool, use_compose: bool) Key {
     const t = w.kb.translate(code, pressed, use_compose);
     w.ctrl = t.ctrl;
     w.shift = t.shift;
+    w.alt = t.alt;
     return .{
         .code = keyboard.evdev.toCode(code),
         .pressed = pressed,
@@ -73,6 +74,7 @@ pub fn handleEvent(w: *Window, opcode: u16, r: *wl.ArgReader) !void {
             w.kb_focus = false;
             log.debug("keyboard focus lost", .{});
             w.kb.leave();
+            w.alt = false;
         },
         else => {},
     }
@@ -113,4 +115,5 @@ fn onModifiers(w: *Window, r: *wl.ArgReader) !void {
     const t = w.kb.translate(0, false, false);
     w.ctrl = t.ctrl;
     w.shift = t.shift;
+    w.alt = t.alt;
 }

@@ -3,9 +3,11 @@
 //! (a layer-shell surface, or a "shotlet:quick" window the GNOME Shell
 //! extension places). Hovering plays the filmstrip; Copy puts the file on
 //! the clipboard (text/uri-list, and the video itself as video/mp4 or
-//! image/gif); Save as… copies it elsewhere; the scissors open the trim
-//! window; dragging it drops the file into another app. It fades in and
-//! stays until closed: a recording is not glanced at like a screenshot.
+//! image/gif); Save as… copies it elsewhere, and the card goes (Alt held
+//! keeps it); the scissors open the trim window; dragging it drops the
+//! file into another app; a right-click opens its menu, with Show in
+//! Files. It fades in and stays until closed or saved: a recording is
+//! not glanced at like a screenshot.
 
 const std = @import("std");
 const log = std.log.scoped(.quick_video);
@@ -52,14 +54,20 @@ const Quick = struct {
     press: press.Press(card.Control) = .{},
     /// fading in from the first frame, out once closed
     life: motion.Life = .{},
-    /// "Copied", "Saved · Show in Files" over the card for a while
+    /// "Copied", "Saved" over the card for a moment
     notice: Notice = .{},
     play_from: i64 = 0,
     dirty: bool = true,
     drag: fui.DragOut = .{},
     done: bool = false,
+    /// the right-click menu is open
+    menu: bool = false,
     /// a layer surface (keyboard only while the pointer is over it)
     layer: bool = false,
+    /// saved: when it goes (monotonic ms), 0 while it stays
+    end_at: i64 = 0,
+    /// where Save as… put it last (owned), for Show in Files
+    saved: ?[]u8 = null,
 
     fn factor(self: *const Quick) f64 {
         return scale.of(self.win.scale120);
@@ -68,7 +76,7 @@ const Quick = struct {
     /// What is under a pointer at x, y (buffer pixels).
     fn hitAt(self: *const Quick, x: f64, y: f64) ?card.Control {
         const k = self.factor();
-        return card.hitWith(&self.notice, scale.toLogical(x, k), scale.toLogical(y, k), sys.monoMs());
+        return card.hit(scale.toLogical(x, k), scale.toLogical(y, k), self.menu);
     }
 
     /// The picture to show now: a strip picture while hovered.
@@ -114,6 +122,7 @@ const Quick = struct {
             .hovered = self.hover != null,
             .notice = &self.notice,
             .now = now,
+            .menu = self.menu,
             .alpha = alpha,
             .th = self.th,
         });
@@ -141,7 +150,13 @@ const Quick = struct {
                 }
                 self.win.setCursor(self.cursor()) catch {};
             },
-            .pointer_button => |b| if (b.button == .left) {
+            .pointer_button => |b| if (b.button == .right and b.pressed) {
+                if (self.hitAt(b.x, b.y) != null) self.menu = !self.menu;
+                // the rows take the place of the buttons under the pointer
+                self.hover = self.hitAt(b.x, b.y);
+                self.dirty = true;
+                self.win.setCursor(self.cursor()) catch {};
+            } else if (b.button == .left) {
                 const h = self.hitAt(b.x, b.y);
                 if (b.pressed) {
                     self.press.down(h, b.x, b.y);
@@ -150,23 +165,30 @@ const Quick = struct {
             },
             // as on the screenshot thumbnail (quick/input.zig): only while
             // the pointer is over a layer surface
-            .key => |k| if (!self.layer or self.win.pointer_in) self.onKey(k),
+            .key => |k| if (k.pressed and (!self.layer or self.win.pointer_in)) self.onKey(k),
             else => {},
         }
     }
 
-    /// Enter or Space opens the "Saved" link while it shows; Esc closes.
+    /// Esc closes the menu, else the card; Ctrl+C copies, Ctrl+S saves
+    /// as, as on the screenshot thumbnail.
     fn onKey(self: *Quick, k: window.Key) void {
-        if (self.notice.opensOn(k, sys.monoMs())) return self.act(.notice);
-        if (focus.action(k, .none) == .close) self.act(.close);
+        if (k.ctrl) return switch (k.code) {
+            .c => self.act(.copy),
+            .s => self.act(.save_as),
+            else => {},
+        };
+        if (focus.action(k, .none) != .close) return;
+        if (self.menu) {
+            self.menu = false;
+            self.dirty = true;
+        } else self.act(.close);
     }
 
     /// The hand over the picture, which drags the file out (closed while
-    /// pressed); the pointing hand over the "Saved" link; the arrow over
-    /// the buttons.
+    /// pressed); the arrow over the buttons.
     fn cursor(self: *const Quick) window.Cursor {
-        if (self.hover == .notice) return .pointer;
-        if (self.hover != .body) return .arrow;
+        if (self.hover != .body or self.menu) return .arrow;
         return window.Cursor.hand(self.press.held() == .body);
     }
 
@@ -178,6 +200,8 @@ const Quick = struct {
     }
 
     fn actInner(self: *Quick, c: card.Control) !void {
+        self.menu = false;
+        self.dirty = true;
         switch (c) {
             .close => self.life.leave(sys.monoMs()),
             .copy => {
@@ -191,15 +215,14 @@ const Quick = struct {
                 const saved = (try files.saveAs(self.gpa, self.env, &bus, self.info.path)) orelse return;
                 defer self.gpa.free(saved);
                 log.info("saved to {s}", .{saved});
-                self.notice.showSaved(saved, sys.monoMs());
-                self.dirty = true;
+                self.keepSaved(saved);
             },
             // the file manager takes over: the card goes (it stays, and a
             // problem card says why, when none answered)
-            .notice => {
-                const path = self.notice.file(sys.monoMs()) orelse return;
+            .show_in_files => {
                 var bus: ?desktop.Bus = desktop.connect(self.gpa, self.env) catch null;
                 defer if (bus) |*b| b.deinit();
+                const path = self.saved orelse self.info.path;
                 if (deliver.showInFiles(self.gpa, self.env, if (bus) |*b| b else null, path, "quick video")) self.life.leave(sys.monoMs());
             },
             .trim => {
@@ -208,6 +231,20 @@ const Quick = struct {
             },
             .body => {},
         }
+    }
+
+    /// Saved to `path` (the caller's): "✓ Saved", then the card goes,
+    /// unless Alt is held (as CleanShot X's Option).
+    fn keepSaved(self: *Quick, path: []const u8) void {
+        if (self.saved) |p| self.gpa.free(p);
+        self.saved = self.gpa.dupe(u8, path) catch null;
+        const now = sys.monoMs();
+        if (self.win.alt) {
+            log.info("saved, kept open (Alt)", .{});
+            return self.notice.showSaved(now, notice_mod.word_ms);
+        }
+        self.notice.showSaved(now, notice_mod.end_ms);
+        self.end_at = now + notice_mod.end_ms;
     }
 
     fn startDrag(self: *Quick) !void {
@@ -229,16 +266,13 @@ const Quick = struct {
 
     fn tick(self: *Quick) void {
         const now = sys.monoMs();
+        if (self.end_at != 0 and now >= self.end_at) {
+            self.end_at = 0;
+            self.life.leave(now);
+        }
         if (self.life.busy(now)) self.dirty = true;
         if (self.life.gone(now)) self.done = true;
-        if (self.hover == .notice) self.notice.hold(now);
-        if (self.notice.expire(now)) {
-            self.dirty = true;
-            if (self.hover == .notice) {
-                self.hover = .body;
-                self.win.setCursor(self.cursor()) catch {};
-            }
-        }
+        if (self.notice.expire(now)) self.dirty = true;
     }
 
     fn open(self: *Quick) !void {
@@ -284,6 +318,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
         .strip_n = n_pics,
     };
     defer q.win.deinit();
+    defer if (q.saved) |p| gpa.free(p);
     try q.open();
     log.info("showing {s} ({d} ms)", .{ id, vi.info.duration_ms });
     while (!q.done) {

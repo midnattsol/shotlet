@@ -204,6 +204,9 @@ pub const Window = struct {
     // keyboard state shared with callers
     ctrl: bool = false,
     shift: bool = false,
+    /// Alt held (known while the window has the keyboard: a click that
+    /// gives it the keyboard brings the modifiers held with it)
+    alt: bool = false,
     /// layout translation (libxkbcommon when available) and key repeat
     kb: keyboard.Keyboard = .{},
     /// last button/key serial, for set_selection, moves and drags

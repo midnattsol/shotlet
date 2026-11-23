@@ -85,7 +85,6 @@ fn shapeOf(kind: Cursor) u32 {
         .text => shape_device.shape_text,
         .grab => shape_device.shape_grab,
         .grabbing => shape_device.shape_grabbing,
-        .pointer => shape_device.shape_pointer,
         .resize_ew => shape_device.shape_ew_resize,
         .resize_ns => shape_device.shape_ns_resize,
         .resize_nesw => shape_device.shape_nesw_resize,

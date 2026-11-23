@@ -243,7 +243,6 @@ pub const wp_cursor_shape_device_v1 = struct {
     pub const set_shape = 1;
     /// the shapes shotlet uses (CSS cursor names)
     pub const shape_default: u32 = 1;
-    pub const shape_pointer: u32 = 4;
     pub const shape_crosshair: u32 = 8;
     pub const shape_text: u32 = 9;
     pub const shape_grab: u32 = 16;

@@ -21,7 +21,7 @@ multimon  | sway labwc kwin | 1600x900 1280x720@2              | -          | tw
 rotated   | sway            | 1600x900/90 1280x720/flipped-180 | -          | turned and flipped outputs come out the way they show
 portal    | sway labwc kwin | 1600x900                         | gpu portal | the ScreenCast portal when direct capture is off; the restore token skips the chooser after
 record    | sway            | 1600x900                         | gpu portal | a GIF recording through the portal, then one with no chooser (restore token)
-quick     | sway labwc kwin | 1600x900                         | -          | the thumbnail: a layer surface, the keyboard stays with the app, Copy, drag and drop, the Saved link with no file manager
+quick     | sway labwc kwin | 1600x900                         | -          | the thumbnail: a layer surface, the keyboard stays with the app, Copy, drag and drop, Save ends it (Alt keeps), Show in Files with no file manager
 pin       | sway labwc kwin | 1600x900                         | -          | pins: 1:1 at their place, above the app, dragged, --at, the menu, Close All Pins
 history   | sway labwc kwin | 1600x900                         | -          | Recent captures: lists, copies, closes, exits once another app copies
 ocr       | sway            | 1600x900                         | -          | the history searched by text (Tesseract): every word, accents folded
