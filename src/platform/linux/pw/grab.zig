@@ -23,22 +23,28 @@ pub const Pre = struct {
 /// every path, so callers never close it themselves.
 /// Safe to run on a separate thread (no shared allocator use).
 pub fn preconnect(fd: i32) !Pre {
-    if (!pw.available()) {
-        _ = std.os.linux.close(fd);
-        return error.PipeWireUnavailable;
-    }
-    var pre = Pre{};
-    pre.loop = pw.api.thread_loop_new("shotlet-pw", null) orelse {
-        _ = std.os.linux.close(fd);
-        return error.PwLoop;
+    var pre = startLoop("shotlet-pw") catch |err| {
+        sys.close(fd);
+        return err;
     };
-    if (pw.api.thread_loop_start(pre.loop) < 0) {
-        pw.api.thread_loop_destroy(pre.loop);
-        _ = std.os.linux.close(fd);
-        return error.PwLoop;
-    }
     pw.api.thread_loop_lock(pre.loop);
-    connectCore(&pre, fd);
+    // fd is PipeWire's or closed from here on
+    const ok = connectCore(&pre, fd);
+    pw.api.thread_loop_unlock(pre.loop);
+    if (!ok) {
+        teardown(&pre, &.{});
+        return error.PwConnect;
+    }
+    return pre;
+}
+
+/// Connect to the session's PipeWire daemon (no portal fd), on a loop
+/// thread named `name`.
+pub fn connectDaemon(name: [*:0]const u8) !Pre {
+    var pre = try startLoop(name);
+    pw.api.thread_loop_lock(pre.loop);
+    pre.context = pw.api.context_new(pw.api.thread_loop_get_loop(pre.loop), null, 0);
+    if (pre.context != null) pre.core = pw.api.context_connect(pre.context, null, 0);
     pw.api.thread_loop_unlock(pre.loop);
     if (pre.core == null) {
         teardown(&pre, &.{});
@@ -47,13 +53,26 @@ pub fn preconnect(fd: i32) !Pre {
     return pre;
 }
 
-/// Create the context and connect its core over fd (loop locked). Leaves
-/// pre.core null on failure, with fd closed exactly once.
-fn connectCore(pre: *Pre, fd: i32) void {
+/// Load PipeWire and start a loop thread named `name`, without a
+/// context yet.
+fn startLoop(name: [*:0]const u8) !Pre {
+    if (!pw.available()) return error.PipeWireUnavailable;
+    var pre = Pre{};
+    pre.loop = pw.api.thread_loop_new(name, null) orelse return error.PwLoop;
+    if (pw.api.thread_loop_start(pre.loop) < 0) {
+        pw.api.thread_loop_destroy(pre.loop);
+        return error.PwLoop;
+    }
+    return pre;
+}
+
+/// Create the context and connect its core over fd (loop locked). False
+/// on failure, with fd closed exactly once.
+fn connectCore(pre: *Pre, fd: i32) bool {
     pre.context = pw.api.context_new(pw.api.thread_loop_get_loop(pre.loop), null, 0);
     if (pre.context == null) {
-        _ = std.os.linux.close(fd);
-        return;
+        sys.close(fd);
+        return false;
     }
     // pw_context_connect_fd closes the fd on some failure paths and not
     // on others (e.g. when allocating the core fails). Remember what the
@@ -64,10 +83,11 @@ fn connectCore(pre: *Pre, fd: i32) void {
     if (pre.core == null) {
         if (id_before) |before| {
             if (sys.fileId(fd)) |after| {
-                if (std.meta.eql(before, after)) _ = std.os.linux.close(fd);
+                if (std.meta.eql(before, after)) sys.close(fd);
             }
         }
     }
+    return pre.core != null;
 }
 
 /// Discard a pre-established connection without grabbing.
