@@ -1,7 +1,8 @@
 #!/bin/bash
 # usage: tools/e2e/monitors.sh Meta-0=2 Meta-1=1   (inside session.sh only)
 # Lays the named monitors out left to right, top aligned, at the given
-# scales (the nearest scale mutter supports for the current mode), through
+# scales (the nearest scale mutter supports for the current mode), the
+# first primary unless one is marked so (Meta-1=1.5!), through
 # org.gnome.Mutter.DisplayConfig.ApplyMonitorsConfig (temporary method).
 # Prints the resulting layout, one "connector x y w h scale" line each.
 set -eu
@@ -23,12 +24,15 @@ for chunk in re.split(r"\(\('", state)[1:]:
             scales = [float(s) for s in mode.group(4).split(",")]
             mons[conn] = (mode.group(1), int(mode.group(2)), int(mode.group(3)), scales)
 x, parts, layout = 0, [], []
+marked = any(w.endswith("!") for w in wants)
 for i, w in enumerate(wants):
     conn, want = w.split("=")
+    first = want.endswith("!") if marked else i == 0
+    want = want.rstrip("!")
     mode, pw, ph, scales = mons[conn]
     scale = min(scales, key=lambda s: abs(s - float(want)))
     lw, lh = round(pw / scale), round(ph / scale)
-    primary = "true" if i == 0 else "false"
+    primary = "true" if first else "false"
     parts.append(f"({x}, 0, {scale!r}, 0, {primary}, [('{conn}', '{mode}', @a{{sv}} {{}})])")
     layout.append(f"{conn} {x} 0 {lw} {lh} {scale!r}")
     x += lw

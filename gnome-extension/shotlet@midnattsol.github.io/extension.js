@@ -129,7 +129,7 @@ export default class ShotletExtension extends Extension {
             () => this._shotletPath());
         this._bindShortcut();
         this._scroll = new ScrollSessions(s => this._checkCaller(s), () => this._captureDir(),
-            () => this._windows.showing('scroll'));
+            () => this._windows.showing('scroll'), () => this._windows.windows('scroll'));
         this._removeStale();
 
         this._dbus = Gio.DBusExportedObject.wrapJSObject(IFACE, this);

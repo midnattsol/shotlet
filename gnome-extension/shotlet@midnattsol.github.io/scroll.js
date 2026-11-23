@@ -15,6 +15,9 @@
 //   of the Shotlet app titled "shotlet:scroll") is on screen;
 // - frames are only ever of the region given at the start, written like
 //   every capture: fresh 0600 files in the private capture directory;
+//   the control is left out of them (hidden for the grab) when it sits
+//   over the region (the region fills the monitor: there is no room
+//   beside it), else it would be a changing part of every frame;
 // - with `auto`, a virtual pointer exists for the session only: it puts
 //   the pointer in the middle of the region and turns the wheel there
 //   (at most 10 notches a step, at most 25 steps a second); the pointer
@@ -47,11 +50,13 @@ function wait(ms) {
 
 export class ScrollSessions {
     // checkCaller(sender) throws unless it is shotlet; captureDir() is the
-    // private directory; hudShown() says whether the control is up
-    constructor(checkCaller, captureDir, hudShown) {
+    // private directory; hudShown() says whether the control is up,
+    // hudWindows() which windows it is
+    constructor(checkCaller, captureDir, hudShown, hudWindows) {
         this._checkCaller = checkCaller;
         this._captureDir = captureDir;
         this._hudShown = hudShown;
+        this._hudWindows = hudWindows;
         this._session = null;
     }
 
@@ -126,10 +131,29 @@ export class ScrollSessions {
             s.dev.notify_discrete_scroll(t + i + 1, Clutter.ScrollDirection.DOWN, Clutter.ScrollSource.WHEEL);
     }
 
+    // The control's window actors over the region, made invisible (for
+    // the grab); give each back its opacity after.
+    _hideHud(s) {
+        const over = w => {
+            const r = w.get_frame_rect();
+            return r.x < s.x + s.w && s.x < r.x + r.width && r.y < s.y + s.h && s.y < r.y + r.height;
+        };
+        const hidden = [];
+        for (const w of this._hudWindows().filter(over)) {
+            const actor = w.get_compositor_private();
+            if (!actor || actor.opacity === 0)
+                continue;
+            hidden.push([actor, actor.opacity]);
+            actor.opacity = 0;
+        }
+        return hidden;
+    }
+
     async _grab(s) {
         const fid = `${s.id}s${s.n++}`;
         const file = Gio.File.new_for_path(GLib.build_filenamev([this._captureDir(), `shot-${fid}-0.png`]));
         const stream = file.create(Gio.FileCreateFlags.PRIVATE, null);
+        const hidden = this._hideHud(s);
         try {
             await new Promise((resolve, reject) => {
                 new Shell.Screenshot().screenshot_area(s.x, s.y, s.w, s.h, stream, (obj, res) => {
@@ -147,6 +171,9 @@ export class ScrollSessions {
                 file.delete(null);
             } catch {}
             throw e;
+        } finally {
+            for (const [actor, opacity] of hidden)
+                actor.opacity = opacity;
         }
         return fid;
     }

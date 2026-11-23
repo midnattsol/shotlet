@@ -34,6 +34,7 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
     const shell = shell_seam.applies() and shell_seam.active(c.bus);
     var hud = try hud_mod.Hud.open(c.win, th);
     defer c.win.closeWindow();
+    defer hud.deinit();
     try showHud(c, &hud, cap, region, shell);
     var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| return failed(&hud, err);
     defer session.deinit();
@@ -47,7 +48,7 @@ fn failed(hud: *hud_mod.Hud, err: anyerror) !?png.Image {
     log.warn("scrolling capture failed ({t}): no frame of the region", .{err});
     hud.show(.failed, "Couldn\u{2019}t capture the region", "Close and try again", 0);
     while (true) {
-        try hud.draw(null);
+        try hud.draw();
         if (try hud.poll(100)) |_| return null;
     }
 }
@@ -57,7 +58,7 @@ fn showHud(c: flow.Ctx, hud: *hud_mod.Hud, cap: *const capture.Capture, region: 
     const deadline = sys.monoMs() + 1500;
     var placed = !shell;
     while (sys.monoMs() < deadline) {
-        try hud.draw(null);
+        try hud.draw();
         _ = try hud.poll(50);
         if (!placed) if (besideRegion(cap, region)) |p| {
             placed = shell_seam.place(c.gpa, c.bus, hud_mod.title, p[0], p[1]);

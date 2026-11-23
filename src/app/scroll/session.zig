@@ -10,6 +10,13 @@
 //!   Continue picks up from where it stopped, keeping what is stitched:
 //!   it tries the wheel again, lets the person scroll back until the
 //!   parts line up, or starts the frame source over.
+//!
+//! A frame takes a while (the shell paints and encodes the region, then
+//! it is decoded: half a second for a 4K region), and stitching it and
+//! shrinking the image for the control's preview take tens of
+//! milliseconds more: all of it runs on a worker thread (offload.zig)
+//! while the control keeps answering its input and the compositor's
+//! pings (else GNOME offers to force quit Shotlet).
 
 const std = @import("std");
 const log = std.log.scoped(.scrolling_capture);
@@ -21,6 +28,7 @@ const flow = @import("../modes/flow.zig");
 const hud_mod = @import("../../ui/scroll_hud.zig");
 const stitch = @import("stitch.zig");
 const stop = @import("stop.zig");
+const offload = @import("offload.zig");
 const platform_capture = @import("../../platform/api.zig").capture;
 
 /// How long a natural stop's reason stays up before the editor opens.
@@ -51,6 +59,8 @@ pub const Session = struct {
     realign: bool = false,
     /// a warning is up (the person scrolled past what lines up)
     warned: bool = false,
+    /// what the person asked for on the control while a frame came
+    asked: ?hud_mod.Action = null,
 
     pub fn init(c: flow.Ctx, hud: *hud_mod.Hud, opener: Opener, max_height: u32) !Session {
         var self: Session = .{ .c = c, .hud = hud, .opener = opener, .max_height = max_height, .watch = .{ .auto = false } };
@@ -87,11 +97,6 @@ pub const Session = struct {
         return st.row(y);
     }
 
-    fn preview(self: *const Session) ?hud_mod.Source {
-        const st = if (self.st) |*s| s else return null;
-        return .{ .ctx = st, .width = st.width, .height = st.totalHeight(), .row = rowOf };
-    }
-
     fn total(self: *const Session) u32 {
         return if (self.st) |*s| s.totalHeight() else 0;
     }
@@ -99,12 +104,64 @@ pub const Session = struct {
     /// A frame; when the source fails, once more from a new source (the
     /// extension ends a session left idle).
     fn grab(self: *Session, clicks: i32) !png.Image {
-        const c = self.c;
         if (self.src) |*s| {
-            if (s.grab(c.gpa, c.env, c.bus, clicks)) |f| return f else |err| log.info("no frame ({t}), starting the source again", .{err});
+            if (self.grabOn(s, clicks)) |f| return f else |err| log.info("no frame ({t}), starting the source again", .{err});
         }
         const s = try self.reopen();
-        return s.grab(c.gpa, c.env, c.bus, 0);
+        return self.grabOn(s, 0);
+    }
+
+    /// One frame of `src` on a worker thread; the control answers
+    /// meanwhile.
+    fn grabOn(self: *Session, src: *platform_capture.ScrollSource, clicks: i32) !png.Image {
+        return offload.run(self, grabFrame, .{ src, self.c, clicks });
+    }
+
+    fn grabFrame(src: *platform_capture.ScrollSource, c: flow.Ctx, clicks: i32) !png.Image {
+        return src.grab(c.gpa, c.env, c.bus, clicks);
+    }
+
+    /// The stitcher from the first frame, and the control's first preview.
+    fn startStitch(gpa: std.mem.Allocator, first: png.Image, max_height: u32, rect: hud_mod.Rect, pv: *?hud_mod.Preview) !stitch.Stitcher {
+        const st = try stitch.Stitcher.init(gpa, .{ .pixels = first.pixels, .width = first.width, .height = first.height }, max_height);
+        pv.* = previewOf(&st, gpa, rect);
+        return st;
+    }
+
+    /// Stitch frame `f` in on a worker thread, and the control's new
+    /// preview when the image grew.
+    fn push(self: *Session, f: png.Image) !stitch.Push {
+        var pv: ?hud_mod.Preview = null;
+        const r = try offload.run(self, pushFrame, .{ &self.st.?, f, self.c.gpa, self.hud.previewRect(), &pv });
+        if (pv) |p| self.hud.setPreview(p);
+        return r;
+    }
+
+    fn pushFrame(st: *stitch.Stitcher, f: png.Image, gpa: std.mem.Allocator, rect: hud_mod.Rect, pv: *?hud_mod.Preview) !stitch.Push {
+        const r = try st.push(.{ .pixels = f.pixels, .width = f.width, .height = f.height });
+        if (r == .appended or r == .full) pv.* = previewOf(st, gpa, rect);
+        return r;
+    }
+
+    /// The control's preview of the image so far, at `rect`.
+    fn previewOf(st: *const stitch.Stitcher, gpa: std.mem.Allocator, rect: hud_mod.Rect) ?hud_mod.Preview {
+        return hud_mod.Preview.make(gpa, rect, .{ .ctx = st, .width = st.width, .height = st.totalHeight(), .row = rowOf });
+    }
+
+    /// The control for up to `ms`: drawn, its input read (an action is
+    /// kept for the capture loop). Called beside the worker: it touches
+    /// the control only, never the stitcher.
+    pub fn pump(self: *Session, ms: i32) !void {
+        try self.hud.draw();
+        if (try self.hud.poll(ms)) |a| {
+            if (self.asked == null) self.asked = a;
+        }
+    }
+
+    /// `ms` without a frame, the control answering.
+    fn wait(self: *Session, ms: i64) !void {
+        const until_ms = sys.monoMs() + ms;
+        while (sys.monoMs() < until_ms) try self.pump(@intCast(@max(1, @min(10, until_ms - sys.monoMs()))));
     }
 
     /// The region once nothing moves in it any more (the picker's fade,
@@ -112,7 +169,7 @@ pub const Session = struct {
     fn settled(self: *Session) !png.Image {
         var a = try self.grab(0);
         for (0..12) |_| {
-            sleepMs(60);
+            try self.wait(60);
             const b = try self.grab(0);
             const same = std.mem.eql(u32, a.pixels, b.pixels);
             a.deinit(self.c.gpa);
@@ -126,8 +183,10 @@ pub const Session = struct {
     pub fn collect(self: *Session) !?png.Image {
         var first = try self.settled();
         defer first.deinit(self.c.gpa);
-        self.st = try stitch.Stitcher.init(self.c.gpa, .{ .pixels = first.pixels, .width = first.width, .height = first.height }, self.max_height);
+        var pv: ?hud_mod.Preview = null;
+        self.st = try offload.run(self, startStitch, .{ self.c.gpa, first, self.max_height, self.hud.previewRect(), &pv });
         defer self.st.?.deinit();
+        if (pv) |p| self.hud.setPreview(p);
         self.showRunning();
         _ = (try self.until()) orelse return null;
         const out = try self.st.?.result();
@@ -166,8 +225,10 @@ pub const Session = struct {
     /// Frames until something stops it; null when cancelled.
     fn scrolling(self: *Session) !?stop.Reason {
         while (true) {
-            try self.hud.draw(self.preview());
-            if (try self.hud.poll(if (self.wheel()) 10 else 120)) |a| switch (a) {
+            try self.hud.draw();
+            const asked = self.asked;
+            self.asked = null;
+            if (asked orelse try self.hud.poll(if (self.wheel()) 10 else 120)) |a| switch (a) {
                 .finish => return .user_stopped,
                 .cancel => return null,
                 .@"continue" => {},
@@ -178,9 +239,11 @@ pub const Session = struct {
 
     /// Paused: wait for Continue, Finish or Cancel.
     fn paused(self: *Session, msg: []const u8) !hud_mod.Action {
+        // (a click meant for the running control is not an answer here)
+        self.asked = null;
         self.hud.showMessage(.paused, msg, self.total());
         while (true) {
-            try self.hud.draw(self.preview());
+            try self.hud.draw();
             if (try self.hud.poll(100)) |a| return a;
         }
     }
@@ -189,9 +252,10 @@ pub const Session = struct {
     /// False when cancelled meanwhile.
     fn hold(self: *Session, msg: []const u8) !bool {
         self.hud.showMessage(.done, msg, self.total());
+        if (self.asked) |a| return a != .cancel;
         const until_ms = sys.monoMs() + done_hold_ms;
         while (sys.monoMs() < until_ms) {
-            try self.hud.draw(self.preview());
+            try self.hud.draw();
             if (try self.hud.poll(30)) |a| return a != .cancel;
         }
         return true;
@@ -230,7 +294,7 @@ pub const Session = struct {
         };
         defer f.deinit(self.c.gpa);
         const st = &self.st.?;
-        var r = st.push(.{ .pixels = f.pixels, .width = f.width, .height = f.height }) catch |err| {
+        var r = self.push(f) catch |err| {
             log.warn("{t}", .{err});
             return .lost;
         };
@@ -259,10 +323,10 @@ pub const Session = struct {
     /// The region again, without scrolling: what it does now (`was` when
     /// it still has not moved).
     fn recheck(self: *Session, was: stitch.Push) !stitch.Push {
-        sleepMs(150);
+        try self.wait(150);
         var f = try self.settled();
         defer f.deinit(self.c.gpa);
-        const r = try self.st.?.push(.{ .pixels = f.pixels, .width = f.width, .height = f.height });
+        const r = try self.push(f);
         return if (r == .unchanged) was else r;
     }
 

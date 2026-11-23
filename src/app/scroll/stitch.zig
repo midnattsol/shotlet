@@ -17,10 +17,15 @@
 //!   pixel, so a hash collision cannot pass;
 //! - the new rows (the bottom d rows of the body) are appended.
 //!
+//! When no distance lines up exactly (a half-pixel scroll on a
+//! fractional scale repaints every row a little differently), the rows'
+//! profiles decide (nearmatch.zig).
+//!
 //! An unchanged frame means the content stopped moving (the end of the
 //! page); no offset means it moved too far between two frames.
 
 const std = @import("std");
+const nearmatch = @import("nearmatch.zig");
 
 pub const default_max_height: u32 = 20_000;
 
@@ -212,8 +217,12 @@ pub const Stitcher = struct {
         const body_h = self.height - b.top - b.bottom;
         const prev_body = self.prev_hash[b.top..][0..body_h];
         const cur_body = self.cur_hash[b.top..][0..body_h];
-        const d = (try findOffset(self.gpa, prev_body, cur_body, self.last_step)) orelse return .no_overlap;
-        if (!verify(self.prevFrame(), f, b.top, body_h, d)) return .no_overlap;
+        const exact = try findOffset(self.gpa, prev_body, cur_body, self.last_step);
+        const d = if (exact != null and verify(self.prevFrame(), f, b.top, body_h, exact.?))
+            exact.?
+        else
+            (try self.nearOffset(f, b.top, body_h)) orelse return .no_overlap;
+        if (d == 0) return .unchanged;
         if (self.bands == null) try self.startBody(b);
         const room = self.max_height - self.totalHeight();
         const add = @min(d, room);
@@ -222,6 +231,19 @@ pub const Stitcher = struct {
         @memcpy(self.prev, f.pixels[0..self.prev.len]);
         @memcpy(self.prev_hash, self.cur_hash);
         return if (add < d or add == room) .full else .{ .appended = d };
+    }
+
+    /// No distance lines the rows up exactly (a half-pixel scroll on a
+    /// fractional scale): the one their profiles agree on (nearmatch.zig).
+    fn nearOffset(self: *const Stitcher, f: Frame, top: u32, body_h: u32) !?u32 {
+        const n = @as(usize, body_h) * nearmatch.blocks;
+        const prof = try self.gpa.alloc(u16, 2 * n);
+        defer self.gpa.free(prof);
+        const hw = hashWidth(self.width);
+        const at = @as(usize, top) * self.width;
+        nearmatch.profiles(self.prev[at..], self.width, hw, body_h, prof[0..n]);
+        nearmatch.profiles(f.pixels[at..], self.width, hw, body_h, prof[n..]);
+        return nearmatch.findOffset(self.gpa, prof[0..n], prof[n..], body_h, self.last_step);
     }
 
     /// The first move fixes the bands; the first frame's body starts the

@@ -270,7 +270,10 @@ windows are is taken with the capture, never live:
   Start scrolling capture on the bar under it (or Enter).
   Shotlet turns the wheel there step by step and stitches the frames
   (sticky headers and footers kept once, repeated rows handled, frames
-  verified pixel by pixel) until the page stops moving, you press Stop,
+  verified pixel by pixel; on a fractional scale such as 1.5, where a
+  scroll can land between two physical pixels and every row is painted a
+  little differently, the rows' profiles line them up instead) until the
+  page stops moving, you press Stop,
   or the image reaches `scroll_max_height=20000` px; a small control
   beside the region shows the image growing and says why it stopped
   ("Reached the end of the page", "Stopped at the 20 000 px limit").
@@ -757,7 +760,11 @@ Both suites print PASS, FAIL or SKIP per check and a summary, and exit
 `scenario_NAME` function in `tools/e2e/scenarios/*.sh` or
 `tools/container/scenarios/*.sh`, with a row in that suite's
 `table.sh` (monitors, flags, what it checks: what `--list` prints).
-`rec-bench` (the encoders' CPU, memory and size) only runs when named.
+`rec-bench` (the encoders' CPU, memory and size) and `perf-owner` (each
+surface's frame times on two 4K monitors at 2 and 1.5) only run when
+named. Every window in the GNOME suite logs its frame times as it closes
+(`SHOTLET_LOOP_STATS`); `modes-scroll-mixed` fails when the scrolling
+capture's picker or control kept the compositor's pings waiting.
 `zig build e2e-driver` builds the binaries the scripts need when run
 directly. CI runs both suites nightly and on demand
 (`.github/workflows/e2e.yml`, `e2e-container.yml`), never on pull

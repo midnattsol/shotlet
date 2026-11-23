@@ -2,6 +2,8 @@
 
 comptime {
     _ = @import("stitch.zig");
+    _ = @import("nearmatch.zig");
+    _ = @import("offload.zig");
     _ = @import("available.zig");
     _ = @import("stop.zig");
 }

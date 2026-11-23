@@ -52,6 +52,7 @@ modes-scroll        | 1600x900           | ext                    | a scrolling 
 modes-scroll-manual | 1600x900           | ext                    | scroll_auto=false: the person scrolls, a jump warns, Stop ends it
 modes-scroll-stops  | 1600x900           | ext                    | why a scrolling capture pauses or stops: didn't move, no match, height limit, Esc
 modes-scroll-dark   | 1600x900           | ext                    | the same in the dark appearance
+modes-scroll-mixed  | 3456x2160 3840x2160 | ext                   | a scrolling capture on 1.5 beside 2 (4K): stitched at 1.5's pixels
 scroll-unavailable  | 1600x900           | -                      | shotlet scroll without the extension says why and exits 1; works after a new login
 area-editor         | 1600x900           | ext                    | the editor's area: drag, resize, move, arrows, size, Enter, Shift, click, Esc
 area-record         | 1600x900           | ext                    | the same in the recording picker
@@ -69,6 +70,7 @@ rec-portal          | 1600x900           | -                      | recording th
 perms               | 1600x900           | nothumb                | shotlet permissions after a portal grant, reset --dry-run and reset
 perms-shell         | 1600x900           | nothumb ext            | captures through the extension store no permission
 gnome-install       | 1600x900           | nothumb                | gnome-integration install loads at the next login and finishes the setup
+perf-owner          | 3456x2160 3840x2160 | ext manual            | frame times of each surface on two 4K monitors at 2 and 1.5 (a report)
 rec-bench           | 1600x900           | ext manual             | CPU, memory and size of 10 s recordings per encoder (a report)
 EOF_TABLE
 }

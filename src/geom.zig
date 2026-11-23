@@ -335,3 +335,29 @@ test "a region maps onto a scaled monitor's frame pixels" {
     const f = toFramePixels(.{ .x = 1601, .y = 1, .w = 3, .h = 3 }, mon, 1920, 1080).?;
     try testing.expectEqual(Rect{ .x = 2, .y = 2, .w = 4, .h = 4 }, f);
 }
+
+// the scrolling capture's mixed layout: a built-in 3456x2160 at 2
+// (1728x1080 logical) left of a 3840x2160 at 1.5 (2560x1440 logical);
+// the stitched capture keeps the sharpest density, 2, so the 1.5
+// monitor's part is 5120x2880 image pixels
+const owner = [_]Monitor{
+    .{ .x = 0, .y = 0, .w = 3456, .h = 2160, .logical = .{ .x = 0, .y = 0, .w = 1728, .h = 1080 } },
+    .{ .x = 3456, .y = 0, .w = 5120, .h = 2880, .logical = .{ .x = 1728, .y = 0, .w = 2560, .h = 1440 } },
+};
+
+test "a selection on the 1.5 monitor beside a 2 one maps to its logical region" {
+    // the picked region (image pixels, odd width: half a logical pixel)
+    const l = imageToLogical(&owner, .{ .x = 4820, .y = 411, .w = 3685, .h = 1844 }).?;
+    try testing.expectEqual(Rect{ .x = 2410, .y = 206, .w = 1843, .h = 922 }, l.rect);
+    try testing.expectEqual(@as(f64, 2), l.scale);
+    // and back: whole image pixels, one more where the half rounded up
+    try testing.expectEqual(Rect{ .x = 4820, .y = 412, .w = 3686, .h = 1844 }, logicalToImage(&owner, l.rect).?);
+    // on the 2 monitor, 1:1 with its own pixels
+    const b = imageToLogical(&owner, .{ .x = 100, .y = 60, .w = 801, .h = 400 }).?;
+    try testing.expectEqual(Rect{ .x = 50, .y = 30, .w = 401, .h = 200 }, b.rect);
+    // across the seam: the monitor holding its centre, clipped to it
+    const s = imageToLogical(&owner, .{ .x = 3000, .y = 0, .w = 2000, .h = 200 }).?;
+    try testing.expectEqual(Rect{ .x = 1728, .y = 0, .w = 772, .h = 100 }, s.rect);
+    try testing.expectEqual(@as(usize, 1), monitorAt(&owner, .{ 2410, 206 }));
+    try testing.expectEqual(@as(usize, 0), monitorAt(&owner, .{ 1727, 1079 }));
+}

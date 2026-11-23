@@ -93,6 +93,11 @@ export class ShotletWindows {
         return [...this._windows].some(([w, st]) => st.role === role && w.showing_on_its_workspace());
     }
 
+    // The tagged windows of `role`.
+    windows(role) {
+        return [...this._windows].filter(([, st]) => st.role === role).map(([w]) => w);
+    }
+
     // Move the tagged window titled `title` to x, y; whether there is one.
     place(title, x, y) {
         for (const win of this._windows.keys()) {

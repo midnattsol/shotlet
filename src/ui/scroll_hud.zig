@@ -28,7 +28,7 @@ const floatwin = @import("floatwin.zig");
 const material = @import("material.zig");
 const resample = @import("../gfx/resample.zig");
 const window = @import("../platform/api.zig").window;
-const Rect = @import("shapes.zig").Rect;
+pub const Rect = @import("shapes.zig").Rect;
 
 pub const title = "shotlet:scroll";
 /// logical size
@@ -65,6 +65,52 @@ pub const Source = struct {
 
 const Button = struct { r: Rect, action: Action, label: []const u8, primary: bool };
 
+/// The image's bottom, area-filtered to the preview's width
+/// (gfx/resample.zig), so text in it stays legible. Made off the event
+/// loop (the capture's worker: `make`), handed over with `setPreview`.
+pub const Preview = struct {
+    px: []u32 = &.{},
+    w: u32 = 0,
+    h: u32 = 0,
+    /// where it sits in the preview's rectangle
+    at: [2]i32 = .{ 0, 0 },
+
+    /// The rows that fill a preview `pv` at its width; null when there
+    /// is nothing to show (or no memory).
+    pub fn make(gpa: std.mem.Allocator, pv: Rect, s: Source) ?Preview {
+        if (s.width == 0 or s.height == 0 or pv.w <= 0 or pv.h <= 0) return null;
+        const ratio = @as(f64, @floatFromInt(pv.w)) / @as(f64, @floatFromInt(s.width));
+        const shown: u32 = std.math.clamp(@as(u32, @intFromFloat(@as(f64, @floatFromInt(pv.h)) / ratio)), 1, s.height);
+        const first = s.height - shown;
+        const p = resample.fit(s.width, shown, @intCast(pv.w), @intCast(pv.h), .contain);
+        const rows = gpa.alloc(u32, @as(usize, s.width) * shown) catch return null;
+        defer gpa.free(rows);
+        for (0..shown) |y| for (rows[y * s.width ..][0..s.width], s.row(s.ctx, first + @as(u32, @intCast(y)))[0..s.width]) |*d, q| {
+            d.* = q | 0xFF000000;
+        };
+        const out = gpa.alloc(u32, @as(usize, p.w) * p.h) catch return null;
+        resample.region(gpa, rows, s.width, shown, p.src, out, p.w, p.h) catch {
+            gpa.free(out);
+            return null;
+        };
+        return .{ .px = out, .w = p.w, .h = p.h, .at = .{ p.x, pv.h - @as(i32, @intCast(p.h)) } };
+    }
+
+    fn blit(self: *const Preview, cv: *render.Canvas, pv: Rect) void {
+        // (made for another size: the next one fits)
+        if (self.at[0] < 0 or self.at[1] < 0 or self.at[0] + @as(i32, @intCast(self.w)) > pv.w or self.at[1] + @as(i32, @intCast(self.h)) > pv.h) return;
+        for (0..self.h) |y| {
+            const at = @as(usize, @intCast(pv.y + self.at[1] + @as(i32, @intCast(y)))) * @as(usize, @intCast(cv.w)) + @as(usize, @intCast(pv.x + self.at[0]));
+            @memcpy(cv.px[at..][0..self.w], self.px[y * self.w ..][0..self.w]);
+        }
+    }
+
+    pub fn free(self: *Preview, gpa: std.mem.Allocator) void {
+        gpa.free(self.px);
+        self.* = .{};
+    }
+};
+
 pub const Hud = struct {
     win: *window.Window,
     th: theme.Theme,
@@ -83,6 +129,8 @@ pub const Hud = struct {
     /// a click is a press and a release on the same button (ui/press.zig)
     pressed: press.Press(Action) = .{},
     dirty: bool = true,
+    /// the preview of the image so far (setPreview)
+    pv_cache: Preview = .{},
 
     pub fn open(win: *window.Window, th: theme.Theme) !Hud {
         _ = try floatwin.open(win, .{
@@ -125,7 +173,7 @@ pub const Hud = struct {
         return scale.px(v, self.k());
     }
 
-    pub fn draw(self: *Hud, src: ?Source) !void {
+    pub fn draw(self: *Hud) !void {
         if (!self.dirty or !floatwin.canDraw(self.win)) return;
         self.dirty = false;
         const bw = self.win.width;
@@ -134,7 +182,7 @@ pub const Hud = struct {
         const card = try gpa.alloc(u32, @as(usize, bw) * bh);
         defer gpa.free(card);
         var cv = render.Canvas.init(card, bw, bh);
-        self.drawCard(&cv, src);
+        self.drawCard(&cv);
         const px = try self.win.backBuffer();
         @memset(px, 0);
         floatui.place(.{ .px = px, .w = bw, .h = bh }, .{ .px = card, .w = bw, .h = bh }, .{ 0, 0 }, self.radiusPx(), null, self.k());
@@ -146,7 +194,7 @@ pub const Hud = struct {
     }
 
     /// Everything on the card, on an opaque canvas of the window's size.
-    fn drawCard(self: *Hud, cv: *render.Canvas, src: ?Source) void {
+    fn drawCard(self: *Hud, cv: *render.Canvas) void {
         const lk = self.look;
         @memset(cv.px, lk.panel);
         material.hairline(cv, .{ .x = 0, .y = 0, .w = cv.w, .h = cv.h }, self.radiusPx(), lk.line);
@@ -159,9 +207,9 @@ pub const Hud = struct {
         var ebuf: [128]u8 = undefined;
         text.drawStyled(cv, x0, self.sc(pad + 22), fs, if (loud) lk.fg else lk.muted, head_style, text.ellipsize(&ebuf, fs, head_style, self.headline, inner, .end));
         text.draw(cv, x0, self.sc(pad + 38), fs, lk.muted, text.ellipsize(&ebuf, fs, .regular, self.hint, inner, .end));
-        const pv: Rect = .{ .x = x0, .y = self.sc(preview_y), .w = inner, .h = self.sc(preview_h) };
+        const pv = self.previewRect();
         cv.fillRect(pv.x, pv.y, pv.w, pv.h, lk.field);
-        if (src) |s| drawPreview(self.win.alloc, cv, pv, s);
+        if (self.pv_cache.px.len > 0) self.pv_cache.blit(cv, pv);
         if (self.phase != .failed) text.drawStyled(cv, x0, pv.y + pv.h + self.sc(8), fs, lk.muted, text.Style.regular.num(), self.detail);
         self.layoutButtons(cv.w, cv.h);
         for (self.buttons) |b| {
@@ -198,31 +246,30 @@ pub const Hud = struct {
         self.buttons = b[0..3];
     }
 
-    /// The bottom of the image, as wide as the preview: it grows up from
-    /// the preview's bottom edge. Area-filtered (gfx/resample.zig), so
-    /// text in it stays legible.
-    fn drawPreview(gpa: std.mem.Allocator, cv: *render.Canvas, pv: Rect, s: Source) void {
-        if (s.width == 0 or s.height == 0 or pv.w <= 0 or pv.h <= 0) return;
-        // the rows that fill the preview at its width
-        const ratio = @as(f64, @floatFromInt(pv.w)) / @as(f64, @floatFromInt(s.width));
-        const shown: u32 = std.math.clamp(@as(u32, @intFromFloat(@as(f64, @floatFromInt(pv.h)) / ratio)), 1, s.height);
-        const first = s.height - shown;
-        var p = resample.fit(s.width, shown, @intCast(pv.w), @intCast(pv.h), .contain);
-        p.y = pv.h - @as(i32, @intCast(p.h));
-        const rows = gpa.alloc(u32, @as(usize, s.width) * shown) catch return;
-        defer gpa.free(rows);
-        for (0..shown) |y| for (rows[y * s.width ..][0..s.width], s.row(s.ctx, first + @as(u32, @intCast(y)))[0..s.width]) |*d, q| {
-            d.* = q | 0xFF000000;
-        };
-        const out = gpa.alloc(u32, @as(usize, p.w) * p.h) catch return;
-        defer gpa.free(out);
-        resample.region(gpa, rows, s.width, shown, p.src, out, p.w, p.h) catch return;
-        for (0..p.h) |y| {
-            const at = @as(usize, @intCast(pv.y + p.y + @as(i32, @intCast(y)))) * @as(usize, @intCast(cv.w)) + @as(usize, @intCast(pv.x + p.x));
-            @memcpy(cv.px[at..][0..p.w], out[y * p.w ..][0..p.w]);
-        }
+    /// Where the preview goes (buffer pixels): `Preview.make` it for this.
+    pub fn previewRect(self: *const Hud) Rect {
+        const x0 = self.sc(pad);
+        return .{ .x = x0, .y = self.sc(preview_y), .w = @as(i32, @intCast(self.win.width)) - 2 * x0, .h = self.sc(preview_h) };
     }
 
+    /// Show `p` from now on (the control owns it).
+    pub fn setPreview(self: *Hud, p: Preview) void {
+        self.pv_cache.free(self.win.alloc);
+        self.pv_cache = p;
+        self.dirty = true;
+    }
+
+    /// The bottom of the image, as wide as the preview: it grows up from
+    /// the preview's bottom edge (the test's way in: render, blit, free).
+    fn drawPreview(gpa: std.mem.Allocator, cv: *render.Canvas, pv: Rect, s: Source) void {
+        var p = Preview.make(gpa, pv, s) orelse return;
+        defer p.free(gpa);
+        p.blit(cv, pv);
+    }
+
+    pub fn deinit(self: *Hud) void {
+        self.pv_cache.free(self.win.alloc);
+    }
     /// Wait up to `ms` for input: the action asked for, if any.
     pub fn poll(self: *Hud, ms: i32) !?Action {
         const deadline = sys.monoMs() + ms;
@@ -237,7 +284,8 @@ pub const Hud = struct {
     fn handle(self: *Hud, ev: window.InputEvent) ?Action {
         switch (ev) {
             .close => return .cancel,
-            .resize, .frame_done => self.dirty = true,
+            // (not on frame_done: a frame only when something changed)
+            .resize => self.dirty = true,
             .key => |key| if (key.pressed and !key.repeat) return keyAction(self.phase, key),
             .pointer_motion => |m| {
                 const over = self.buttonAt(m.x, m.y);
