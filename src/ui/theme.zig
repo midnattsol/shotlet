@@ -24,6 +24,9 @@
 //!   Opaque, Opaque.of(th) the panel colours made opaque, for surfaces
 //!                         with no backdrop blur (floating client windows)
 //!   Scrim, Theme.scrim(level)  the dark veils and pills over pictures
+//!   Shadow, Shadow.reach, window_shadow   shadows (cards': Theme.card_shadow)
+//!   card_room, window_room   the room a see-through window keeps for a
+//!                         card's or a window frame's shadow
 //!   withAlpha, fade, mix, over, luminance, contrast, legible
 //!                         colour helpers (gfx/color.zig)
 
@@ -97,7 +100,30 @@ pub const Shadow = struct {
     /// CSS-style blur radius and vertical offset, logical px
     blur: f64,
     dy: f64,
+
+    /// How far it reaches past the surface casting it, on its farthest
+    /// side (logical px): ui/material.zig draws it over
+    /// shadowFootprint, the blur all round plus the offset below.
+    pub fn reach(sh: Shadow) f64 {
+        return sh.blur + @abs(sh.dy);
+    }
 };
+
+/// The room a see-through window keeps around what casts a shadow in it
+/// (logical px, outside its input region): a card's shadow's reach
+/// (quick access, toasts) and a window frame's (frame.zig). Their sizes
+/// are the same in both appearances.
+pub const card_room = room(dark_base.card_shadow);
+pub const window_room = room(window_shadow);
+
+/// The shadow of ordinary windows' drawn frame (Settings, Trim;
+/// ui/frame.zig), the same in both appearances: smaller than a card's,
+/// so the room the frame keeps around the window stays small.
+pub const window_shadow: Shadow = .{ .color = 0x48000000, .blur = 14, .dy = 5 };
+
+fn room(comptime sh: Shadow) comptime_int {
+    return @intFromFloat(@ceil(sh.reach()));
+}
 
 pub const Theme = struct {
     dark: bool,
@@ -415,6 +441,15 @@ test "the opaque panel is the panel over the window, tints over that" {
         try std.testing.expect(contrast(o.muted, o.panel) >= aa_text);
         try std.testing.expectEqual(t.accent_fill, o.accent_fill);
     }
+}
+
+test "the rooms hold the shadows in either appearance" {
+    for ([_]bool{ false, true }) |dark| {
+        const t = Theme.get(dark, null);
+        try std.testing.expect(t.card_shadow.reach() <= card_room);
+    }
+    try std.testing.expectEqual(32, card_room);
+    try std.testing.expectEqual(19, window_room);
 }
 
 test "scrim levels darken in order" {

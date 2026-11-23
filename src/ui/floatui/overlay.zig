@@ -46,11 +46,10 @@ pub fn notice(cv: *Canvas, area: Rect, s: []const u8, k: f64, th: Theme) void {
 }
 
 /// A round dark button of radius `r` (physical px) centred on cx, cy,
-/// with a white `icon`.
+/// with a white `icon` at its own stroke (icons.defaultStroke).
 pub fn roundButton(cv: *Canvas, cx: f64, cy: f64, r: f64, icon: icons.Icon, st: State, k: f64, th: Theme) void {
     cv.fillCircleAA(cx, cy, r, if (st.hot and !st.dim) th.round_btn_hover else th.round_btn);
-    const stroke: f64 = if (icon == .close or icon == .check) 2.4 else 2;
-    icons.drawAt(cv, icon, cx, cy, 14 * k, .{ .stroke = stroke }, if (st.dim) th.on_scrim_dim else th.on_scrim);
+    icons.drawAt(cv, icon, cx, cy, 14 * k, .{}, if (st.dim) th.on_scrim_dim else th.on_scrim);
     if (st.focused) barkit.focusRingRound(cv, cx, cy, r, k, th.accent);
 }
 

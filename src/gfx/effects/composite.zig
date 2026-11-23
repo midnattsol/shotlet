@@ -121,11 +121,12 @@ const Shadow = struct {
 };
 
 /// Copy `src` (sw×sh) into `dst` (dw×dh) at (x, y) with its corners rounded
-/// to `radius`, blending the corner edges over what `dst` already holds.
-pub fn blitRounded(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32, x: i32, y: i32, radius: u32) void {
+/// to `radius` (px, fractional at fractional scales; at most half the
+/// shorter side, rounded down), blending the corner edges over what `dst`
+/// already holds.
+pub fn blitRounded(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32, x: i32, y: i32, radius: f64) void {
     const c = clip(.{ .x = x, .y = y, .w = dim(sw), .h = dim(sh) }, dw, dh) orelse return;
-    const radi: u32 = @min(radius, @min(sw, sh) / 2);
-    const rad: f64 = @floatFromInt(radi);
+    const rad: f64 = if (radius > 0) @min(radius, @as(f64, @floatFromInt(@min(sw, sh) / 2))) else 0;
     const fw: f64 = @floatFromInt(sw);
     const fh: f64 = @floatFromInt(sh);
     const sx0: usize = @intCast(c.x - x); // first source column drawn
@@ -136,7 +137,7 @@ pub fn blitRounded(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: 
         const srow = src[sy * sw ..][0..sw];
         const drow = dst[@as(usize, @intCast(dy)) * dw + @as(usize, @intCast(c.x)) ..][0..cw];
         const py = @as(f64, @floatFromInt(sy)) + 0.5;
-        if (radi == 0 or (py > rad and py < fh - rad)) {
+        if (rad == 0 or (py > rad and py < fh - rad)) {
             @memcpy(drow, srow[sx0..][0..cw]); // no corner on this row
             continue;
         }
