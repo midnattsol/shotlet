@@ -4,6 +4,7 @@
 //! like the "discard changes?" prompt of macOS editors, without a dialog.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const commands = @import("commands.zig");
 const session = @import("session.zig");
@@ -22,7 +23,7 @@ pub fn close(ed: *Editor) void {
     ed.discard_until_ms = now + confirm_ms;
     ed.tools.toast.show(.problem, message, confirm_ms);
     ed.needs_render = true;
-    std.log.info("close: unsaved annotations, waiting for a second Esc to discard them", .{});
+    log.info("close: unsaved annotations, waiting for a second Esc to discard them", .{});
 }
 
 /// Shapes the person drew in this session (a reopened capture's shapes,

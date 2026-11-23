@@ -5,6 +5,7 @@
 //! outcome is kept for the Settings window.
 
 const std = @import("std");
+const log = std.log.scoped(.gnome);
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const gsettings = @import("gsettings.zig");
@@ -69,7 +70,7 @@ fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShor
     var exe_buf: [1024]u8 = undefined;
     const exe = sys.selfExe(&exe_buf) catch "";
     pointAt(arena, env, schemadir, exe) catch |err| {
-        std.log.warn("could not configure the extension ({t}): it may be an older version", .{err});
+        log.warn("could not configure the extension ({t}): it may be an older version", .{err});
         return;
     };
     if (!offerCustomShortcuts(arena, env, schemadir, exe, move)) return;

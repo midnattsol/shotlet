@@ -4,6 +4,7 @@
 //! A recording with sound goes to the ffmpeg program.
 
 const std = @import("std");
+const log = std.log.scoped(.recording);
 const switches = @import("../platform/api/switches.zig");
 const gif = @import("gif.zig");
 const av = @import("av.zig");
@@ -63,16 +64,16 @@ pub const Sink = struct {
         if (cfg.vaapi != null and want != .libav and want != .ffmpeg) {
             var o = ff_opts;
             o.vaapi = cfg.vaapi;
-            if (ffmpeg.Proc.open(gpa, envp, path, o)) |p| return .{ .backend = .ffmpeg_vaapi, .cfg = cfg, .ff = p, .has_audio = cfg.audio } else |err| std.log.info("recording: ffmpeg with VA-API: {t}", .{err});
+            if (ffmpeg.Proc.open(gpa, envp, path, o)) |p| return .{ .backend = .ffmpeg_vaapi, .cfg = cfg, .ff = p, .has_audio = cfg.audio } else |err| log.info("ffmpeg with VA-API: {t}", .{err});
         }
         if (cfg.audio and want != .libav) {
-            if (ffmpeg.Proc.open(gpa, envp, path, ff_opts)) |p| return .{ .backend = .ffmpeg, .cfg = cfg, .ff = p, .has_audio = true } else |err| std.log.info("recording: ffmpeg: {t}; no sound", .{err});
+            if (ffmpeg.Proc.open(gpa, envp, path, ff_opts)) |p| return .{ .backend = .ffmpeg, .cfg = cfg, .ff = p, .has_audio = true } else |err| log.info("ffmpeg: {t}; no sound", .{err});
         }
         if (want != .ffmpeg) {
             if (av_mp4.Mp4.open(path, .{ .width = cfg.width, .height = cfg.height, .fps = cfg.fps, .quality = cfg.quality })) |m| {
-                std.log.info("recording: {s} through the FFmpeg libraries", .{m.encoder_name});
+                log.info("{s} through the FFmpeg libraries", .{m.encoder_name});
                 return .{ .backend = .libav, .cfg = cfg, .mp4 = m };
-            } else |err| std.log.info("recording: FFmpeg libraries: {t} ({s})", .{ err, if (av.available()) "loaded" else av.missing() });
+            } else |err| log.info("FFmpeg libraries: {t} ({s})", .{ err, if (av.available()) "loaded" else av.missing() });
         }
         var o = ff_opts;
         o.audio = false;

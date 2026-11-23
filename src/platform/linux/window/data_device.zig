@@ -170,59 +170,59 @@ fn receive(w: *Window, offer: u32, mime: []const u8) !sys.fd_t {
 /// Plain text on the clipboard, or null when it holds none. Reads at
 /// most `max_bytes` and gives up after `timeout_ms` so a stuck source
 /// cannot freeze the UI. Caller owns the bytes.
-pub fn clipboardText(w: *Window, alloc: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) !?[]u8 {
+pub fn clipboardText(w: *Window, gpa: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) !?[]u8 {
     // our own text: answering our own receive would need this very loop
     if (w.clipboard.source != 0 and w.clipboard_text.len > 0)
-        return try alloc.dupe(u8, w.clipboard_text[0..@min(max_bytes, w.clipboard_text.len)]);
+        return try gpa.dupe(u8, w.clipboard_text[0..@min(max_bytes, w.clipboard_text.len)]);
     const dd = &w.data_device;
     const slot = dd.offerSlot(dd.selection_offer) orelse return null;
     const kinds = dd.offers[slot].text;
     if (kinds == 0) return null;
     const fd = try receive(w, dd.selection_offer, text_mimes[@ctz(kinds)]);
     defer sys.close(fd);
-    return try readBounded(alloc, fd, max_bytes, sys.monoMs() + timeout_ms);
+    return try readBounded(gpa, fd, max_bytes, sys.monoMs() + timeout_ms);
 }
 
 /// The clipboard's content in the first of accept_mimes it offers
 /// (caller frees .data); null when it offers none of them.
-pub fn clipboardAccepted(w: *Window, alloc: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) !?Dropped {
+pub fn clipboardAccepted(w: *Window, gpa: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) !?Dropped {
     const offer = w.data_device.selection_offer;
     const mime = acceptedMime(w, offer) orelse return null;
     const fd = try receive(w, offer, mime);
     defer sys.close(fd);
-    return .{ .mime = mime, .data = try readBounded(alloc, fd, max_bytes, sys.monoMs() + timeout_ms) };
+    return .{ .mime = mime, .data = try readBounded(gpa, fd, max_bytes, sys.monoMs() + timeout_ms) };
 }
 
 /// Read an offer's pipe until EOF, `max_bytes` or the deadline, whichever
 /// comes first (sys.readBounded); a cut never splits a UTF-8 sequence.
 /// Caller owns the bytes.
-fn readBounded(alloc: std.mem.Allocator, fd: sys.fd_t, max_bytes: usize, deadline_ms: i64) ![]u8 {
-    const out = try sys.readBounded(alloc, fd, max_bytes, deadline_ms);
+fn readBounded(gpa: std.mem.Allocator, fd: sys.fd_t, max_bytes: usize, deadline_ms: i64) ![]u8 {
+    const out = try sys.readBounded(gpa, fd, max_bytes, deadline_ms);
     if (out.len < max_bytes) return out;
     // drop a trailing partial character
     const last = utf8.prevBoundary(out, out.len);
     if (last == out.len or out[last] < 0xC0) return out;
     const need = std.unicode.utf8ByteSequenceLength(out[last]) catch 1;
     if (out.len - last >= need) return out;
-    defer alloc.free(out);
-    return alloc.dupe(u8, out[0..last]);
+    defer gpa.free(out);
+    return gpa.dupe(u8, out[0..last]);
 }
 
 test "offers are read up to EOF, the size limit and the deadline" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const fds = try sys.pipe();
     defer sys.close(fds[0]);
     try sys.writeAll(fds[1], "ab\xc3\xb1cd"); // "abñcd"
     // limit cuts inside "ñ": the partial character is dropped
-    const cut = try readBounded(alloc, fds[0], 3, sys.monoMs() + 1000);
-    defer alloc.free(cut);
+    const cut = try readBounded(gpa, fds[0], 3, sys.monoMs() + 1000);
+    defer gpa.free(cut);
     try std.testing.expectEqualStrings("ab", cut);
     // nothing more arrives and the writer stays open: the deadline ends it
-    const rest = try readBounded(alloc, fds[0], 100, sys.monoMs() + 50);
-    defer alloc.free(rest);
+    const rest = try readBounded(gpa, fds[0], 100, sys.monoMs() + 50);
+    defer gpa.free(rest);
     try std.testing.expectEqualStrings("\xb1cd", rest);
     sys.close(fds[1]);
-    const eof = try readBounded(alloc, fds[0], 100, sys.monoMs() + 1000);
-    defer alloc.free(eof);
+    const eof = try readBounded(gpa, fds[0], 100, sys.monoMs() + 1000);
+    defer gpa.free(eof);
     try std.testing.expectEqual(@as(usize, 0), eof.len);
 }

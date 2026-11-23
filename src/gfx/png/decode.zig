@@ -16,18 +16,18 @@ pub const Image = struct {
     /// row-major, width*height entries, 0xAARRGGBB
     pixels: []u32,
 
-    pub fn deinit(self: *Image, alloc: std.mem.Allocator) void {
-        alloc.free(self.pixels);
+    pub fn deinit(self: *Image, gpa: std.mem.Allocator) void {
+        gpa.free(self.pixels);
         self.* = undefined;
     }
 
     /// A copy of the pixels inside `r`, clipped to the image;
     /// error.OutsideImage when nothing of it is left.
-    pub fn crop(self: *const Image, alloc: std.mem.Allocator, r: Rect) !Image {
+    pub fn crop(self: *const Image, gpa: std.mem.Allocator, r: Rect) !Image {
         const c = r.clip(self.width, self.height) orelse return error.OutsideImage;
         const w: u32 = @intCast(c.w);
         const h: u32 = @intCast(c.h);
-        const px = try alloc.alloc(u32, @as(usize, w) * h);
+        const px = try gpa.alloc(u32, @as(usize, w) * h);
         for (0..h) |y| {
             const src = (@as(usize, @intCast(c.y)) + y) * self.width + @as(usize, @intCast(c.x));
             @memcpy(px[y * w ..][0..w], self.pixels[src..][0..w]);
@@ -41,28 +41,28 @@ pub const max_side = 16384;
 pub const max_pixels = 64 * 1024 * 1024;
 const max_raw_bytes = 512 * 1024 * 1024;
 
-pub fn decode(alloc: std.mem.Allocator, data: []const u8) !Image {
+pub fn decode(gpa: std.mem.Allocator, data: []const u8) !Image {
     if (data.len < 8 or !std.mem.eql(u8, data[0..8], &chunks.signature)) return error.NotPng;
 
     var idat: std.ArrayList(u8) = .empty;
-    defer idat.deinit(alloc);
-    const info = try readChunks(alloc, data, &idat);
+    defer idat.deinit(gpa);
+    const info = try readChunks(gpa, data, &idat);
     const hdr = info.header;
 
     const passes: []const Pass = if (hdr.interlaced) &adam7 else &.{whole_image};
     const raw_len, const max_pass_px = rawSize(hdr, passes);
     if (raw_len > max_raw_bytes) return error.TooLarge;
-    const raw = try alloc.alloc(u8, @intCast(raw_len));
-    defer alloc.free(raw);
-    try inflate(alloc, idat.items, raw);
+    const raw = try gpa.alloc(u8, @intCast(raw_len));
+    defer gpa.free(raw);
+    try inflate(gpa, idat.items, raw);
 
-    const pixels = try alloc.alloc(u32, @as(usize, hdr.width) * hdr.height);
-    errdefer alloc.free(pixels);
+    const pixels = try gpa.alloc(u32, @as(usize, hdr.width) * hdr.height);
+    errdefer gpa.free(pixels);
     if (!hdr.interlaced) {
         try decodePass(&info, whole_image, raw, pixels);
     } else {
-        const sub_px = try alloc.alloc(u32, @intCast(max_pass_px));
-        defer alloc.free(sub_px);
+        const sub_px = try gpa.alloc(u32, @intCast(max_pass_px));
+        defer gpa.free(sub_px);
         var off: usize = 0;
         for (passes) |ps| {
             const pw, const ph = ps.size(hdr.width, hdr.height);
@@ -168,7 +168,7 @@ const Info = struct {
 
 /// Read IHDR (which must come first), PLTE and tRNS, and collect the
 /// IDAT payloads into `idat`.
-fn readChunks(alloc: std.mem.Allocator, data: []const u8, idat: *std.ArrayList(u8)) !Info {
+fn readChunks(gpa: std.mem.Allocator, data: []const u8, idat: *std.ArrayList(u8)) !Info {
     var reader: chunks.Reader = .{ .data = data };
     const first = (try reader.next()) orelse return error.BadIhdr;
     if (!std.mem.eql(u8, first.type, "IHDR")) return error.BadIhdr;
@@ -180,7 +180,7 @@ fn readChunks(alloc: std.mem.Allocator, data: []const u8, idat: *std.ArrayList(u
         } else if (std.mem.eql(u8, t, "tRNS")) {
             info.setTransparency(chunk.data);
         } else if (std.mem.eql(u8, t, "IDAT")) {
-            try idat.appendSlice(alloc, chunk.data);
+            try idat.appendSlice(gpa, chunk.data);
         } else if (std.mem.eql(u8, t, "IEND")) {
             break;
         } else if (t[0] & 0x20 == 0) {
@@ -207,10 +207,10 @@ fn rawSize(hdr: Header, passes: []const Pass) struct { u64, u64 } {
 }
 
 /// Decompress the zlib stream into exactly `raw.len` bytes.
-fn inflate(alloc: std.mem.Allocator, zdata: []const u8, raw: []u8) !void {
+fn inflate(gpa: std.mem.Allocator, zdata: []const u8, raw: []u8) !void {
     var in: std.Io.Reader = .fixed(zdata);
-    const window = try alloc.alloc(u8, flate.max_window_len);
-    defer alloc.free(window);
+    const window = try gpa.alloc(u8, flate.max_window_len);
+    defer gpa.free(window);
     var dec = flate.Decompress.init(&in, .zlib, window);
     dec.reader.readSliceAll(raw) catch return error.BadData;
 }
@@ -344,13 +344,13 @@ const buildTestPng = helpers.buildTestPng;
 const testSample = helpers.testSample;
 
 test "png decoder survives mutated input" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     // embedded seed: a small encoded image
     var px: [24 * 16]u32 = undefined;
     screenLike(&px, 24, 7);
-    const seed = try encode(alloc, &px, 24, 16);
-    defer alloc.free(seed);
-    try fuzzDecode(alloc, seed, 3000, 1);
+    const seed = try encode(gpa, &px, 24, 16);
+    defer gpa.free(seed);
+    try fuzzDecode(gpa, seed, 3000, 1);
 
     // real-world seeds when present (palette, gray, alpha, 16-bit...)
     const files = [_][:0]const u8{
@@ -368,37 +368,37 @@ test "png decoder survives mutated input" {
     };
     for (files, 0..) |path, i| {
         const data = (try testutil.optionalFile(path, 4 * 1024 * 1024)) orelse continue;
-        defer alloc.free(data);
+        defer gpa.free(data);
         // the unmodified file must decode
-        var img = try decode(alloc, data);
-        img.deinit(alloc);
-        try fuzzDecode(alloc, data, 400, 100 + i);
+        var img = try decode(gpa, data);
+        img.deinit(gpa);
+        try fuzzDecode(gpa, data, 400, 100 + i);
     }
 }
 
 test "png decoder rejects hostile headers before allocating" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var px: [4]u32 = @splat(0xFF336699);
-    const good = try encode(alloc, &px, 2, 2);
-    defer alloc.free(good);
-    const bad = try alloc.dupe(u8, good);
-    defer alloc.free(bad);
+    const good = try encode(gpa, &px, 2, 2);
+    defer gpa.free(good);
+    const bad = try gpa.dupe(u8, good);
+    defer gpa.free(bad);
     // IHDR width = 0x7FFFFFFF
     std.mem.writeInt(u32, bad[16..20], 0x7FFFFFFF, .big);
-    try std.testing.expectError(error.TooLarge, decode(alloc, bad));
+    try std.testing.expectError(error.TooLarge, decode(gpa, bad));
     std.mem.writeInt(u32, bad[16..20], 16384, .big);
     std.mem.writeInt(u32, bad[20..24], 16384, .big);
-    try std.testing.expectError(error.TooLarge, decode(alloc, bad));
+    try std.testing.expectError(error.TooLarge, decode(gpa, bad));
     // chunk length past the end
     @memcpy(bad, good);
     std.mem.writeInt(u32, bad[8..12], 0xFFFFFFF0, .big);
-    try std.testing.expectError(error.Truncated, decode(alloc, bad));
-    try std.testing.expectError(error.NotPng, decode(alloc, good[0..4]));
-    try std.testing.expectError(error.Truncated, decode(alloc, good[0 .. good.len - 20]));
+    try std.testing.expectError(error.Truncated, decode(gpa, bad));
+    try std.testing.expectError(error.NotPng, decode(gpa, good[0..4]));
+    try std.testing.expectError(error.Truncated, decode(gpa, good[0 .. good.len - 20]));
 }
 
 test "adam7 interlaced decode matches the same image non-interlaced" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var plte: [3 * 256]u8 = undefined;
     for (&plte, 0..) |*b, i| b.* = @truncate(i * 7);
     const Case = struct { ct: u8, depth: u8 };
@@ -413,24 +413,24 @@ test "adam7 interlaced decode matches the same image non-interlaced" {
     inline for (cases) |cs| {
         for (sizes) |sz| {
             const pl: []const u8 = if (cs.ct == 3) &plte else &.{};
-            const flat = try buildTestPng(alloc, sz[0], sz[1], cs.ct, cs.depth, false, pl, testSample(cs.depth));
-            defer alloc.free(flat);
-            const inter = try buildTestPng(alloc, sz[0], sz[1], cs.ct, cs.depth, true, pl, testSample(cs.depth));
-            defer alloc.free(inter);
-            var a = try decode(alloc, flat);
-            defer a.deinit(alloc);
-            var b = try decode(alloc, inter);
-            defer b.deinit(alloc);
+            const flat = try buildTestPng(gpa, sz[0], sz[1], cs.ct, cs.depth, false, pl, testSample(cs.depth));
+            defer gpa.free(flat);
+            const inter = try buildTestPng(gpa, sz[0], sz[1], cs.ct, cs.depth, true, pl, testSample(cs.depth));
+            defer gpa.free(inter);
+            var a = try decode(gpa, flat);
+            defer a.deinit(gpa);
+            var b = try decode(gpa, inter);
+            defer b.deinit(gpa);
             try std.testing.expectEqualSlices(u32, a.pixels, b.pixels);
         }
     }
     // fuzz the interlaced path too
-    const seed = try buildTestPng(alloc, 19, 13, 6, 8, true, &.{}, testSample(8));
-    defer alloc.free(seed);
-    try fuzzDecode(alloc, seed, 1500, 5);
-    const seed2 = try buildTestPng(alloc, 21, 9, 3, 2, true, plte[0..12], testSample(2));
-    defer alloc.free(seed2);
-    try fuzzDecode(alloc, seed2, 1500, 6);
+    const seed = try buildTestPng(gpa, 19, 13, 6, 8, true, &.{}, testSample(8));
+    defer gpa.free(seed);
+    try fuzzDecode(gpa, seed, 1500, 5);
+    const seed2 = try buildTestPng(gpa, 21, 9, 3, 2, true, plte[0..12], testSample(2));
+    defer gpa.free(seed2);
+    try fuzzDecode(gpa, seed2, 1500, 6);
 }
 
 test "crop clips to the image and refuses what lies outside" {

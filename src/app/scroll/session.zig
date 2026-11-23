@@ -12,6 +12,7 @@
 //!   parts line up, or starts the frame source over.
 
 const std = @import("std");
+const log = std.log.scoped(.scrolling_capture);
 const capture = @import("../capture.zig");
 const png = @import("../../gfx/png.zig");
 const sys = @import("../../platform/api.zig").sys;
@@ -55,7 +56,7 @@ pub const Session = struct {
         var self: Session = .{ .c = c, .hud = hud, .opener = opener, .max_height = max_height, .watch = .{ .auto = false } };
         const src = try self.open();
         self.watch.auto = src.scrolls();
-        std.log.info("scrolling capture: {s}, {s}", .{ @tagName(src.*), if (src.scrolls()) "Shotlet scrolls" else "the person scrolls" });
+        log.info("{s}, {s}", .{ @tagName(src.*), if (src.scrolls()) "Shotlet scrolls" else "the person scrolls" });
         return self;
     }
 
@@ -66,7 +67,7 @@ pub const Session = struct {
 
     fn open(self: *Session) !*platform_capture.ScrollSource {
         const o = self.opener;
-        self.src = try platform_capture.openScroll(self.c.gpa, self.c.env, self.c.conn, o.cap, o.region, o.shell, o.auto);
+        self.src = try platform_capture.openScroll(self.c.gpa, self.c.env, self.c.bus, o.cap, o.region, o.shell, o.auto);
         return &self.src.?;
     }
 
@@ -100,10 +101,10 @@ pub const Session = struct {
     fn grab(self: *Session, clicks: i32) !png.Image {
         const c = self.c;
         if (self.src) |*s| {
-            if (s.grab(c.gpa, c.env, c.conn, clicks)) |f| return f else |err| std.log.info("scrolling capture: no frame ({t}), starting the source again", .{err});
+            if (s.grab(c.gpa, c.env, c.bus, clicks)) |f| return f else |err| log.info("no frame ({t}), starting the source again", .{err});
         }
         const s = try self.reopen();
-        return s.grab(c.gpa, c.env, c.conn, 0);
+        return s.grab(c.gpa, c.env, c.bus, 0);
     }
 
     /// The region once nothing moves in it any more (the picker's fade,
@@ -130,7 +131,7 @@ pub const Session = struct {
         self.showRunning();
         _ = (try self.until()) orelse return null;
         const out = try self.st.?.result();
-        std.log.info("scrolling capture: {d}x{d}", .{ out.width, out.height });
+        log.info("{d}x{d}", .{ out.width, out.height });
         return .{ .width = out.width, .height = out.height, .pixels = @constCast(out.pixels) };
     }
 
@@ -141,14 +142,14 @@ pub const Session = struct {
             const why = (try self.scrolling()) orelse return cancelled();
             var buf: [96]u8 = undefined;
             const msg = why.message(&buf, self.max_height);
-            std.log.info("scrolling capture: stopped: {t} ({s}) at {d} px", .{ why, msg, self.total() });
+            log.info("stopped: {t} ({s}) at {d} px", .{ why, msg, self.total() });
             if (why.natural()) {
                 if (why != .user_stopped and !(try self.hold(msg))) return cancelled();
                 return why;
             }
             switch (try self.paused(msg)) {
                 .finish => {
-                    std.log.info("scrolling capture: finished after {t}", .{why});
+                    log.info("finished after {t}", .{why});
                     return why;
                 },
                 .cancel => return cancelled(),
@@ -158,7 +159,7 @@ pub const Session = struct {
     }
 
     fn cancelled() ?stop.Reason {
-        std.log.info("scrolling capture: cancelled", .{});
+        log.info("cancelled", .{});
         return null;
     }
 
@@ -198,14 +199,14 @@ pub const Session = struct {
 
     /// Continue after a short stop, keeping what is stitched.
     fn carryOn(self: *Session, why: stop.Reason) void {
-        std.log.info("scrolling capture: continuing after {t}", .{why});
+        log.info("continuing after {t}", .{why});
         self.watch.restart();
         switch (why) {
             .didnt_move => self.clicks = 3,
             .no_match => if (self.opener.auto) {
                 self.realign = true;
             },
-            .lost => if (self.reopen()) |_| {} else |err| std.log.warn("scrolling capture: {t}", .{err}),
+            .lost => if (self.reopen()) |_| {} else |err| log.warn("{t}", .{err}),
             else => {},
         }
         self.watch.auto = self.wheel();
@@ -224,13 +225,13 @@ pub const Session = struct {
     fn step(self: *Session) !?stop.Reason {
         const clicks: i32 = if (self.wheel()) self.clicks else 0;
         var f = self.grab(clicks) catch |err| {
-            std.log.warn("scrolling capture: no frame: {t}", .{err});
+            log.warn("no frame: {t}", .{err});
             return .lost;
         };
         defer f.deinit(self.c.gpa);
         const st = &self.st.?;
         var r = st.push(.{ .pixels = f.pixels, .width = f.width, .height = f.height }) catch |err| {
-            std.log.warn("scrolling capture: {t}", .{err});
+            log.warn("{t}", .{err});
             return .lost;
         };
         // the app may not have painted the scroll yet, or a frame caught
@@ -239,14 +240,14 @@ pub const Session = struct {
         switch (self.watch.feed(r, clicks)) {
             .go => {},
             .slower => {
-                std.log.info("scrolling capture: moved too far ({d} notches)", .{clicks});
+                log.info("moved too far ({d} notches)", .{clicks});
                 self.clicks = @max(1, @divTrunc(clicks, 2));
             },
             .warn => |why| if (!self.warned and !self.realign) {
                 self.warned = true;
                 var buf: [96]u8 = undefined;
                 const msg = why.message(&buf, self.max_height);
-                std.log.info("scrolling capture: warning: {t} ({s})", .{ why, msg });
+                log.info("warning: {t} ({s})", .{ why, msg });
                 self.hud.showMessage(.warning, msg, st.totalHeight());
             },
             .stop => |why| return why,
@@ -266,7 +267,7 @@ pub const Session = struct {
     }
 
     fn appended(self: *Session, d: u32, h: u32) void {
-        if (self.warned or self.realign) std.log.info("scrolling capture: lined up again", .{});
+        if (self.warned or self.realign) log.info("lined up again", .{});
         self.warned = false;
         if (self.realign) {
             // lined up again: back to the wheel, carefully

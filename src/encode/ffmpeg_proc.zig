@@ -11,6 +11,7 @@
 //! go through it too.
 
 const std = @import("std");
+const log = std.log.scoped(.ffmpeg);
 const switches = @import("../platform/api/switches.zig");
 const proc = @import("../platform/api.zig").proc;
 const yuv = @import("yuv.zig");
@@ -104,7 +105,7 @@ pub fn find(buf: *ExeBuf, envp: proc.Envp) error{NoFfmpeg}![:0]const u8 {
 /// with what ffmpeg was doing and becomes error.FfmpegFailed.
 fn check(what: []const u8, status: ?u8) error{FfmpegFailed}!void {
     if (status != null and status.? == 0) return;
-    std.log.warn("{s}: ffmpeg exited with {?d}", .{ what, status });
+    log.warn("{s}: exited with {?d}", .{ what, status });
     return error.FfmpegFailed;
 }
 

@@ -22,14 +22,14 @@ const Region = model.Region;
 const State = model.State;
 
 /// Draw and present a frame; returns the content's height (unscrolled).
-pub fn draw(win: *Window, fr: *frame.Frame, cfg: *const config.Config, regions: *std.ArrayList(Region), alloc: std.mem.Allocator, st: *const State, choosing: bool) !i32 {
+pub fn draw(win: *Window, fr: *frame.Frame, cfg: *const config.Config, regions: *std.ArrayList(Region), gpa: std.mem.Allocator, st: *const State, choosing: bool) !i32 {
     var ui = Ui{
         .win = win,
-        .c = try fr.begin(alloc, win),
+        .c = try fr.begin(gpa, win),
         .f = scale.of(win.scale120),
         .th = st.theme,
         .regions = regions,
-        .alloc = alloc,
+        .alloc = gpa,
         .mx = st.mouse_x,
         .my = st.mouse_y,
     };

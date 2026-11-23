@@ -50,10 +50,10 @@ fn cached(key: WrapKey) ?[]Line {
 }
 
 /// Remember a copy of `lines` for `key`, evicting the oldest entry.
-fn remember(alloc: std.mem.Allocator, key: WrapKey, lines: []const Line) void {
-    const copy = alloc.dupe(Line, lines) catch return;
-    wrap_alloc = alloc;
-    if (wrap_cache[wrap_next]) |old| alloc.free(old.lines);
+fn remember(gpa: std.mem.Allocator, key: WrapKey, lines: []const Line) void {
+    const copy = gpa.dupe(Line, lines) catch return;
+    wrap_alloc = gpa;
+    if (wrap_cache[wrap_next]) |old| gpa.free(old.lines);
     wrap_cache[wrap_next] = .{ .key = key, .lines = copy };
     wrap_next = (wrap_next + 1) % wrap_cache.len;
 }
@@ -62,11 +62,11 @@ fn remember(alloc: std.mem.Allocator, key: WrapKey, lines: []const Line) void {
 /// wide: breaks after spaces and hyphens and around CJK, long words cut
 /// between graphemes (see wrap.zig). Appended to `out`. Recent results are
 /// cached, since boxes are laid out on every frame.
-pub fn wrapLines(alloc: std.mem.Allocator, size_px: f64, style: Style, s: []const u8, max_w: i32, dir: bidi.Direction, out: *std.ArrayList(Line)) !void {
+pub fn wrapLines(gpa: std.mem.Allocator, size_px: f64, style: Style, s: []const u8, max_w: i32, dir: bidi.Direction, out: *std.ArrayList(Line)) !void {
     const key: WrapKey = .{ .hash = std.hash.Wyhash.hash(0, s), .len = s.len, .size = @bitCast(size_px), .style = style, .max_w = max_w, .dir = dir };
     const cacheable = state_mod.state != null;
-    if (cacheable) if (cached(key)) |lines| return out.appendSlice(alloc, lines);
+    if (cacheable) if (cached(key)) |lines| return out.appendSlice(gpa, lines);
     const first = out.items.len;
-    try wrap_mod.wrap(alloc, s, @floatFromInt(max_w), MeasureCtx{ .size = size_px, .style = style, .para = s, .dir = dir }, measureFor, out);
+    try wrap_mod.wrap(gpa, s, @floatFromInt(max_w), MeasureCtx{ .size = size_px, .style = style, .para = s, .dir = dir }, measureFor, out);
     if (cacheable) remember(state_mod.state.?.alloc, key, out.items[first..]);
 }

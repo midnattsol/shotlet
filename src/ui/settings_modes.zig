@@ -8,6 +8,7 @@
 //!   it. Elsewhere, the commands to bind in the desktop's settings.
 
 const std = @import("std");
+const log = std.log.scoped(.settings);
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const shell = @import("../platform/api.zig").shell;
@@ -48,18 +49,18 @@ pub const State = struct {
     }
 };
 
-pub fn load(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) State {
-    var st: State = .{ .s = config.load(alloc, env.home).modes, .words = shell.words() };
+pub fn load(gpa: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Bus) State {
+    var st: State = .{ .s = config.load(gpa, env.home).modes, .words = shell.words() };
     const b = bus orelse return st;
-    const sd = shell.shortcutStore(alloc, env, b, &st.sd_buf) orelse return st;
+    const sd = shell.shortcutStore(gpa, env, b, &st.sd_buf) orelse return st;
     st.sd_len = sd.len;
     st.held = true;
-    readKeys(&st, alloc, env);
+    readKeys(&st, gpa, env);
     return st;
 }
 
-fn readKeys(st: *State, alloc: std.mem.Allocator, env: env_mod.Env) void {
-    var arena_state = std.heap.ArenaAllocator.init(alloc);
+fn readKeys(st: *State, gpa: std.mem.Allocator, env: env_mod.Env) void {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     for (mode.shortcuts, 0..) |sc, i| {
@@ -117,18 +118,18 @@ pub fn drawShortcuts(ui: *S.Ui, x: i32, y0: i32, w: i32, st: *const State) !i32 
     return yy;
 }
 
-pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) void {
+pub fn activate(h: Hit, st: *State, gpa: std.mem.Allocator, env: env_mod.Env) void {
     switch (h) {
         .after => {
             st.s.after = st.s.after.next();
-            save(alloc, env, .{ .after = st.s.after });
+            save(gpa, env, .{ .after = st.s.after });
         },
         .timer => {
             const i = std.mem.indexOfScalar(u8, &mode.timer_choices, st.s.timer_s) orelse 0;
             st.s.timer_s = mode.timer_choices[(i + 1) % mode.timer_choices.len];
-            save(alloc, env, .{ .timer_s = st.s.timer_s });
-            if (st.held) shell.setTimerSeconds(alloc, env, st.store(), st.s.timer_s) catch |err|
-                std.log.warn("could not change the {s}'s self-timer: {t}", .{ st.words.title, err });
+            save(gpa, env, .{ .timer_s = st.s.timer_s });
+            if (st.held) shell.setTimerSeconds(gpa, env, st.store(), st.s.timer_s) catch |err|
+                log.warn("could not change the {s}'s self-timer: {t}", .{ st.words.title, err });
         },
         .key => |i| st.recording = if (st.recording == i) null else i,
     }
@@ -136,18 +137,18 @@ pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) 
 
 /// Write one capture-mode setting the window changed (after_fullscreen
 /// or timer_seconds) into the config.
-fn save(alloc: std.mem.Allocator, env: env_mod.Env, change: union(enum) { after: config.After, timer_s: u8 }) void {
-    var cfg = config.load(alloc, env.home);
+fn save(gpa: std.mem.Allocator, env: env_mod.Env, change: union(enum) { after: config.After, timer_s: u8 }) void {
+    var cfg = config.load(gpa, env.home);
     switch (change) {
         .after => |a| cfg.modes.after = a,
         .timer_s => |t| cfg.modes.timer_s = t,
     }
-    config.save(alloc, env.home, &cfg) catch |err| std.log.warn("could not save: {t}", .{err});
+    config.save(gpa, env.home, &cfg) catch |err| log.warn("could not save: {t}", .{err});
 }
 
 /// A key press while a mode's shortcut is being recorded. True when it
 /// was taken.
-pub fn onKey(st: *State, k: window.Key, alloc: std.mem.Allocator, env: env_mod.Env) bool {
+pub fn onKey(st: *State, k: window.Key, gpa: std.mem.Allocator, env: env_mod.Env) bool {
     const i = st.recording orelse return false;
     if (k.code == .escape) {
         st.recording = null;
@@ -156,9 +157,9 @@ pub fn onKey(st: *State, k: window.Key, alloc: std.mem.Allocator, env: env_mod.E
     const accel: ?Accel = if (k.code == .backspace) null else accelFor(k) orelse return true;
     st.recording = null;
     const name = mode.shortcuts[i].name;
-    shell.setShortcut(alloc, env, st.store(), name, accel) catch |err|
-        std.log.warn("could not change the {s}'s {s} shortcut: {t}", .{ st.words.title, name, err });
-    readKeys(st, alloc, env);
+    shell.setShortcut(gpa, env, st.store(), name, accel) catch |err|
+        log.warn("could not change the {s}'s {s} shortcut: {t}", .{ st.words.title, name, err });
+    readKeys(st, gpa, env);
     return true;
 }
 

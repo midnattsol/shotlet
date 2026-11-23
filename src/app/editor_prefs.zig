@@ -5,6 +5,7 @@
 //! Beautify itself is per capture.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const config = @import("config.zig");
 const stateflag = @import("stateflag.zig");
 const Env = @import("env.zig").Env;
@@ -25,7 +26,7 @@ fn rememberAt(gpa: std.mem.Allocator, home: []const u8, cfg: *const config.Confi
     config.rebase(&next);
     apply(&next, ed);
     config.save(gpa, home, &next) catch |err|
-        std.log.warn("could not save editor settings: {t}", .{err});
+        log.warn("could not save editor settings: {t}", .{err});
 }
 
 fn apply(c: *config.Config, ed: anytype) void {
@@ -39,12 +40,12 @@ fn apply(c: *config.Config, ed: anytype) void {
 }
 
 test "only what the editor changed is saved" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try @import("../testutil.zig").TmpDir.home();
     defer tmp.deinit();
     const root = tmp.path;
 
-    var cfg = config.load(alloc, root);
+    var cfg = config.load(gpa, root);
     // held in memory only: never written by remember
     cfg.notify = false;
     const Ed = struct {
@@ -53,8 +54,8 @@ test "only what the editor changed is saved" {
         loupe: struct { zoom: u8 = 8, hint: struct { seen: bool = false } = .{} } = .{},
         hint_seen: bool = false,
     };
-    rememberAt(alloc, root, &cfg, &Ed{});
+    rememberAt(gpa, root, &cfg, &Ed{});
     const data = try tmp.read(".config/shotlet/config");
-    defer alloc.free(data);
+    defer gpa.free(data);
     try std.testing.expectEqualStrings("# shotlet configuration\nbeautify_padding=large\nbeautify_shadow=false\n", data);
 }

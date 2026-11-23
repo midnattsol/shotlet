@@ -2,6 +2,7 @@
 //! every monitor, stitched.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const capture = @import("../../../app/capture.zig");
 const config = @import("../../../app/config.zig");
 const dbus = @import("../dbus.zig");
@@ -15,7 +16,7 @@ const Env = @import("../../../app/env.zig").Env;
 /// back to the Screenshot portal.
 pub fn screencast(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, cfg: *config.Config) portal.Result(capture.Capture) {
     return screencastInner(gpa, env, bus, cfg) catch |err| {
-        std.log.info("screencast capture failed ({t})", .{err});
+        log.info("screencast capture failed ({t})", .{err});
         return .unavailable;
     };
 }
@@ -28,11 +29,11 @@ fn screencastInner(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, cfg:
     };
     defer session.close(gpa, bus);
     if (session.start.restore_token) |t| rememberToken(gpa, env.home, cfg, t);
-    for (session.start.streams) |st| std.log.debug("screencast stream: node {d} position {?any} size {?any}", .{ st.node_id, st.position, st.size });
+    for (session.start.streams) |st| log.debug("screencast stream: node {d} position {?any} size {?any}", .{ st.node_id, st.position, st.size });
 
     const ts1 = sys.monoMs();
     const cap = try grabStitched(gpa, bus, &session);
-    std.log.info("  capture detail: monitors={d} session={d} grab+close+stitch={d}ms", .{
+    log.info("capture detail: monitors={d} session={d} grab+close+stitch={d}ms", .{
         @min(session.start.streams.len, pw.max_nodes), ts1 - ts0, sys.monoMs() - ts1,
     });
     return .{ .granted = cap };
@@ -59,7 +60,7 @@ pub fn rememberToken(gpa: std.mem.Allocator, home: []const u8, cfg: *config.Conf
     cfg.setScToken(t);
     // only this key: never write back a stale snapshot of the rest
     config.saveScreencastToken(gpa, home, t) catch |err|
-        std.log.warn("could not store the screencast token: {t}", .{err});
+        log.warn("could not store the screencast token: {t}", .{err});
 }
 
 /// Stitches one grabbed frame per stream, placed where the portal says

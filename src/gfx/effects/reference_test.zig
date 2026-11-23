@@ -65,10 +65,10 @@ const Ref = struct {
         }
     }
 
-    fn blur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, radius: u32) !void {
+    fn blur(gpa: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, radius: u32) !void {
         const c = clip(r, w, h) orelse return;
-        const tmp = try alloc.alloc(u32, @intCast(c.w * c.h));
-        defer alloc.free(tmp);
+        const tmp = try gpa.alloc(u32, @intCast(c.w * c.h));
+        defer gpa.free(tmp);
         for (0..3) |_| {
             boxPass(pixels, w, h, c, @intCast(radius), tmp, true);
             boxPass(pixels, w, h, c, @intCast(radius), tmp, false);
@@ -172,7 +172,7 @@ fn randomImage(px: []u32, seed: u64) void {
 }
 
 test "optimized effects match the straightforward versions" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const W = 37;
     const H = 29;
     var a: [W * H]u32 = undefined;
@@ -193,8 +193,8 @@ test "optimized effects match the straightforward versions" {
             0 => {
                 const rad = r.intRangeAtMost(u32, 1, 20);
                 const c = clip(rect, W, H) orelse continue;
-                try boxBlur(alloc, &a, W, H, c, rad);
-                try Ref.blur(alloc, &b, W, H, rect, rad);
+                try boxBlur(gpa, &a, W, H, c, rad);
+                try Ref.blur(gpa, &b, W, H, rect, rad);
             },
             1 => {
                 const from = r.int(u32);

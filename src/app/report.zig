@@ -13,6 +13,7 @@
 //! and no second message.
 
 const std = @import("std");
+const log = std.log.scoped(.report);
 const out = @import("../cli/out.zig");
 const relaunch = @import("relaunch.zig");
 const Env = @import("env.zig").Env;
@@ -24,7 +25,7 @@ pub const Reported = error.Reported;
 pub fn problem(env: Env, title: []const u8, body: []const u8) void {
     var buf: [400]u8 = undefined;
     const line = sentence(&buf, title, body);
-    std.log.warn("{s}", .{line});
+    log.warn("{s}", .{line});
     out.warn("{s}", .{line});
     relaunch.toast(env, .info, title, body);
 }

@@ -9,6 +9,7 @@
 //! without the keyboard focus. A click closes it.
 
 const std = @import("std");
+const log = std.log.scoped(.toast);
 const env_mod = @import("env.zig");
 const sys = @import("../platform/api.zig").sys;
 const text = @import("../gfx/text.zig");
@@ -81,7 +82,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env, t: Toast) !void {
         .anchor = .{ .bottom = true },
         .margin = .{ 0, 0, 24, 0 },
     });
-    std.log.info("toast: {s}: {s}", .{ t.title, t.body });
+    log.info("{s}: {s}", .{ t.title, t.body });
     const end = sys.monoMs() + t.kind.showMs();
     var drawn = false;
     // a click on the card (pressed and released on it) closes it

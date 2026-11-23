@@ -21,8 +21,8 @@ pub const Closing = struct {
     rect: Rect = Rect.empty,
     pane: u8 = 0,
 
-    pub fn release(c: *Closing, alloc: std.mem.Allocator) void {
-        alloc.free(c.px);
+    pub fn release(c: *Closing, gpa: std.mem.Allocator) void {
+        gpa.free(c.px);
         c.* = .{};
     }
 };

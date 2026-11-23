@@ -31,9 +31,9 @@ pub fn prepare(buf: []u8, home: []const u8, dir: Dir, name: []const u8) ![]u8 {
 }
 
 /// The whole file (owned), at most `max` bytes; error.NotFound when absent.
-pub fn read(alloc: std.mem.Allocator, home: []const u8, dir: Dir, name: []const u8, max: usize) ![]u8 {
+pub fn read(gpa: std.mem.Allocator, home: []const u8, dir: Dir, name: []const u8, max: usize) ![]u8 {
     var pbuf: env.PathBuf = undefined;
-    return sys.readFileAlloc(alloc, try path(&pbuf, home, dir, name), max);
+    return sys.readFileAlloc(gpa, try path(&pbuf, home, dir, name), max);
 }
 
 /// A small file into `buf`, without allocating.
@@ -50,14 +50,14 @@ pub fn write(home: []const u8, dir: Dir, name: []const u8, data: []const u8) !vo
 
 /// Add `extra` after what the file holds (created when missing); the
 /// result replaces it at once, so a crash never leaves half a record.
-pub fn append(alloc: std.mem.Allocator, home: []const u8, dir: Dir, name: []const u8, extra: []const u8, max: usize) !void {
-    const old = read(alloc, home, dir, name, max) catch |err| switch (err) {
-        error.NotFound => try alloc.dupe(u8, ""),
+pub fn append(gpa: std.mem.Allocator, home: []const u8, dir: Dir, name: []const u8, extra: []const u8, max: usize) !void {
+    const old = read(gpa, home, dir, name, max) catch |err| switch (err) {
+        error.NotFound => try gpa.dupe(u8, ""),
         else => return err,
     };
-    defer alloc.free(old);
-    const all = try std.mem.concat(alloc, u8, &.{ old, extra });
-    defer alloc.free(all);
+    defer gpa.free(old);
+    const all = try std.mem.concat(gpa, u8, &.{ old, extra });
+    defer gpa.free(all);
     try write(home, dir, name, all);
 }
 
@@ -69,19 +69,19 @@ pub fn remove(home: []const u8, dir: Dir, name: []const u8) bool {
 }
 
 test "state files are written atomically, private, and appended to" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try @import("../testutil.zig").TmpDir.home();
     defer tmp.deinit();
     const home = tmp.path;
-    try std.testing.expectError(error.NotFound, read(alloc, home, .state, "x", 64));
+    try std.testing.expectError(error.NotFound, read(gpa, home, .state, "x", 64));
     try write(home, .state, "x", "one\n");
-    try append(alloc, home, .state, "x", "two\n", 64);
-    const got = try read(alloc, home, .state, "x", 64);
-    defer alloc.free(got);
+    try append(gpa, home, .state, "x", "two\n", 64);
+    const got = try read(gpa, home, .state, "x", 64);
+    defer gpa.free(got);
     try std.testing.expectEqualStrings("one\ntwo\n", got);
     var pbuf: env.PathBuf = undefined;
     try std.testing.expectEqual(@as(?u32, 0o600), sys.fileMode(try path(&pbuf, home, .state, "x")));
-    try append(alloc, home, .config, "y", "a", 64);
+    try append(gpa, home, .config, "y", "a", 64);
     var b: [8]u8 = undefined;
     try std.testing.expectEqualStrings("a", try readBuf(home, .config, "y", &b));
     try std.testing.expect(remove(home, .state, "x"));

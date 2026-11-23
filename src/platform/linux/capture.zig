@@ -7,6 +7,7 @@
 //! those paths keep.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("dbus.zig");
 const portal = @import("portal.zig");
 const pw = @import("pw.zig");
@@ -44,14 +45,14 @@ pub fn screens(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, cfg: *co
     if (pw.available()) {
         switch (screencast(gpa, env, bus, cfg)) {
             .granted => |cap| {
-                std.log.info("capture path: portal (ScreenCast)", .{});
+                log.info("capture path: portal (ScreenCast)", .{});
                 path.remember(env.home, .portal);
                 return cap;
             },
             .cancelled => return null,
             .timeout => return dialogTimedOut(),
-            .denied => std.log.info("screencast denied; trying the screenshot portal", .{}),
-            .unavailable => std.log.info("screencast unavailable; trying the screenshot portal", .{}),
+            .denied => log.info("screencast denied; trying the screenshot portal", .{}),
+            .unavailable => log.info("screencast unavailable; trying the screenshot portal", .{}),
         }
     }
     return screenshotPortal(gpa, env, bus);
@@ -61,17 +62,17 @@ pub fn screens(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, cfg: *co
 /// none or it failed, for the portal to take over.
 fn tryDirect(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) ?capture.Capture {
     const res = direct.captureAll(gpa, env.runtime_dir, env.session.display, bus) catch |err| {
-        std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
+        log.info("capture path: direct capture failed ({t}); the portal", .{err});
         return null;
     };
     switch (res) {
         .captured => |c| {
-            std.log.info("capture path: direct ({s})", .{c.method.label()});
+            log.info("capture path: direct ({s})", .{c.method.label()});
             path.remember(env.home, .direct);
             return c.cap;
         },
         .unavailable => |why| {
-            std.log.info("capture path: no direct capture ({s}); the portal", .{why});
+            log.info("capture path: no direct capture ({s}); the portal", .{why});
             return null;
         },
     }
@@ -79,7 +80,7 @@ fn tryDirect(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) ?capture.C
 
 /// The Screenshot portal, the last resort; null when cancelled.
 fn screenshotPortal(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) !?capture.Capture {
-    std.log.info("capture path: portal (Screenshot)", .{});
+    log.info("capture path: portal (Screenshot)", .{});
     path.remember(env.home, .portal);
     const png_data = switch (try portal.screenshot(gpa, bus, false, portal.timeout_unfocused_screenshot_ms)) {
         .granted => |d| d,
@@ -99,7 +100,7 @@ fn screenshotPortal(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) !?c
 /// Nobody answered a consent dialog for timeout_dialog_ms: it was closed;
 /// end quietly, like a cancel.
 fn dialogTimedOut() ?capture.Capture {
-    std.log.info("the permission dialog got no answer; closed it and stopped", .{});
+    log.info("the permission dialog got no answer; closed it and stopped", .{});
     return null;
 }
 

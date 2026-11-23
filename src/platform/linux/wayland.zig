@@ -6,6 +6,7 @@
 //! opcode tables live in wayland/protocol.zig and are re-exported here.
 
 const std = @import("std");
+const log = std.log.scoped(.wayland);
 const sys = @import("sys.zig");
 
 // --- interface opcodes (wayland/protocol.zig) ---
@@ -100,7 +101,7 @@ pub const Event = struct {
         const obj = try r.uint();
         const code = try r.uint();
         const msg = try r.string();
-        std.log.err("wayland protocol error on object {d} code {d}: {s}", .{ obj, code, msg });
+        log.err("wayland protocol error on object {d} code {d}: {s}", .{ obj, code, msg });
         return error.ProtocolError;
     }
 };
@@ -182,7 +183,7 @@ pub const Connection = struct {
     out: std.ArrayList(u8) = .empty,
     out_fds: std.ArrayList(sys.fd_t) = .empty,
 
-    pub fn connect(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Connection {
+    pub fn connect(gpa: std.mem.Allocator, runtime_dir: []const u8, display: []const u8) !Connection {
         var path_buf: [256]u8 = undefined;
         const path = if (display.len > 0 and display[0] == '/')
             display
@@ -192,7 +193,7 @@ pub const Connection = struct {
         const fd = try sys.socketUnixStream();
         errdefer sys.close(fd);
         try sys.connectUnix(fd, path);
-        return .{ .fd = fd, .alloc = alloc };
+        return .{ .fd = fd, .alloc = gpa };
     }
 
     pub fn deinit(self: *Connection) void {
@@ -246,8 +247,8 @@ pub const Connection = struct {
         };
     }
 
-    fn appendU32(w: *std.ArrayList(u8), alloc: std.mem.Allocator, v: u32) void {
-        _ = alloc;
+    fn appendU32(w: *std.ArrayList(u8), gpa: std.mem.Allocator, v: u32) void {
+        _ = gpa;
         w.appendSliceAssumeCapacity(std.mem.asBytes(&v));
     }
 

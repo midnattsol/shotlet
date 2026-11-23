@@ -36,7 +36,7 @@ pub const Ctx = struct {
     cfg: *const config.Config,
     /// the desktop session, for the save dialog and the notification
     /// (null: no dialog, so the folder, and no notification)
-    bus: ?*desktop.Session,
+    bus: ?*desktop.Bus,
     /// takes the clipboard (copy on save, Copy)
     win: *window.Window,
     /// `win` shows no surface: a moment's one takes the clipboard
@@ -101,7 +101,7 @@ fn writePng(c: Ctx, data: []const u8, where: Where) !?[]u8 {
                 return p;
             },
             .cancelled => return null,
-            .unavailable => std.log.warn("no file chooser portal; saving to {s}", .{dir}),
+            .unavailable => std.log.warn("{s}: no file chooser portal; saving to {s}", .{ c.who, dir }),
         }
     }
     return try filename.writeUnique(c.gpa, dir, base, ".png", data);
@@ -125,7 +125,7 @@ pub const Target = union(enum) {
 
 /// Ask where to save a file of type `ext` (".png", ".mp4"); a name typed
 /// without it gets it (filename.completeChosen).
-pub fn askTarget(gpa: std.mem.Allocator, bus: *desktop.Session, opts: desktop.SaveOptions, ext: []const u8, over: ?*window.Window) !Target {
+pub fn askTarget(gpa: std.mem.Allocator, bus: *desktop.Bus, opts: desktop.SaveOptions, ext: []const u8, over: ?*window.Window) !Target {
     return switch (try desktop.askSavePath(gpa, bus, opts, over)) {
         .chosen => |p| .{ .path = try filename.completeChosen(gpa, p, ext) },
         .cancelled => .cancelled,

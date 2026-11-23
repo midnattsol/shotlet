@@ -121,19 +121,19 @@ pub fn writeFile(path: []const u8, data: []const u8) !void {
     try io.writeAll(fd, data);
 }
 
-pub fn readFileAlloc(alloc: std.mem.Allocator, path: []const u8, max: usize) ![]u8 {
+pub fn readFileAlloc(gpa: std.mem.Allocator, path: []const u8, max: usize) ![]u8 {
     const fd = try openRead(path);
     defer io.close(fd);
     var list: std.ArrayList(u8) = .empty;
-    errdefer list.deinit(alloc);
+    errdefer list.deinit(gpa);
     var buf: [64 * 1024]u8 = undefined;
     while (true) {
         const n = try io.read(fd, &buf);
         if (n == 0) break;
         if (list.items.len + n > max) return error.FileTooBig;
-        try list.appendSlice(alloc, buf[0..n]);
+        try list.appendSlice(gpa, buf[0..n]);
     }
-    return list.toOwnedSlice(alloc);
+    return list.toOwnedSlice(gpa);
 }
 
 /// Read a small file into `buf`, with no allocator; error.FileTooBig
@@ -209,7 +209,7 @@ pub fn symlink(target: []const u8, path: []const u8) !void {
 const testutil = @import("../../../testutil.zig");
 
 test "writeAtomic replaces a file, and a symlink without following it" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-atomic");
     defer tmp.deinit();
     const dir = tmp.path;
@@ -227,9 +227,9 @@ test "writeAtomic replaces a file, and a symlink without following it" {
     try std.testing.expectEqualStrings("two", try readFileBuf(target, &rb));
     try std.testing.expectEqualStrings("new", try readFileBuf(link, &rb));
     // nothing but the two files is left behind
-    const names = try @import("dir.zig").listDir(alloc, dir);
-    defer alloc.free(names);
-    defer @import("dir.zig").freeNames(alloc, names);
+    const names = try @import("dir.zig").listDir(gpa, dir);
+    defer gpa.free(names);
+    defer @import("dir.zig").freeNames(gpa, names);
     try std.testing.expectEqual(@as(usize, 2), names.len);
 }
 

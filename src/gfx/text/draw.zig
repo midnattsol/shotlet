@@ -61,8 +61,8 @@ pub fn drawRange(canvas: *Canvas, x: i32, y: i32, size_px: f64, color: u32, styl
 test "text survives invalid utf-8 and odd sizes" {
     const measure = @import("measure.zig");
     const offsetForX = @import("caret.zig").offsetForX;
-    const alloc = std.testing.allocator;
-    state_mod.init(alloc);
+    const gpa = std.testing.allocator;
+    state_mod.init(gpa);
     defer state_mod.deinit();
     var px: [64 * 32]u32 = @splat(0xFF000000);
     var c = Canvas.init(&px, 64, 32);

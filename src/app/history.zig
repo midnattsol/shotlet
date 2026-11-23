@@ -65,16 +65,16 @@ pub const Meta = struct {
     /// when known: a pin of it opens there
     at: ?[2]i32 = null,
 
-    pub fn deinit(self: *Meta, alloc: std.mem.Allocator) void {
-        alloc.free(self.saved);
-        if (self.ocr) |o| alloc.free(o);
+    pub fn deinit(self: *Meta, gpa: std.mem.Allocator) void {
+        gpa.free(self.saved);
+        if (self.ocr) |o| gpa.free(o);
         self.* = .{};
     }
 
     const header = "shotlet-history 1";
 
-    pub fn format(self: *const Meta, alloc: std.mem.Allocator) ![]u8 {
-        var w = try kvfile.Writer.init(alloc, header);
+    pub fn format(self: *const Meta, gpa: std.mem.Allocator) ![]u8 {
+        var w = try kvfile.Writer.init(gpa, header);
         errdefer w.deinit();
         try w.int("time", self.time_ms);
         try w.size("size", self.width, self.height);
@@ -84,10 +84,10 @@ pub const Meta = struct {
         return w.finish();
     }
 
-    pub fn parse(alloc: std.mem.Allocator, data: []const u8) !Meta {
+    pub fn parse(gpa: std.mem.Allocator, data: []const u8) !Meta {
         var r = kvfile.Reader.init(data, header) catch return error.BadMeta;
         var m: Meta = .{};
-        errdefer m.deinit(alloc);
+        errdefer m.deinit(gpa);
         var have_time = false;
         while (r.next()) |f| {
             if (f.is("time")) {
@@ -97,13 +97,13 @@ pub const Meta = struct {
                 const sz = kvfile.parseSize(f.value) orelse return error.BadMeta;
                 m.width, m.height = sz;
             } else if (f.is("saved")) {
-                alloc.free(m.saved);
-                m.saved = try kvfile.text(alloc, f.value);
+                gpa.free(m.saved);
+                m.saved = try kvfile.text(gpa, f.value);
             } else if (f.is("at")) {
                 m.at = parsePoint(f.value);
             } else if (f.is("ocr")) {
-                if (m.ocr) |o| alloc.free(o);
-                m.ocr = try kvfile.text(alloc, f.value);
+                if (m.ocr) |o| gpa.free(o);
+                m.ocr = try kvfile.text(gpa, f.value);
             }
         }
         if (!have_time) return error.BadMeta;
@@ -123,14 +123,14 @@ pub const Entry = struct {
     /// the annotations can be edited again (doc + source.png present)
     editable: bool,
 
-    pub fn deinit(self: *Entry, alloc: std.mem.Allocator) void {
-        self.meta.deinit(alloc);
+    pub fn deinit(self: *Entry, gpa: std.mem.Allocator) void {
+        self.meta.deinit(gpa);
     }
 };
 
-pub fn freeList(alloc: std.mem.Allocator, entries: []Entry) void {
-    for (entries) |*e| e.deinit(alloc);
-    alloc.free(entries);
+pub fn freeList(gpa: std.mem.Allocator, entries: []Entry) void {
+    for (entries) |*e| e.deinit(gpa);
+    gpa.free(entries);
 }
 
 /// $XDG_STATE_HOME/shotlet/history
@@ -161,15 +161,15 @@ pub const NewEntry = struct {
 };
 
 /// Write a new entry; it becomes visible all at once. Returns its id.
-pub fn create(alloc: std.mem.Allocator, root: []const u8, e: NewEntry) !Id {
+pub fn create(gpa: std.mem.Allocator, root: []const u8, e: NewEntry) !Id {
     sys.mkdirAll(root, 0o700);
     const id = Id.make(e.meta.time_ms);
     var tmp_buf: [1200]u8 = undefined;
     const tmp = try std.fmt.bufPrint(&tmp_buf, "{s}/.new-{s}", .{ root, id.slice() });
     sys.mkdirMode(tmp, 0o700);
     errdefer sys.removeTree(tmp);
-    const meta = try e.meta.format(alloc);
-    defer alloc.free(meta);
+    const meta = try e.meta.format(gpa);
+    defer gpa.free(meta);
     try writeIn(tmp, "image.png", e.image_png);
     try writeIn(tmp, "thumb.png", e.thumb_png);
     if (e.source_png) |d| try writeIn(tmp, "source.png", d);
@@ -229,23 +229,23 @@ pub const File = enum {
 };
 
 /// One file of entry `id` (owned).
-pub fn readFile(alloc: std.mem.Allocator, root: []const u8, id: []const u8, f: File) ![]u8 {
+pub fn readFile(gpa: std.mem.Allocator, root: []const u8, id: []const u8, f: File) ![]u8 {
     if (!Id.valid(id)) return error.BadId;
     var buf: env_mod.PathBuf = undefined;
-    return sys.readFileAlloc(alloc, try entryPath(&buf, root, id, f.name()), f.maxBytes());
+    return sys.readFileAlloc(gpa, try entryPath(&buf, root, id, f.name()), f.maxBytes());
 }
 
 /// Rewrite an entry's meta (e.g. after Save or OCR).
-pub fn writeMeta(alloc: std.mem.Allocator, root: []const u8, id: []const u8, m: *const Meta) !void {
-    const data = try m.format(alloc);
-    defer alloc.free(data);
+pub fn writeMeta(gpa: std.mem.Allocator, root: []const u8, id: []const u8, m: *const Meta) !void {
+    const data = try m.format(gpa);
+    defer gpa.free(data);
     try replaceFile(root, id, "meta", data);
 }
 
-pub fn readMeta(alloc: std.mem.Allocator, root: []const u8, id: []const u8) !Meta {
-    const data = try readFile(alloc, root, id, .meta);
-    defer alloc.free(data);
-    return Meta.parse(alloc, data);
+pub fn readMeta(gpa: std.mem.Allocator, root: []const u8, id: []const u8) !Meta {
+    const data = try readFile(gpa, root, id, .meta);
+    defer gpa.free(data);
+    return Meta.parse(gpa, data);
 }
 
 fn fileBytes(root: []const u8, id: []const u8, name: []const u8) ?u64 {
@@ -254,30 +254,30 @@ fn fileBytes(root: []const u8, id: []const u8, name: []const u8) ?u64 {
 }
 
 /// Readable entries, newest first. Damaged ones are left out.
-pub fn list(alloc: std.mem.Allocator, root: []const u8) ![]Entry {
-    const names = sys.listDir(alloc, root) catch |err| switch (err) {
-        error.NotFound => return try alloc.alloc(Entry, 0),
+pub fn list(gpa: std.mem.Allocator, root: []const u8) ![]Entry {
+    const names = sys.listDir(gpa, root) catch |err| switch (err) {
+        error.NotFound => return try gpa.alloc(Entry, 0),
         else => return err,
     };
     defer {
-        sys.freeNames(alloc, names);
-        alloc.free(names);
+        sys.freeNames(gpa, names);
+        gpa.free(names);
     }
     var out: std.ArrayList(Entry) = .empty;
     errdefer {
-        for (out.items) |*e| e.deinit(alloc);
-        out.deinit(alloc);
+        for (out.items) |*e| e.deinit(gpa);
+        out.deinit(gpa);
     }
     for (names) |n| {
         if (!n.is_dir) continue;
         const id = Id.fromSlice(n.name) orelse continue;
         const image = fileBytes(root, n.name, "image.png") orelse continue;
-        var meta = readMeta(alloc, root, n.name) catch continue;
-        errdefer meta.deinit(alloc);
+        var meta = readMeta(gpa, root, n.name) catch continue;
+        errdefer meta.deinit(gpa);
         var bytes = image;
         for ([_][]const u8{ "thumb.png", "meta", "source.png", "doc" }) |f| bytes += fileBytes(root, n.name, f) orelse 0;
         const editable = fileBytes(root, n.name, "doc") != null and fileBytes(root, n.name, "source.png") != null;
-        try out.append(alloc, .{ .id = id, .meta = meta, .bytes = bytes, .editable = editable });
+        try out.append(gpa, .{ .id = id, .meta = meta, .bytes = bytes, .editable = editable });
     }
     std.mem.sort(Entry, out.items, {}, struct {
         fn newer(_: void, a: Entry, b: Entry) bool {
@@ -285,7 +285,7 @@ pub fn list(alloc: std.mem.Allocator, root: []const u8) ![]Entry {
             return std.mem.order(u8, a.id.slice(), b.id.slice()) == .gt;
         }
     }.newer);
-    return out.toOwnedSlice(alloc);
+    return out.toOwnedSlice(gpa);
 }
 
 pub fn remove(root: []const u8, id: []const u8) !void {
@@ -301,13 +301,13 @@ pub fn clear(root: []const u8) void {
 
 /// Enforce the caps; also removes damaged entries and leftovers of
 /// interrupted writes older than a minute. Returns how many entries went.
-pub fn prune(alloc: std.mem.Allocator, root: []const u8, max_count: usize, max_bytes: u64) !usize {
+pub fn prune(gpa: std.mem.Allocator, root: []const u8, max_count: usize, max_bytes: u64) !usize {
     var removed: usize = 0;
     // damaged and half-written directories
-    if (sys.listDir(alloc, root)) |names| {
+    if (sys.listDir(gpa, root)) |names| {
         defer {
-            sys.freeNames(alloc, names);
-            alloc.free(names);
+            sys.freeNames(gpa, names);
+            gpa.free(names);
         }
         const now = sys.realtimeSec();
         for (names) |n| {
@@ -321,8 +321,8 @@ pub fn prune(alloc: std.mem.Allocator, root: []const u8, max_count: usize, max_b
             }
             if (!Id.valid(n.name)) continue; // not ours: leave it alone
             const ok = fileBytes(root, n.name, "image.png") != null and blk: {
-                var m = readMeta(alloc, root, n.name) catch break :blk false;
-                m.deinit(alloc);
+                var m = readMeta(gpa, root, n.name) catch break :blk false;
+                m.deinit(gpa);
                 break :blk true;
             };
             if (!ok and old) {
@@ -332,8 +332,8 @@ pub fn prune(alloc: std.mem.Allocator, root: []const u8, max_count: usize, max_b
         }
     } else |_| {}
 
-    const entries = try list(alloc, root);
-    defer freeList(alloc, entries);
+    const entries = try list(gpa, root);
+    defer freeList(gpa, entries);
     var total: u64 = 0;
     for (entries, 0..) |e, i| {
         total += e.bytes;
@@ -350,32 +350,32 @@ pub fn prune(alloc: std.mem.Allocator, root: []const u8, max_count: usize, max_b
 
 const testutil = @import("../testutil.zig");
 
-fn addTest(alloc: std.mem.Allocator, root: []const u8, time: i64, size: usize) !Id {
-    const img = try alloc.alloc(u8, size);
-    defer alloc.free(img);
+fn addTest(gpa: std.mem.Allocator, root: []const u8, time: i64, size: usize) !Id {
+    const img = try gpa.alloc(u8, size);
+    defer gpa.free(img);
     @memset(img, 0xAB);
-    return create(alloc, root, .{ .meta = .{ .time_ms = time, .width = 10, .height = 20 }, .image_png = img, .thumb_png = "t" });
+    return create(gpa, root, .{ .meta = .{ .time_ms = time, .width = 10, .height = 20 }, .image_png = img, .thumb_png = "t" });
 }
 
 test "meta round-trips and escapes its values" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var m: Meta = .{ .time_ms = 1763740953123, .width = 640, .height = 480, .saved = "/home/u/a\\b\nc.png", .ocr = "line 1\nline 2\r", .at = .{ -1200, 340 } };
-    const data = try m.format(alloc);
-    defer alloc.free(data);
-    var back = try Meta.parse(alloc, data);
-    defer back.deinit(alloc);
+    const data = try m.format(gpa);
+    defer gpa.free(data);
+    var back = try Meta.parse(gpa, data);
+    defer back.deinit(gpa);
     try std.testing.expectEqual(m.time_ms, back.time_ms);
     try std.testing.expectEqual(@as(u32, 640), back.width);
     try std.testing.expectEqualStrings(m.saved, back.saved);
     try std.testing.expectEqualStrings(m.ocr.?, back.ocr.?);
     try std.testing.expectEqual(m.at, back.at);
     // no OCR yet stays null; a missing time is damage
-    var plain = try Meta.parse(alloc, "shotlet-history 1\ntime=5\nsize=1x2\n");
-    defer plain.deinit(alloc);
+    var plain = try Meta.parse(gpa, "shotlet-history 1\ntime=5\nsize=1x2\n");
+    defer plain.deinit(gpa);
     try std.testing.expect(plain.ocr == null and plain.saved.len == 0 and plain.at == null);
-    try std.testing.expectError(error.BadMeta, Meta.parse(alloc, "shotlet-history 1\nsize=1x2\n"));
-    try std.testing.expectError(error.BadMeta, Meta.parse(alloc, "garbage"));
-    try std.testing.expectError(error.BadMeta, Meta.parse(alloc, "shotlet-history 1\ntime=x\n"));
+    try std.testing.expectError(error.BadMeta, Meta.parse(gpa, "shotlet-history 1\nsize=1x2\n"));
+    try std.testing.expectError(error.BadMeta, Meta.parse(gpa, "garbage"));
+    try std.testing.expectError(error.BadMeta, Meta.parse(gpa, "shotlet-history 1\ntime=x\n"));
 }
 
 test "ids are validated before they become paths" {
@@ -387,15 +387,15 @@ test "ids are validated before they become paths" {
 }
 
 test "entries list newest first and survive a reload" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-history");
     defer tmp.deinit();
     const root = tmp.path;
-    _ = try addTest(alloc, root, 1000, 10);
-    const newest = try addTest(alloc, root, 3000, 10);
-    _ = try addTest(alloc, root, 2000, 10);
-    const l = try list(alloc, root);
-    defer freeList(alloc, l);
+    _ = try addTest(gpa, root, 1000, 10);
+    const newest = try addTest(gpa, root, 3000, 10);
+    _ = try addTest(gpa, root, 2000, 10);
+    const l = try list(gpa, root);
+    defer freeList(gpa, l);
     try std.testing.expectEqual(@as(usize, 3), l.len);
     try std.testing.expectEqualStrings(newest.slice(), l[0].id.slice());
     try std.testing.expectEqual(@as(i64, 2000), l[1].meta.time_ms);
@@ -405,72 +405,72 @@ test "entries list newest first and survive a reload" {
     // saving later records the path
     var m = l[0].meta;
     m.saved = "/x/y.png";
-    try writeMeta(alloc, root, l[0].id.slice(), &m);
-    var r = try readMeta(alloc, root, l[0].id.slice());
-    defer r.deinit(alloc);
+    try writeMeta(gpa, root, l[0].id.slice(), &m);
+    var r = try readMeta(gpa, root, l[0].id.slice());
+    defer r.deinit(gpa);
     try std.testing.expectEqualStrings("/x/y.png", r.saved);
 }
 
 test "caps by count and size keep the newest" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-history");
     defer tmp.deinit();
     const root = tmp.path;
-    for (0..6) |i| _ = try addTest(alloc, root, @intCast(1000 + i), 1000);
-    try std.testing.expectEqual(@as(usize, 2), try prune(alloc, root, 4, 1 << 30));
+    for (0..6) |i| _ = try addTest(gpa, root, @intCast(1000 + i), 1000);
+    try std.testing.expectEqual(@as(usize, 2), try prune(gpa, root, 4, 1 << 30));
     {
-        const l = try list(alloc, root);
-        defer freeList(alloc, l);
+        const l = try list(gpa, root);
+        defer freeList(gpa, l);
         try std.testing.expectEqual(@as(usize, 4), l.len);
         try std.testing.expectEqual(@as(i64, 1005), l[0].meta.time_ms);
         try std.testing.expectEqual(@as(i64, 1002), l[3].meta.time_ms);
     }
     // each entry is a bit over 1000 bytes: 2500 bytes keep two
-    _ = try prune(alloc, root, 50, 2500);
+    _ = try prune(gpa, root, 50, 2500);
     {
-        const l = try list(alloc, root);
-        defer freeList(alloc, l);
+        const l = try list(gpa, root);
+        defer freeList(gpa, l);
         try std.testing.expectEqual(@as(usize, 2), l.len);
         try std.testing.expectEqual(@as(i64, 1004), l[1].meta.time_ms);
     }
     // the newest stays even when it alone is over the size cap
-    _ = try prune(alloc, root, 50, 10);
-    const l = try list(alloc, root);
-    defer freeList(alloc, l);
+    _ = try prune(gpa, root, 50, 10);
+    const l = try list(gpa, root);
+    defer freeList(gpa, l);
     try std.testing.expectEqual(@as(usize, 1), l.len);
     try std.testing.expectEqual(@as(i64, 1005), l[0].meta.time_ms);
 }
 
 test "damaged entries are skipped, then cleaned up" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var tmp = try testutil.TmpDir.init("shotlet-history");
     defer tmp.deinit();
     const root = tmp.path;
-    const good = try addTest(alloc, root, 5000, 10);
+    const good = try addTest(gpa, root, 5000, 10);
     // no image
     const a = Id.make(6000);
     var buf: [1200]u8 = undefined;
     sys.mkdirMode(try std.fmt.bufPrint(&buf, "{s}/{s}", .{ root, a.slice() }), 0o700);
     try sys.writeFile(try entryPath(&buf, root, a.slice(), "meta"), "shotlet-history 1\ntime=6000\n");
     // garbage meta
-    const b = try addTest(alloc, root, 7000, 10);
+    const b = try addTest(gpa, root, 7000, 10);
     try sys.writeFile(try entryPath(&buf, root, b.slice(), "meta"), "\x00\xff junk");
     // a stray directory that is not ours, and a half-written entry
     sys.mkdirMode(try std.fmt.bufPrint(&buf, "{s}/notes", .{root}), 0o700);
     sys.mkdirMode(try std.fmt.bufPrint(&buf, "{s}/.new-1", .{root}), 0o700);
-    const l = try list(alloc, root);
-    defer freeList(alloc, l);
+    const l = try list(gpa, root);
+    defer freeList(gpa, l);
     try std.testing.expectEqual(@as(usize, 1), l.len);
     try std.testing.expectEqualStrings(good.slice(), l[0].id.slice());
     // fresh damage may be a write in progress elsewhere: kept for now
-    try std.testing.expectEqual(@as(usize, 0), try prune(alloc, root, 50, 1 << 30));
+    try std.testing.expectEqual(@as(usize, 0), try prune(gpa, root, 50, 1 << 30));
     try std.testing.expect(sys.fileSize(try std.fmt.bufPrint(&buf, "{s}/notes", .{root})) != error.NotFound);
     try remove(root, good.slice());
-    const l2 = try list(alloc, root);
-    defer freeList(alloc, l2);
+    const l2 = try list(gpa, root);
+    defer freeList(gpa, l2);
     try std.testing.expectEqual(@as(usize, 0), l2.len);
     clear(root);
-    const l3 = try list(alloc, root);
-    defer freeList(alloc, l3);
+    const l3 = try list(gpa, root);
+    defer freeList(gpa, l3);
     try std.testing.expectEqual(@as(usize, 0), l3.len);
 }

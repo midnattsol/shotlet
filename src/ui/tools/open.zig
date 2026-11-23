@@ -3,6 +3,7 @@
 //! Copy would copy and closes the editor.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const doc_mod = @import("../doc.zig");
 const editor_mod = @import("../editor.zig");
 const png = @import("../../gfx/png.zig");
@@ -26,16 +27,16 @@ pub fn poll(ed: *Editor) void {
     const is_file = std.mem.eql(u8, d.mime, "text/uri-list");
     const path: []const u8 = if (is_file) (uri.firstFilePath(&buf, d.data) orelse return) else "the dropped image";
     const img = (if (is_file) imgload.loadFile(ed.alloc, path) else imgload.decode(ed.alloc, d.data)) catch |err| {
-        std.log.warn("drop: cannot open {s}: {t}", .{ path, err });
+        log.warn("drop: cannot open {s}: {t}", .{ path, err });
         ed.tools.toast.show(.problem, "Not an image Shotlet can open", 3000);
         ed.needs_render = true;
         return;
     };
     replaceDocument(ed, img) catch |err| {
-        std.log.warn("drop: {t}", .{err});
+        log.warn("drop: {t}", .{err});
         return;
     };
-    std.log.info("drop: opened {s} ({d}x{d})", .{ path, ed.img.width, ed.img.height });
+    log.info("drop: opened {s} ({d}x{d})", .{ path, ed.img.width, ed.img.height });
     var msg: [160]u8 = undefined;
     const base = if (std.mem.lastIndexOfScalar(u8, path, '/')) |i| path[i + 1 ..] else path;
     ed.tools.toast.show(.done, std.fmt.bufPrint(&msg, "Opened {s}", .{base}) catch "Opened", 2400);
@@ -68,7 +69,7 @@ pub fn pinExport(ed: *Editor) !void {
     var file_buf: [1300]u8 = undefined;
     const path = try std.fmt.bufPrintSentinel(&file_buf, "{s}/pin-{d}.png", .{ dir, sys.realtimeMs() }, 0);
     try sys.writeFileExclusive(path, data, 0o600);
-    std.log.info("pin: pinning the export ({s})", .{path});
+    log.info("pin: pinning the export ({s})", .{path});
     // where the capture was, rather than wherever a new window goes
     relaunch.pin(env, path, selectionCentre(ed));
     ed.finish(.cancel);

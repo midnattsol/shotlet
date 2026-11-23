@@ -55,18 +55,18 @@ pub const Shape = struct {
     /// wide as the longest line
     box_w: i32 = 0,
 
-    pub fn deinit(self: *Shape, alloc: std.mem.Allocator) void {
-        self.points.deinit(alloc);
-        self.str.deinit(alloc);
+    pub fn deinit(self: *Shape, gpa: std.mem.Allocator) void {
+        self.points.deinit(gpa);
+        self.str.deinit(gpa);
     }
 
-    pub fn clone(self: *const Shape, alloc: std.mem.Allocator) !Shape {
+    pub fn clone(self: *const Shape, gpa: std.mem.Allocator) !Shape {
         var c = self.*;
         c.points = .empty;
         c.str = .empty;
-        errdefer c.deinit(alloc);
-        try c.points.appendSlice(alloc, self.points.items);
-        try c.str.appendSlice(alloc, self.str.items);
+        errdefer c.deinit(gpa);
+        try c.points.appendSlice(gpa, self.points.items);
+        try c.str.appendSlice(gpa, self.str.items);
         return c;
     }
 
@@ -320,7 +320,7 @@ pub const palette_labels = [palette.len][]const u8{ "Red", "Orange", "Yellow", "
 pub const swatch_order = [palette.len]u4{ 0, 1, 2, 3, 4, 5, 8, 9, 6, 10, 7 };
 
 test "shape hit testing and frames" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const line = Shape{ .tool = .line, .color = 0xFFFF0000, .thickness = 4, .p0 = .{ .x = 0, .y = 0 }, .p1 = .{ .x = 100, .y = 0 } };
     try std.testing.expect(line.hitTest(.{ .x = 50, .y = 3 }, 2));
     try std.testing.expect(!line.hitTest(.{ .x = 50, .y = 10 }, 2));
@@ -333,11 +333,11 @@ test "shape hit testing and frames" {
     try std.testing.expect(rect.hitTest(.{ .x = 50, .y = 50 }, 2));
 
     var pen = Shape{ .tool = .pen, .color = 0xFFFF0000, .thickness = 2 };
-    defer pen.deinit(alloc);
-    try pen.points.appendSlice(alloc, &.{ .{ .x = 0, .y = 0 }, .{ .x = 10, .y = 10 }, .{ .x = 20, .y = 0 } });
+    defer pen.deinit(gpa);
+    try pen.points.appendSlice(gpa, &.{ .{ .x = 0, .y = 0 }, .{ .x = 10, .y = 10 }, .{ .x = 20, .y = 0 } });
     try std.testing.expect(pen.frame().eql(.{ .x = 0, .y = 0, .w = 20, .h = 10 }));
-    var copy = try pen.clone(alloc);
-    defer copy.deinit(alloc);
+    var copy = try pen.clone(gpa);
+    defer copy.deinit(gpa);
     copy.setFrame(&pen, .{ .x = 100, .y = 100, .w = 40, .h = 20 });
     try std.testing.expectEqual(Point{ .x = 120, .y = 120 }, copy.points.items[1]);
     try std.testing.expectEqual(Point{ .x = 140, .y = 100 }, copy.points.items[2]);

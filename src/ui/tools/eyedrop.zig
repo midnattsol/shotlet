@@ -5,6 +5,7 @@
 //! history.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const shapes = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const color = @import("color.zig");
@@ -59,11 +60,11 @@ fn copy(ed: *Editor, c: u32, f: color.Format) !void {
     const owned = try ed.alloc.dupe(u8, s);
     ed.win.setClipboardText(owned) catch |e| {
         ed.alloc.free(owned);
-        std.log.warn("colour picker: copy failed: {t}", .{e});
+        log.warn("colour picker: copy failed: {t}", .{e});
         ed.tools.toast.show(.problem, "Copy failed", 2400);
         return;
     };
-    std.log.info("colour picker: copied {s}", .{s});
+    log.info("colour picker: copied {s}", .{s});
     var msg: [64]u8 = undefined;
     ed.tools.toast.show(.done, std.fmt.bufPrint(&msg, "{s} copied", .{s}) catch s, 2400);
     ed.tools.toast.swatch = c;

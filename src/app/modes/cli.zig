@@ -5,6 +5,7 @@
 //! status 1), then the usual capture flow (app/shot.zig) with the mode.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const platform = @import("../../platform/api.zig");
 const shell = platform.shell;
 const env_mod = @import("../env.zig");
@@ -24,7 +25,7 @@ pub fn run(gpa: std.mem.Allocator, env: env_mod.Env, p: *const Parsed) !void {
     var req = request(p, config.load(gpa, env.home).modes.timer_s);
     if (req.mode == .window and !gnomeExtension(gpa, env)) {
         if (!shell.applies() and try platform.capture.captureWindow(gpa, env, req)) return;
-        std.log.info("window capture: not offered here; selecting an area instead", .{});
+        log.info("window capture: not offered here; selecting an area instead", .{});
         req.mode = .area;
     }
     if (req.mode == .scroll and !scroll_available.ensure(gpa, env)) out.exit(.failure);

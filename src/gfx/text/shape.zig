@@ -359,8 +359,8 @@ test "complex scripts are shaped with the font: joining, ligatures, marks" {
     const caret = @import("caret.zig");
     const xForOffset = caret.xForOffset;
     const offsetForX = caret.offsetForX;
-    const alloc = std.testing.allocator;
-    state_mod.init(alloc);
+    const gpa = std.testing.allocator;
+    state_mod.init(gpa);
     defer state_mod.deinit();
     const st = if (state_mod.state) |*p| p else return;
     // Urdu ڈاکٹر: letters outside Presentation Forms-B still join (ٹ

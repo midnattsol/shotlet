@@ -22,10 +22,10 @@ const TextCursor = draw_text.TextCursor;
 /// Paint `s` through `xf`. `alloc` is scratch for transformed polylines
 /// and blur; `cursor` marks the caret and selection of a text shape being
 /// edited.
-pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
+pub fn drawShape(canvas: *Canvas, gpa: std.mem.Allocator, s: *const Shape, xf: Xform, cursor: ?TextCursor) void {
     const tf = @max(1.0, s.th() * xf.scale);
     switch (s.tool) {
-        .pen, .highlight => drawStroke(canvas, alloc, s, xf, tf),
+        .pen, .highlight => drawStroke(canvas, gpa, s, xf, tf),
         .line => {
             const seg = [_]Point{ xf.pt(s.p0), xf.pt(s.p1) };
             canvas.strokePolylineAA(seg[0..], tf, s.color);
@@ -36,9 +36,9 @@ pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf:
             const r = xf.rect(s.frame());
             if (s.filled) raster.fillEllipseAA(canvas, r, s.color) else canvas.ellipseRingAA(r.x, r.y, r.w, r.h, tf, s.color);
         },
-        .blur, .pixelate, .redact => drawRedaction(canvas, alloc, s, xf),
+        .blur, .pixelate, .redact => drawRedaction(canvas, gpa, s, xf),
         .counter => drawCounter(canvas, s, xf),
-        .text => draw_text.drawText(canvas, alloc, s, xf, cursor),
+        .text => draw_text.drawText(canvas, gpa, s, xf, cursor),
         .ruler => ruler.draw(canvas, s, xf),
         .spotlight => spotlight.draw(canvas, s, xf),
         .select => {},
@@ -46,9 +46,9 @@ pub fn drawShape(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf:
 }
 
 /// A pen stroke, or a translucent highlighter three times as wide.
-fn drawStroke(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform, tf: f64) void {
-    const pts = alloc.alloc(Point, s.points.items.len) catch return;
-    defer alloc.free(pts);
+fn drawStroke(canvas: *Canvas, gpa: std.mem.Allocator, s: *const Shape, xf: Xform, tf: f64) void {
+    const pts = gpa.alloc(Point, s.points.items.len) catch return;
+    defer gpa.free(pts);
     for (pts, s.points.items) |*d, p| d.* = xf.pt(p);
     if (s.tool == .pen) {
         canvas.strokePolylineAA(pts, tf, s.color);
@@ -70,12 +70,12 @@ fn drawRect(canvas: *Canvas, s: *const Shape, xf: Xform, tf: f64) void {
 }
 
 /// Blur, pixelate or redact the pixels under the shape's frame.
-fn drawRedaction(canvas: *Canvas, alloc: std.mem.Allocator, s: *const Shape, xf: Xform) void {
+fn drawRedaction(canvas: *Canvas, gpa: std.mem.Allocator, s: *const Shape, xf: Xform) void {
     const r = xf.rect(s.frame());
     switch (s.tool) {
         .blur => {
             const rad: u32 = @max(1, @as(u32, @intFromFloat(@round(@as(f64, @floatFromInt(s.blurRadius())) * xf.scale))));
-            effects.blur(alloc, canvas.px, @intCast(canvas.w), @intCast(canvas.h), r, rad) catch {};
+            effects.blur(gpa, canvas.px, @intCast(canvas.w), @intCast(canvas.h), r, rad) catch {};
         },
         .pixelate => {
             const blk: i32 = @max(2, @as(i32, @intFromFloat(@round(@as(f64, @floatFromInt(s.pixelBlock())) * xf.scale))));
@@ -126,11 +126,11 @@ pub fn drawArrow(canvas: *Canvas, x0: f64, y0: f64, x1: f64, y1: f64, width: f64
 }
 
 test "drawing through a transform scales shapes" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var px: [40 * 40]u32 = @splat(0xFF000000);
     var c = Canvas.init(&px, 40, 40);
     const s = Shape{ .tool = .redact, .color = 0xFFFFFFFF, .thickness = 2, .p0 = .{ .x = 10, .y = 10 }, .p1 = .{ .x = 30, .y = 30 } };
-    drawShape(&c, alloc, &s, .{ .scale = 0.5, .ox = 5, .oy = 5 }, null);
+    drawShape(&c, gpa, &s, .{ .scale = 0.5, .ox = 5, .oy = 5 }, null);
     // image (10..30) -> canvas (10..20)
     try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[10 * 40 + 10]);
     try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[19 * 40 + 19]);

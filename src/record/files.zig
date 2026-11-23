@@ -54,13 +54,13 @@ pub fn copyFile(gpa: std.mem.Allocator, src: []const u8, dst: []const u8) !void 
 /// Ask where (the desktop's save dialog, as a screenshot's Save As does:
 /// deliver.askTarget) and copy the recording there; the new path, or null
 /// when cancelled.
-pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, session: *desktop.Session, src: []const u8) !?[]u8 {
+pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, bus: *desktop.Bus, src: []const u8) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
     const cfg = config.load(gpa, env.home);
     const dir = try settings_mod.outputDir(gpa, &cfg.record, env.home, &dir_buf);
     const slash = std.mem.lastIndexOfScalar(u8, src, '/') orelse return error.BadPath;
     const opts: desktop.SaveOptions = .{ .title = "Save Recording", .current_name = src[slash + 1 ..], .current_folder = dir };
-    const path = switch (try deliver.askTarget(gpa, session, opts, filename.extension(src), null)) {
+    const path = switch (try deliver.askTarget(gpa, bus, opts, filename.extension(src), null)) {
         .path => |p| p,
         .cancelled => return null,
         .unavailable => return error.NoFileChooser,

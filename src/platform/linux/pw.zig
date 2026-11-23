@@ -11,6 +11,7 @@
 //! The loaded library and its function table live here, shared by all.
 
 const std = @import("std");
+const log = std.log.scoped(.pw);
 const abi = @import("pw/abi.zig");
 const pod = @import("pw/pod.zig");
 const stream = @import("pw/stream.zig");
@@ -53,9 +54,9 @@ const Lib = optlib.Once(optlib.Table(Api), struct {
     fn load(why: *[]const u8) anyerror!optlib.Table(Api) {
         const t = optlib.bindPrefixed(Api, "pipewire-0.3", "pw_", &.{"0"}, why) catch |err| {
             if (err == error.NotFound)
-                std.log.info("{s}; using the Screenshot portal", .{why.*})
+                log.info("{s}; using the Screenshot portal", .{why.*})
             else
-                std.log.warn("{s}; using the Screenshot portal", .{why.*});
+                log.warn("{s}; using the Screenshot portal", .{why.*});
             return err;
         };
         api = t.api;

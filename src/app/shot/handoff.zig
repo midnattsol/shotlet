@@ -6,6 +6,7 @@
 //! to edit it again, pruning) is written after that.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
@@ -36,7 +37,7 @@ pub fn close(c: Ctx, what: ?keep_mod.What, thumbnail: bool) void {
         job.work();
         break :blk null;
     } else null;
-    c.ed.fadeOut() catch |err| std.log.debug("editor fade: {t}", .{err});
+    c.ed.fadeOut() catch |err| log.debug("editor fade: {t}", .{err});
     if (worker) |t| t.join();
     if (job.ready >= 0) {
         waitReady(c.win, job.ready);
@@ -85,5 +86,5 @@ fn waitReady(win: *window.Window, ready: sys.fd_t) void {
         _ = win.nextEventTimeout(0) catch return;
         win.queue.clearRetainingCapacity();
     }
-    std.log.info("the thumbnail took over {d} ms to show; closing the editor anyway", .{ready_timeout_ms});
+    log.info("the thumbnail took over {d} ms to show; closing the editor anyway", .{ready_timeout_ms});
 }

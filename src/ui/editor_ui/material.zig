@@ -26,10 +26,10 @@ pub const Backdrop = struct {
     /// the pane's content generation when `src` was last composed
     gen: u64 = 0,
 
-    pub fn release(self: *Backdrop, alloc: std.mem.Allocator) void {
-        alloc.free(self.px);
-        alloc.free(self.src);
-        self.shadow.release(alloc);
+    pub fn release(self: *Backdrop, gpa: std.mem.Allocator) void {
+        gpa.free(self.px);
+        gpa.free(self.src);
+        self.shadow.release(gpa);
         self.* = .{};
     }
 };

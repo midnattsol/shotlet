@@ -35,7 +35,7 @@ fn checkSize(w: c_int, h: c_int) !void {
     if (@as(u64, @intCast(w)) * @as(u64, @intCast(h)) > png.max_pixels) return error.TooBig;
 }
 
-pub fn decodeWebp(alloc: std.mem.Allocator, data: []const u8) !png.Image {
+pub fn decodeWebp(gpa: std.mem.Allocator, data: []const u8) !png.Image {
     const a = &(webp_lib.get() orelse return error.NoWebpLibrary).api;
     var w: c_int = 0;
     var h: c_int = 0;
@@ -44,10 +44,10 @@ pub fn decodeWebp(alloc: std.mem.Allocator, data: []const u8) !png.Image {
     const px = a.WebPDecodeBGRA(data.ptr, data.len, &w, &h) orelse return error.Corrupt;
     defer a.WebPFree(px);
     try checkSize(w, h);
-    return copyBgra(alloc, px, @intCast(w), @intCast(h));
+    return copyBgra(gpa, px, @intCast(w), @intCast(h));
 }
 
-pub fn decodeJpegLib(alloc: std.mem.Allocator, data: []const u8) !png.Image {
+pub fn decodeJpegLib(gpa: std.mem.Allocator, data: []const u8) !png.Image {
     const a = &(tj_lib.get() orelse return error.NoJpegLibrary).api;
     const h_ = a.tjInitDecompress() orelse return error.NoJpegLibrary;
     defer _ = a.tjDestroy(h_);
@@ -58,17 +58,17 @@ pub fn decodeJpegLib(alloc: std.mem.Allocator, data: []const u8) !png.Image {
     if (a.tjDecompressHeader3(h_, data.ptr, std.math.cast(c_ulong, data.len) orelse return error.TooBig, &w, &h, &sub, &cs) != 0) return error.Corrupt;
     try checkSize(w, h);
     const n: usize = @as(usize, @intCast(w)) * @as(usize, @intCast(h));
-    const out = try alloc.alloc(u32, n);
-    errdefer alloc.free(out);
+    const out = try gpa.alloc(u32, n);
+    errdefer gpa.free(out);
     const bytes: [*]u8 = @ptrCast(out.ptr);
     if (a.tjDecompress2(h_, data.ptr, @intCast(data.len), bytes, w, w * 4, h, tjpf_bgra, 0) != 0) return error.Corrupt;
     for (out) |*p| p.* |= 0xFF000000;
     return .{ .width = @intCast(w), .height = @intCast(h), .pixels = out };
 }
 
-fn copyBgra(alloc: std.mem.Allocator, px: [*]const u8, w: u32, h: u32) !png.Image {
+fn copyBgra(gpa: std.mem.Allocator, px: [*]const u8, w: u32, h: u32) !png.Image {
     const n = @as(usize, w) * h;
-    const out = try alloc.alloc(u32, n);
+    const out = try gpa.alloc(u32, n);
     for (out, 0..) |*p, i| p.* = std.mem.readInt(u32, px[i * 4 ..][0..4], .little);
     return .{ .width = w, .height = h, .pixels = out };
 }
@@ -80,12 +80,12 @@ test "webp files are recognised by their header" {
 }
 
 test "webp through libwebp, when installed" {
-    const alloc = std.testing.allocator;
-    var img = decodeWebp(alloc, @embedFile("testdata/small.webp")) catch |err| switch (err) {
+    const gpa = std.testing.allocator;
+    var img = decodeWebp(gpa, @embedFile("testdata/small.webp")) catch |err| switch (err) {
         error.NoWebpLibrary => return error.SkipZigTest,
         else => return err,
     };
-    defer img.deinit(alloc);
+    defer img.deinit(gpa);
     try std.testing.expectEqual(@as(u32, 37), img.width);
     try std.testing.expectEqual(@as(u32, 29), img.height);
     try std.testing.expectEqual(@as(u32, 0xFF), img.pixels[0] >> 24);

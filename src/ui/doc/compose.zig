@@ -15,7 +15,7 @@ const Document = doc.Document;
 /// that read their surroundings (blur, pixelate) see enough margin that
 /// the result matches a full redraw.
 pub fn composeRegion(
-    alloc: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     layer: []u32,
     img: []const u32,
     w: u32,
@@ -36,10 +36,10 @@ pub fn composeRegion(
     const in_place = e.eql(full);
     const ew: usize = @intCast(e.w);
     const eh: usize = @intCast(e.h);
-    const tmp = if (in_place) layer else try alloc.alloc(u32, ew * eh);
-    defer if (!in_place) alloc.free(tmp);
-    const mask = try alloc.alloc(u8, ew * eh);
-    defer alloc.free(mask);
+    const tmp = if (in_place) layer else try gpa.alloc(u32, ew * eh);
+    defer if (!in_place) gpa.free(tmp);
+    const mask = try gpa.alloc(u8, ew * eh);
+    defer gpa.free(mask);
     @memset(mask, 0);
     for (0..eh) |y| {
         const src = (@as(usize, @intCast(e.y)) + y) * w + @as(usize, @intCast(e.x));
@@ -51,7 +51,7 @@ pub fn composeRegion(
     for (list, 0..) |*s, i| {
         if (skip == i) continue;
         if (Rect.intersect(s.bounds().expand(s.readMargin()), e) == null) continue;
-        shapes.drawShape(&canvas, alloc, s, xf, null);
+        shapes.drawShape(&canvas, gpa, s, xf, null);
     }
     if (in_place) return;
     const rw: usize = @intCast(r.w);
@@ -65,16 +65,16 @@ pub fn composeRegion(
 
 /// Paint `s` over the layer as the new topmost shape: no recompose of
 /// what lies under it, so committing a stroke costs only the stroke.
-pub fn paintOnTop(alloc: std.mem.Allocator, layer: []u32, w: u32, h: u32, s: *const Shape) !void {
+pub fn paintOnTop(gpa: std.mem.Allocator, layer: []u32, w: u32, h: u32, s: *const Shape) !void {
     const full: Rect = .ofSize(w, h);
     const r = Rect.intersect(s.bounds(), full) orelse return;
     const e = Rect.intersect(r.expand(s.readMargin()), full).?;
     const ew: usize = @intCast(e.w);
     const eh: usize = @intCast(e.h);
-    const tmp = try alloc.alloc(u32, ew * eh);
-    defer alloc.free(tmp);
-    const mask = try alloc.alloc(u8, ew * eh);
-    defer alloc.free(mask);
+    const tmp = try gpa.alloc(u32, ew * eh);
+    defer gpa.free(tmp);
+    const mask = try gpa.alloc(u8, ew * eh);
+    defer gpa.free(mask);
     @memset(mask, 0);
     for (0..eh) |y| {
         const src = (@as(usize, @intCast(e.y)) + y) * w + @as(usize, @intCast(e.x));
@@ -82,7 +82,7 @@ pub fn paintOnTop(alloc: std.mem.Allocator, layer: []u32, w: u32, h: u32, s: *co
     }
     var canvas = render.Canvas.init(tmp, @intCast(ew), @intCast(eh));
     canvas.mask = mask;
-    shapes.drawShape(&canvas, alloc, s, .{ .ox = @floatFromInt(-e.x), .oy = @floatFromInt(-e.y) }, null);
+    shapes.drawShape(&canvas, gpa, s, .{ .ox = @floatFromInt(-e.x), .oy = @floatFromInt(-e.y) }, null);
     const rw: usize = @intCast(r.w);
     for (0..@intCast(r.h)) |ry| {
         const t = (@as(usize, @intCast(r.y - e.y)) + ry) * ew + @as(usize, @intCast(r.x - e.x));
@@ -99,22 +99,22 @@ pub const Exported = struct {
 
 /// Crop `crop` (inside the image) from the native layer and frame it if
 /// beautify is on. Caller owns the pixels.
-pub fn exportImage(alloc: std.mem.Allocator, layer: []const u32, w: u32, h: u32, crop: Rect, b: Beautify) !Exported {
+pub fn exportImage(gpa: std.mem.Allocator, layer: []const u32, w: u32, h: u32, crop: Rect, b: Beautify) !Exported {
     const full: Rect = .ofSize(w, h);
     const c = Rect.intersect(crop, full) orelse full;
     const cw: u32 = @intCast(c.w);
     const ch: u32 = @intCast(c.h);
-    const shot = try alloc.alloc(u32, @as(usize, cw) * ch);
-    errdefer alloc.free(shot);
+    const shot = try gpa.alloc(u32, @as(usize, cw) * ch);
+    errdefer gpa.free(shot);
     for (0..ch) |y| {
         const src = (@as(usize, @intCast(c.y)) + y) * w + @as(usize, @intCast(c.x));
         @memcpy(shot[y * cw ..][0..cw], layer[src..][0..cw]);
     }
     if (!b.enabled) return .{ .pixels = shot, .width = cw, .height = ch };
-    defer alloc.free(shot);
+    defer gpa.free(shot);
     const g = b.geometry(cw, ch);
-    const out = try alloc.alloc(u32, @as(usize, g.out_w) * g.out_h);
-    b.paint(alloc, out, shot, cw, ch);
+    const out = try gpa.alloc(u32, @as(usize, g.out_w) * g.out_h);
+    b.paint(gpa, out, shot, cw, ch);
     return .{ .pixels = out, .width = g.out_w, .height = g.out_h };
 }
 
@@ -125,12 +125,12 @@ const testing = std.testing;
 const testutil = @import("../../testutil.zig");
 
 test "export geometry is native, independent of the view scale" {
-    const alloc = testing.allocator;
+    const gpa = testing.allocator;
     const view_mod = @import("../view.zig");
     const iw = 1920;
     const ih = 1080;
-    const img = try alloc.alloc(u32, @as(usize, iw) * ih);
-    defer alloc.free(img);
+    const img = try gpa.alloc(u32, @as(usize, iw) * ih);
+    defer gpa.free(img);
     testutil.distinct(img);
     // the same buffer-space drag at several fits selects the same image area
     const cases = [_]struct { area: Rect, max: f64 }{
@@ -141,7 +141,7 @@ test "export geometry is native, independent of the view scale" {
     };
     for (cases) |c| {
         const v = view_mod.View.fit(iw, ih, c.area, c.max);
-        var d = Document.init(alloc, iw, ih);
+        var d = Document.init(gpa, iw, ih);
         defer d.deinit();
         // the user drags the buffer rect showing image (100,100)-(740,460)
         const b = v.rectToBuf(.{ .x = 100, .y = 100, .w = 640, .h = 360 });
@@ -151,8 +151,8 @@ test "export geometry is native, independent of the view scale" {
         const r = d.exportRect();
         try testing.expect(@abs(r.x - 100) <= 1 and @abs(r.y - 100) <= 1);
         try testing.expect(@abs(r.w - 640) <= 2 and @abs(r.h - 360) <= 2);
-        const out = try exportImage(alloc, img, iw, ih, r, .{});
-        defer alloc.free(out.pixels);
+        const out = try exportImage(gpa, img, iw, ih, r, .{});
+        defer gpa.free(out.pixels);
         try testing.expectEqual(@as(u32, @intCast(r.w)), out.width);
         try testing.expectEqual(@as(u32, @intCast(r.h)), out.height);
         // pixels come straight from the native image: no letterbox, no scaling
@@ -161,8 +161,8 @@ test "export geometry is native, independent of the view scale" {
         try testing.expectEqual(img[ry * iw + rx], out.pixels[0]);
         try testing.expectEqual(img[(ry + 5) * iw + rx + 7], out.pixels[5 * out.width + 7]);
         // whole-image export at this fit
-        const whole = try exportImage(alloc, img, iw, ih, Document.init(alloc, iw, ih).exportRect(), .{});
-        defer alloc.free(whole.pixels);
+        const whole = try exportImage(gpa, img, iw, ih, Document.init(gpa, iw, ih).exportRect(), .{});
+        defer gpa.free(whole.pixels);
         try testing.expectEqual(@as(u32, iw), whole.width);
         try testing.expectEqual(@as(u32, ih), whole.height);
         try testing.expectEqualSlices(u32, img, whole.pixels);
@@ -170,7 +170,7 @@ test "export geometry is native, independent of the view scale" {
 }
 
 test "beautify sizes and framing" {
-    const alloc = testing.allocator;
+    const gpa = testing.allocator;
     const b: Beautify = .{ .enabled = true };
     const g = b.geometry(1000, 500);
     try testing.expectEqual(@as(u32, 70), g.pad);
@@ -191,11 +191,11 @@ test "beautify sizes and framing" {
     try testing.expectEqual(@as(u32, 0), (Beautify{ .enabled = true, .padding = 0 }).geometry(1000, 500).shadow_blur);
     try testing.expectEqual(@as(u32, 0), (Beautify{ .enabled = true, .rounded = false }).geometry(1000, 500).radius);
 
-    const img = try alloc.alloc(u32, @as(usize, 200) * 100);
-    defer alloc.free(img);
+    const img = try gpa.alloc(u32, @as(usize, 200) * 100);
+    defer gpa.free(img);
     testutil.distinct(img);
-    const out = try exportImage(alloc, img, 200, 100, .{ .x = 10, .y = 10, .w = 100, .h = 50 }, b);
-    defer alloc.free(out.pixels);
+    const out = try exportImage(gpa, img, 200, 100, .{ .x = 10, .y = 10, .w = 100, .h = 50 }, b);
+    defer gpa.free(out.pixels);
     const gg = b.geometry(100, 50);
     try testing.expectEqual(gg.out_w, out.width);
     try testing.expectEqual(gg.out_h, out.height);
@@ -207,34 +207,34 @@ test "beautify sizes and framing" {
 }
 
 test "region recompose matches a full redraw" {
-    const alloc = testing.allocator;
+    const gpa = testing.allocator;
     const w = 120;
     const h = 90;
-    const img = try alloc.alloc(u32, @as(usize, w) * h);
-    defer alloc.free(img);
+    const img = try gpa.alloc(u32, @as(usize, w) * h);
+    defer gpa.free(img);
     testutil.distinct(img);
-    var d = Document.init(alloc, w, h);
+    var d = Document.init(gpa, w, h);
     defer d.deinit();
     _ = try d.add(.{ .tool = .pixelate, .color = 0, .thickness = 2, .p0 = .{ .x = 5, .y = 5 }, .p1 = .{ .x = 100, .y = 70 } });
     _ = try d.add(.{ .tool = .rect, .color = 0xFFFF0000, .thickness = 3, .p0 = .{ .x = 20, .y = 20 }, .p1 = .{ .x = 60, .y = 50 } });
     _ = try d.add(.{ .tool = .blur, .color = 0, .thickness = 1, .p0 = .{ .x = 30, .y = 40 }, .p1 = .{ .x = 110, .y = 85 } });
-    const full = try alloc.alloc(u32, w * h);
-    defer alloc.free(full);
-    try composeRegion(alloc, full, img, w, h, d.shapes.items, null, d.imageRect());
-    const part = try alloc.dupe(u32, img);
-    defer alloc.free(part);
+    const full = try gpa.alloc(u32, w * h);
+    defer gpa.free(full);
+    try composeRegion(gpa, full, img, w, h, d.shapes.items, null, d.imageRect());
+    const part = try gpa.dupe(u32, img);
+    defer gpa.free(part);
     // compose in four tiles
     const tiles = [_]Rect{
         .{ .x = 0, .y = 0, .w = 60, .h = 45 },  .{ .x = 60, .y = 0, .w = 60, .h = 45 },
         .{ .x = 0, .y = 45, .w = 60, .h = 45 }, .{ .x = 60, .y = 45, .w = 60, .h = 45 },
     };
-    for (tiles) |t| try composeRegion(alloc, part, img, w, h, d.shapes.items, null, t);
+    for (tiles) |t| try composeRegion(gpa, part, img, w, h, d.shapes.items, null, t);
     try testing.expectEqualSlices(u32, full, part);
     // painting the top shape over a layer of the others matches too
-    try composeRegion(alloc, part, img, w, h, d.shapes.items[0..2], null, d.imageRect());
-    try paintOnTop(alloc, part, w, h, &d.shapes.items[2]);
+    try composeRegion(gpa, part, img, w, h, d.shapes.items[0..2], null, d.imageRect());
+    try paintOnTop(gpa, part, w, h, &d.shapes.items[2]);
     try testing.expectEqualSlices(u32, full, part);
     // skipping a shape leaves its pixels as the image underneath
-    try composeRegion(alloc, part, img, w, h, d.shapes.items[1..2], 0, d.imageRect());
+    try composeRegion(gpa, part, img, w, h, d.shapes.items[1..2], 0, d.imageRect());
     try testing.expectEqualSlices(u32, img, part);
 }

@@ -17,7 +17,7 @@ pub const Change = struct { key: []const u8, value: []const u8 };
 const legacy_keys = [_][]const u8{"screencast_token"};
 
 /// Set `changes` in `dir`'s config file, leaving every other line as it is.
-pub fn updateDir(alloc: std.mem.Allocator, dir: []const u8, changes: []const Change) !void {
+pub fn updateDir(gpa: std.mem.Allocator, dir: []const u8, changes: []const Change) !void {
     sys.mkdirAll(dir, 0o700);
     // serialize writers (shot, settings, daemon) on the directory
     const dfd = try sys.openDir(dir);
@@ -26,23 +26,23 @@ pub fn updateDir(alloc: std.mem.Allocator, dir: []const u8, changes: []const Cha
 
     var path_buf: env.PathBuf = undefined;
     const path = try location.configFile(dir, &path_buf);
-    const old: []u8 = sys.readFileAlloc(alloc, path, 64 * 1024) catch |err| switch (err) {
-        error.NotFound => try alloc.dupe(u8, "# shotlet configuration\n"),
+    const old: []u8 = sys.readFileAlloc(gpa, path, 64 * 1024) catch |err| switch (err) {
+        error.NotFound => try gpa.dupe(u8, "# shotlet configuration\n"),
         else => return err,
     };
-    defer alloc.free(old);
+    defer gpa.free(old);
 
-    const content = try mergeContent(alloc, old, changes);
-    defer alloc.free(content);
+    const content = try mergeContent(gpa, old, changes);
+    defer gpa.free(content);
     try sys.writeAtomic(path, content, 0o600);
 }
 
 /// Rewrite `old` with `changes` applied: matching lines get the new value
 /// (later duplicates are dropped), untouched lines and comments are kept
 /// byte for byte, and keys not present yet are appended.
-pub fn mergeContent(alloc: std.mem.Allocator, old: []const u8, changes: []const Change) ![]u8 {
+pub fn mergeContent(gpa: std.mem.Allocator, old: []const u8, changes: []const Change) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(alloc);
+    errdefer out.deinit(gpa);
     var done: [64]bool = @splat(false);
     if (changes.len > done.len) return error.TooManyChanges;
 
@@ -53,19 +53,19 @@ pub fn mergeContent(alloc: std.mem.Allocator, old: []const u8, changes: []const 
             if (isLegacyKey(kv.key) or replaced(kv.key, changes)) continue;
             if (findChange(changes, kv.key)) |ci| {
                 if (!done[ci]) {
-                    try appendKv(alloc, &out, changes[ci]);
+                    try appendKv(gpa, &out, changes[ci]);
                     done[ci] = true;
                 }
                 continue;
             }
         }
-        try out.appendSlice(alloc, line);
-        try out.append(alloc, '\n');
+        try out.appendSlice(gpa, line);
+        try out.append(gpa, '\n');
     }
     for (changes, 0..) |ch, ci| {
-        if (!done[ci] and findChange(changes[0..ci], ch.key) == null) try appendKv(alloc, &out, ch);
+        if (!done[ci] and findChange(changes[0..ci], ch.key) == null) try appendKv(gpa, &out, ch);
     }
-    return out.toOwnedSlice(alloc);
+    return out.toOwnedSlice(gpa);
 }
 
 fn isLegacyKey(key: []const u8) bool {
@@ -99,31 +99,31 @@ fn findChange(changes: []const Change, key: []const u8) ?usize {
 }
 
 /// "key=value\n", with CR/LF dropped from the value.
-fn appendKv(alloc: std.mem.Allocator, out: *std.ArrayList(u8), ch: Change) !void {
-    try out.appendSlice(alloc, ch.key);
-    try out.append(alloc, '=');
+fn appendKv(gpa: std.mem.Allocator, out: *std.ArrayList(u8), ch: Change) !void {
+    try out.appendSlice(gpa, ch.key);
+    try out.append(gpa, '=');
     for (ch.value) |c| {
-        if (c != '\n' and c != '\r') try out.append(alloc, c);
+        if (c != '\n' and c != '\r') try out.append(gpa, c);
     }
-    try out.append(alloc, '\n');
+    try out.append(gpa, '\n');
 }
 
 test "merge keeps comments, replaces in place, drops duplicates" {
-    const alloc = std.testing.allocator;
-    const out = try mergeContent(alloc, "# c\nnotify=true\nx=1\nnotify=false\n", &.{
+    const gpa = std.testing.allocator;
+    const out = try mergeContent(gpa, "# c\nnotify=true\nx=1\nnotify=false\n", &.{
         .{ .key = "notify", .value = "false" },
         .{ .key = "save_dir", .value = "/a\nb" },
     });
-    defer alloc.free(out);
+    defer gpa.free(out);
     try std.testing.expectEqualStrings("# c\nnotify=false\nx=1\nsave_dir=/ab\n", out);
 }
 
 test "single-monitor restore tokens are dropped" {
-    const alloc = std.testing.allocator;
-    const out = try mergeContent(alloc, "screencast_token=old\nnotify=true\n", &.{
+    const gpa = std.testing.allocator;
+    const out = try mergeContent(gpa, "screencast_token=old\nnotify=true\n", &.{
         .{ .key = "screencast_restore_token", .value = "new" },
     });
-    defer alloc.free(out);
+    defer gpa.free(out);
     try std.testing.expectEqualStrings("notify=true\nscreencast_restore_token=new\n", out);
     var cfg = Config{};
     parse.applyValue(&cfg, "screencast_token", "old");
@@ -131,19 +131,19 @@ test "single-monitor restore tokens are dropped" {
 }
 
 test "a thumbnail written anew drops the quick_access switch it replaced" {
-    const alloc = std.testing.allocator;
-    const out = try mergeContent(alloc, "quick_access=false\nnotify=true\n", &.{
+    const gpa = std.testing.allocator;
+    const out = try mergeContent(gpa, "quick_access=false\nnotify=true\n", &.{
         .{ .key = "thumbnail", .value = "never" },
     });
-    defer alloc.free(out);
+    defer gpa.free(out);
     try std.testing.expectEqualStrings("notify=true\nthumbnail=never\n", out);
 }
 
 test "a bind written anew drops the older file's line for it" {
-    const alloc = std.testing.allocator;
-    const out = try mergeContent(alloc, "bind_pen=33\nbind_line=38\nnotify=true\n", &.{
+    const gpa = std.testing.allocator;
+    const out = try mergeContent(gpa, "bind_pen=33\nbind_line=38\nnotify=true\n", &.{
         .{ .key = "shortcut_pen", .value = "Ctrl+F" },
     });
-    defer alloc.free(out);
+    defer gpa.free(out);
     try std.testing.expectEqualStrings("bind_line=38\nnotify=true\nshortcut_pen=Ctrl+F\n", out);
 }

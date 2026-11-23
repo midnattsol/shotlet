@@ -3,6 +3,7 @@
 //! handling around the editor (saving in deliver.zig).
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const platform = @import("../platform/api.zig");
 const desktop = platform.desktop;
 const shell = platform.shell;
@@ -54,15 +55,15 @@ pub const From = struct {
 
 pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, smoke_ms: i64) !void {
     var t: Startup = .{ .t0 = nowMs() };
-    var conn = try desktop.connectBrief(gpa, env);
-    defer conn.deinit();
+    var bus = try desktop.connectBrief(gpa, env);
+    defer bus.deinit();
     t.session = nowMs();
-    if (!from.any() and handedToShell(gpa, env, &conn, from.req, t.t0)) return;
+    if (!from.any() and handedToShell(gpa, env, &bus, from.req, t.t0)) return;
 
     // the capture backend's warm-up (Linux: dlopen(libpipewire), ~50-80ms)
     // overlaps the rest of setup
     const warmup_thread = if (from.any()) null else std.Thread.spawn(.{}, warmupCapture, .{}) catch null;
-    desktop.identify(gpa, &conn);
+    desktop.identify(gpa, &bus);
     t.scope = nowMs();
 
     var cfg = config.load(gpa, env.home);
@@ -78,45 +79,45 @@ pub fn run(gpa: std.mem.Allocator, env: Env, from: From, preset_sel: ?[4]i32, sm
     if (warmup_thread) |th| th.join();
     t.warmup = nowMs();
     // the self-timer, where the GNOME extension did not count down
-    if (from.req.delay_s > 0 and !from.any() and !try countDown(&win, &conn, from.req.delay_s)) return;
-    var cap = (try acquire(gpa, env, &conn, &cfg, from)) orelse {
-        std.log.info("capture cancelled", .{});
+    if (from.req.delay_s > 0 and !from.any() and !try countDown(&win, &bus, from.req.delay_s)) return;
+    var cap = (try acquire(gpa, env, &bus, &cfg, from)) orelse {
+        log.info("capture cancelled", .{});
         return;
     };
     defer cap.deinit(gpa);
     if (from.req.delay_s > 0) win.closeWindow();
     t.capture = nowMs();
-    var edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .conn = &conn, .cfg = &cfg, .win = &win }, &cap, from.req)) {
+    var edit = switch (try mode_flow.afterCapture(.{ .gpa = gpa, .env = env, .bus = &bus, .cfg = &cfg, .win = &win }, &cap, from.req)) {
         .done => return,
         .edit => |e| e,
     };
     // where the windows were, for clicking one (an area to pick)
-    if (edit.modes) edit.windows = platform.capture.windows(gpa, env, &conn, &cap, if (from.shell) |s| s.id else null);
+    if (edit.modes) edit.windows = platform.capture.windows(gpa, env, &bus, &cap, if (from.shell) |s| s.id else null);
     defer gpa.free(edit.windows);
     edit.from_shell = from.shell != null;
-    if (edit.modes) edit.window_ok = platform.capture.canCaptureWindow(&conn);
+    if (edit.modes) edit.window_ok = platform.capture.canCaptureWindow(&bus);
 
     try openEditor(&win, &cap, perMonitor(&cap));
     t.open = nowMs();
-    t.log(from.shell);
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, preset_sel, smoke_ms, null, edit);
+    t.report(from.shell);
+    try editAndFinish(gpa, env, &bus, &cfg, &win, &cap, preset_sel, smoke_ms, null, edit);
 }
 
 /// With the GNOME Shell extension, the shell takes the screenshot (no
 /// prompt) and starts another shotlet on it. True when it took over (or
 /// declined): this process has nothing left to do.
 /// The self-timer's countdown, in the desktop's light/dark mode and accent.
-fn countDown(win: *window.Window, conn: *desktop.Session, seconds: u8) !bool {
+fn countDown(win: *window.Window, bus: *desktop.Bus, seconds: u8) !bool {
     const theme = @import("../ui/theme.zig");
-    return @import("../ui/countdown.zig").run(win, seconds, theme.of(theme.readPrefs(conn, 300)));
+    return @import("../ui/countdown.zig").run(win, seconds, theme.of(theme.readPrefs(bus, 300)));
 }
 
-fn handedToShell(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, req: modes.Request, t0: i64) bool {
-    if (!shell.applies() or !shell.active(conn)) return false;
+fn handedToShell(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, req: modes.Request, t0: i64) bool {
+    if (!shell.applies() or !shell.active(bus)) return false;
     launch.handOff(env);
-    switch (shell.requestCapture(gpa, conn, req)) {
+    switch (shell.requestCapture(gpa, bus, req)) {
         .started => {
-            std.log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
+            log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
             return true;
         },
         .declined => return true,
@@ -142,12 +143,12 @@ const Startup = struct {
     capture: i64 = 0,
     open: i64 = 0,
 
-    fn log(t: Startup, handed: ?shell.HandedCapture) void {
-        std.log.info("startup: capture={d}ms total={d}ms", .{ t.capture - t.t0, t.open - t.t0 });
+    fn report(t: Startup, handed: ?shell.HandedCapture) void {
+        log.info("startup: capture={d}ms total={d}ms", .{ t.capture - t.t0, t.open - t.t0 });
         if (handed) |sh| if (sh.t0_ms) |key| {
-            std.log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t.open - key, t.t0 - key });
+            log.info("GNOME integration: key press to editor {d}ms (shell capture and launch {d}ms)", .{ t.open - key, t.t0 - key });
         };
-        std.log.debug("startup detail: session={d}ms scope={d}ms config={d}ms window={d}ms warmup-wait={d}ms capture={d}ms open={d}ms", .{
+        log.debug("startup detail: session={d}ms scope={d}ms config={d}ms window={d}ms warmup-wait={d}ms capture={d}ms open={d}ms", .{
             t.session - t.t0,
             t.scope - t.session,
             t.config - t.scope,
@@ -164,7 +165,7 @@ const Startup = struct {
 /// xdg-desktop-portal-wlr), on that monitor rather than wherever the
 /// compositor puts a new window.
 fn openEditor(win: anytype, cap: *const capture.Capture, per_monitor: bool) !void {
-    defer std.log.debug("editor: {d} surfaces", .{win.n_surfaces});
+    defer log.debug("editor: {d} surfaces", .{win.n_surfaces});
     if (per_monitor) return win.openOutputs("Shotlet");
     if (cap.monitors.len == 1) if (cap.monitors[0].logical) |l| {
         return win.openOnOutputAt("Shotlet", l.x, l.y);
@@ -180,18 +181,18 @@ const Reopen = struct {
 
 /// The editor, then whatever its result asks for: copy, save, save as;
 /// keeping the capture for quick access and the history.
-pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
+pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.tools.env = env;
     ed.monitors = cap.monitors;
-    configureEditor(&ed, conn, cfg, smoke_ms);
+    configureEditor(&ed, bus, cfg, smoke_ms);
     const stateflag = @import("stateflag.zig");
     ed.loupe.hint.due = !stateflag.isSet(env.home, .zoom_hint);
     ed.show_hint = !stateflag.isSet(env.home, .editor_hint);
     ed.presetSelection(preset_sel);
     if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     ed.keep_alpha = edit.keep_alpha;
-    const ctx: mode_flow.Ctx = .{ .gpa = gpa, .env = env, .conn = conn, .cfg = cfg, .win = win };
+    const ctx: mode_flow.Ctx = .{ .gpa = gpa, .env = env, .bus = bus, .cfg = cfg, .win = win };
     ed.capmode = .{ .on = edit.modes, .windows = edit.windows, .window_ok = edit.window_ok, .screen_in_place = edit.modes and mode_flow.screenOpensEditor(ctx) };
     defer ed.deinit();
     if (reopen) |r| try restoreReopened(gpa, &ed, r);
@@ -202,7 +203,7 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, c
         if (reopen == null and (result.action == .copied or result.action == .save or result.action == .save_as)) if (ed.doc.sel) |r|
             last_area.remember(gpa, env.home, cap, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h });
 
-        const f: Finish = .{ .gpa = gpa, .env = env, .conn = conn, .cfg = cfg, .win = win, .ed = &ed, .replace = if (reopen) |r| r.kept else null };
+        const f: Finish = .{ .gpa = gpa, .env = env, .bus = bus, .cfg = cfg, .win = win, .ed = &ed, .replace = if (reopen) |r| r.kept else null };
         switch (result.action) {
             // the mode strip's other capture modes (shot/next.zig)
             .new_capture => next.restart(ctx, &ed),
@@ -224,11 +225,11 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, c
 
 /// The editor's settings from the config and the desktop's light/dark
 /// preference, accent and reduced motion.
-fn configureEditor(ed: *editor_mod.Editor, conn: *desktop.Session, cfg: *const config.Config, smoke_ms: i64) void {
+fn configureEditor(ed: *editor_mod.Editor, bus: *desktop.Bus, cfg: *const config.Config, smoke_ms: i64) void {
     const theme = @import("../ui/theme.zig");
-    ed.setPrefs(theme.readPrefs(conn, 1500));
-    theme.watch(conn) catch {};
-    ed.bus = conn;
+    ed.setPrefs(theme.readPrefs(bus, 1500));
+    theme.watch(bus) catch {};
+    ed.bus = bus;
     if (smoke_ms > 0) ed.smoke_deadline_ms = nowMs() + smoke_ms;
     ed.cfg_thickness = cfg.default_thickness;
     ed.color_idx = cfg.default_color;
@@ -264,7 +265,7 @@ fn restoreReopened(gpa: std.mem.Allocator, ed: *editor_mod.Editor, r: Reopen) !v
 const Finish = struct {
     gpa: std.mem.Allocator,
     env: Env,
-    conn: *desktop.Session,
+    bus: *desktop.Bus,
     cfg: *config.Config,
     win: *window.Window,
     ed: *editor_mod.Editor,
@@ -299,14 +300,14 @@ const Finish = struct {
             .gpa = f.gpa,
             .env = f.env,
             .cfg = f.cfg,
-            .bus = f.conn,
+            .bus = f.bus,
             .win = f.win,
             .over = f.win,
             .thumbnail_shows = f.cfg.showsThumbnail(true),
             .who = "editor",
         };
         return deliver.savePng(c, data, if (quick) .folder else .ask) catch |err| {
-            std.log.warn("could not save: {t}", .{err});
+            log.warn("could not save: {t}", .{err});
             var buf: [160]u8 = undefined;
             f.ed.tools.toast.show(.problem, deliver.failureText(&buf, err), 6000);
             f.ed.needs_render = true;
@@ -344,8 +345,8 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     };
     defer cap.deinit(gpa);
 
-    var conn = try desktop.connect(gpa, env);
-    defer conn.deinit();
+    var bus = try desktop.connect(gpa, env);
+    defer bus.deinit();
     var cfg = config.load(gpa, env.home);
     const text = @import("../gfx/text.zig");
     text.init(gpa);
@@ -353,19 +354,19 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = true });
-    std.log.info("editing {s} again", .{id});
+    log.info("editing {s} again", .{id});
     var kept: keep_mod.Kept = .{ .id = history.Id.fromSlice(id).? };
     if (root.len > kept.root_buf.len) return error.PathTooLong;
     @memcpy(kept.root_buf[0..root.len], root);
     kept.root_len = root.len;
-    try editAndFinish(gpa, env, &conn, &cfg, &win, &cap, null, 0, .{ .kept = kept, .doc = &doc }, .{});
+    try editAndFinish(gpa, env, &bus, &cfg, &win, &cap, null, 0, .{ .kept = kept, .doc = &doc }, .{});
 }
 
 /// Get the image to edit. Null means the person cancelled a dialog: the
 /// caller exits quietly, with no fallback and no further dialogs.
-pub fn acquire(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, cfg: *config.Config, from: From) !?capture.Capture {
+pub fn acquire(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config, from: From) !?capture.Capture {
     if (from.any()) return try fromGiven(gpa, env, from);
-    return platform.capture.screens(gpa, env, conn, cfg);
+    return platform.capture.screens(gpa, env, bus, cfg);
 }
 
 /// A capture that is already taken: by the GNOME extension, KWin, or a
@@ -375,7 +376,7 @@ fn fromGiven(gpa: std.mem.Allocator, env: Env, from: From) !capture.Capture {
         const t_load = nowMs();
         const cap = try shell.loadHanded(gpa, env, args);
         platform.capture.remember(env.home, .shell);
-        std.log.info("  capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
+        log.info("capture detail: monitors={d} through the GNOME integration (decode+stitch {d}ms)", .{ cap.monitors.len, nowMs() - t_load });
         return cap;
     }
     if (from.image) |img| return try capture.Capture.single(gpa, img);

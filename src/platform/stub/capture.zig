@@ -30,20 +30,20 @@ pub fn lastPath(home: []const u8) ?Path {
 pub fn warmup() void {}
 
 /// Every monitor, frozen. Null when the person cancelled.
-pub fn screens(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, cfg: *config.Config) error{Unavailable}!?capture.Capture {
-    _ = .{ gpa, env, s, cfg };
+pub fn screens(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config) error{Unavailable}!?capture.Capture {
+    _ = .{ gpa, env, bus, cfg };
     return error.Unavailable;
 }
 
 pub const max_windows = 64;
 /// The windows' frames when `cap` was taken (image pixels, owned).
-pub fn windows(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, cap: *const capture.Capture, shell_id: ?[]const u8) []geom.Rect {
-    _ = .{ gpa, env, s, cap, shell_id };
+pub fn windows(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cap: *const capture.Capture, shell_id: ?[]const u8) []geom.Rect {
+    _ = .{ gpa, env, bus, cap, shell_id };
     return &.{};
 }
 /// Whether a window's own pixels can be captured here.
-pub fn canCaptureWindow(s: *desktop.Session) bool {
-    _ = s;
+pub fn canCaptureWindow(bus: *desktop.Bus) bool {
+    _ = bus;
     return false;
 }
 /// Window capture without the shell integration: true when it handled it.
@@ -65,25 +65,25 @@ pub const ScrollSource = union(enum) {
         _ = self;
     }
     /// Scroll `clicks` notches (0: none), then the region's frame.
-    pub fn grab(self: *ScrollSource, gpa: std.mem.Allocator, env: Env, s: *desktop.Session, clicks: i32) error{Unavailable}!png.Image {
-        _ = .{ self, gpa, env, s, clicks };
+    pub fn grab(self: *ScrollSource, gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, clicks: i32) error{Unavailable}!png.Image {
+        _ = .{ self, gpa, env, bus, clicks };
         return error.Unavailable;
     }
 };
 /// Whether a scrolling capture can run here (before a region is picked).
-pub fn scrollSupport(gpa: std.mem.Allocator, env: Env, s: *desktop.Session) ScrollSupport {
-    _ = .{ gpa, env, s };
+pub fn scrollSupport(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus) ScrollSupport {
+    _ = .{ gpa, env, bus };
     return .unsupported;
 }
-pub fn openScroll(gpa: std.mem.Allocator, env: Env, s: *desktop.Session, cap: *const capture.Capture, region: geom.Rect, shell: bool, auto: bool) error{Unavailable}!ScrollSource {
-    _ = .{ gpa, env, s, cap, region, shell, auto };
+pub fn openScroll(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cap: *const capture.Capture, region: geom.Rect, shell: bool, auto: bool) error{Unavailable}!ScrollSource {
+    _ = .{ gpa, env, bus, cap, region, shell, auto };
     return error.Unavailable;
 }
 
 pub const ResetOutcome = struct {};
 /// Forget the permissions captures keep; with `dry_run` only find them.
-pub fn resetPermissions(arena: std.mem.Allocator, env: Env, s: ?*desktop.Session, dry_run: bool) ResetOutcome {
-    _ = .{ arena, env, s, dry_run };
+pub fn resetPermissions(arena: std.mem.Allocator, env: Env, bus: ?*desktop.Bus, dry_run: bool) ResetOutcome {
+    _ = .{ arena, env, bus, dry_run };
     return .{};
 }
 /// A short line about a reset.

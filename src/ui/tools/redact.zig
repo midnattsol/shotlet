@@ -3,6 +3,7 @@
 //! one undo step, to review, move or delete like any other.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const shapes = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const Word = @import("../../ocr/page.zig").Word;
@@ -21,7 +22,7 @@ pub fn apply(ed: *Editor, words: []const Word) !void {
     const hits = try locate.find(ed.alloc, words, 3);
     defer ed.alloc.free(hits);
     if (hits.len == 0) {
-        std.log.info("redact: nothing sensitive found", .{});
+        log.info("redact: nothing sensitive found", .{});
         ed.tools.toast.show(.info, "Nothing sensitive found", 2400);
         return;
     }
@@ -40,7 +41,7 @@ pub fn apply(ed: *Editor, words: []const Word) !void {
         });
         area = Rect.unite(area, r);
         n += 1;
-        std.log.info("redact: {t} at {d},{d} {d}x{d}", .{ h.kind, r.x, r.y, r.w, r.h });
+        log.info("redact: {t} at {d},{d} {d}x{d}", .{ h.kind, r.x, r.y, r.w, r.h });
     }
     try ed.recompose(area);
     var msg: [64]u8 = undefined;

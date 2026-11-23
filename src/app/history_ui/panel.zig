@@ -4,6 +4,7 @@
 //! and are reachable as methods.
 
 const std = @import("std");
+const log = std.log.scoped(.history);
 const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
@@ -38,7 +39,7 @@ pub const Panel = struct {
     env: Env,
     cfg: config.Config,
     win: window.Window,
-    bus: ?desktop.Session = null,
+    bus: ?desktop.Bus = null,
     root_buf: [1024]u8 = undefined,
     root_len: usize = 0,
     items: std.ArrayList(Item) = .empty,
@@ -117,7 +118,7 @@ pub const Panel = struct {
             try self.items.append(self.gpa, .{ .entry = e, .thumb = self.loadThumb(e.id.slice()) });
         }
         self.filter();
-        std.log.info("history: {d} captures", .{self.items.items.len});
+        log.info("{d} captures", .{self.items.items.len});
     }
 
     fn loadThumb(self: *Panel, id: []const u8) ?png.Image {
@@ -138,7 +139,7 @@ pub const Panel = struct {
             }
             self.shown.append(self.gpa, i) catch {};
         }
-        if (self.search.items.len > 0) std.log.info("history: search '{s}': {d} shown", .{ self.search.items, self.shown.items.len });
+        if (self.search.items.len > 0) log.info("search '{s}': {d} shown", .{ self.search.items, self.shown.items.len });
         if (self.selected) |s| if (std.mem.indexOfScalar(usize, self.shown.items, s) == null) {
             self.selected = null;
         };
@@ -148,7 +149,7 @@ pub const Panel = struct {
 
     // --- actions ---
 
-    pub fn bus_(self: *Panel) ?*desktop.Session {
+    pub fn bus_(self: *Panel) ?*desktop.Bus {
         if (self.bus == null) self.bus = desktop.connect(self.gpa, self.env) catch return null;
         return &self.bus.?;
     }
@@ -167,7 +168,7 @@ pub const Panel = struct {
     pub fn act(self: *Panel, a: Action) void {
         const i = self.selected orelse return;
         self.actInner(i, a) catch |err| {
-            std.log.warn("history: {t} failed: {t}", .{ a, err });
+            log.warn("{t} failed: {t}", .{ a, err });
             self.say("Failed");
         };
     }
@@ -187,7 +188,7 @@ pub const Panel = struct {
             .pin => try e.pin(self.env),
             .delete => {
                 try history.remove(self.root(), e.id);
-                std.log.info("history: deleted {s}", .{e.id});
+                log.info("deleted {s}", .{e.id});
                 self.selected = null;
                 try self.load();
                 try self.resize();
@@ -203,7 +204,7 @@ pub const Panel = struct {
     pub fn clearAll(self: *Panel) !void {
         self.confirm_clear = false;
         history.clear(self.root());
-        std.log.info("history: cleared", .{});
+        log.info("cleared", .{});
         self.selected = null;
         try self.load();
         try self.resize();

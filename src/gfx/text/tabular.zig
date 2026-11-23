@@ -26,10 +26,10 @@ pub const Digits = struct {
 };
 
 /// Work out `font`'s tabular digits.
-pub fn compute(alloc: std.mem.Allocator, font: *const ttf.Font) Digits {
+pub fn compute(gpa: std.mem.Allocator, font: *const ttf.Font) Digits {
     var out: Digits = .{ .gid = undefined, .adv = 0 };
     for (&out.gid, 0..) |*g, d| g.* = font.glyphIndex(@intCast('0' + d));
-    substituteTnum(alloc, font, &out.gid);
+    substituteTnum(gpa, font, &out.gid);
     for (out.gid) |g| {
         if (g != 0) out.adv = @max(out.adv, font.advanceUnits(g));
     }
@@ -37,11 +37,11 @@ pub fn compute(alloc: std.mem.Allocator, font: *const ttf.Font) Digits {
 }
 
 /// Replace `gid` by the font's "tnum" glyphs, when it has the feature.
-fn substituteTnum(alloc: std.mem.Allocator, font: *const ttf.Font, gid: *[10]u16) void {
+fn substituteTnum(gpa: std.mem.Allocator, font: *const ttf.Font, gid: *[10]u16) void {
     var buf: std.ArrayList(otl.Glyph) = .empty;
-    defer buf.deinit(alloc);
-    for (gid, 0..) |g, d| buf.append(alloc, .{ .gid = g, .cl0 = @intCast(d), .cl1 = @intCast(d + 1) }) catch return;
-    otl.substitute(alloc, font.layout, .latn, &.{"tnum"}, &buf) catch return;
+    defer buf.deinit(gpa);
+    for (gid, 0..) |g, d| buf.append(gpa, .{ .gid = g, .cl0 = @intCast(d), .cl1 = @intCast(d + 1) }) catch return;
+    otl.substitute(gpa, font.layout, .latn, &.{"tnum"}, &buf) catch return;
     // one glyph per digit, still: a font that did anything else is ignored
     if (buf.items.len != gid.len) return;
     for (buf.items, gid) |g, *out| {
@@ -55,11 +55,11 @@ pub fn digitOf(cp: u21) ?u4 {
 }
 
 test "tabular digits all take the same advance" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const testutil = @import("../../testutil.zig");
     var font = try testutil.systemFont(testutil.fonts.dejavu_sans);
     defer font.deinit();
-    const t = compute(alloc, &font);
+    const t = compute(gpa, &font);
     var adv: ?f64 = null;
     for (0..10) |d| {
         const p = t.place(&font, @intCast(d), 20).?;

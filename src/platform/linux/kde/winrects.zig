@@ -6,6 +6,7 @@
 //! ours) knows, so nobody else on the bus can pass windows off as KWin's.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
@@ -57,12 +58,12 @@ pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, ou
     var name_buf: [48]u8 = undefined;
     const plugin = std.fmt.bufPrint(&name_buf, "shotlet-windows-{s}", .{token}) catch return &.{};
     const id = loadScript(gpa, bus, path, plugin) catch |err| {
-        std.log.info("windows: KWin scripting unavailable ({t})", .{err});
+        log.info("windows: KWin scripting unavailable ({t})", .{err});
         return &.{};
     };
     defer unload(gpa, bus, plugin);
     runScript(bus, id) catch |err| {
-        std.log.info("windows: KWin did not run the script ({t})", .{err});
+        log.info("windows: KWin did not run the script ({t})", .{err});
         return &.{};
     };
     return awaitRects(bus, token, out);
@@ -117,7 +118,7 @@ fn awaitRects(bus: *dbus.Connection, token: []const u8, out: []i32) []const i32 
     }.f;
     while (true) {
         var msg = (bus.waitFor(deadline, {}, isRects) catch return &.{}) orelse {
-            std.log.info("windows: KWin's script did not answer", .{});
+            log.info("windows: KWin's script did not answer", .{});
             return &.{};
         };
         defer msg.deinit(bus.alloc);

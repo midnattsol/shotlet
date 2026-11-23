@@ -8,6 +8,7 @@
 //! the recording accumulates in RAM.
 
 const std = @import("std");
+const log = std.log.scoped(.recording);
 const sink_mod = @import("../encode/sink.zig");
 const quantize = @import("../encode/quantize.zig");
 const yuv = @import("../encode/yuv.zig");
@@ -108,7 +109,7 @@ pub const Engine = struct {
             if (!s.on or self.opts.format == .gif) continue;
             self.taps[i] = .{ .engine = self, .which = i };
             cap.addAudio(s.src, onAudio, &self.taps[i]) catch |err| {
-                std.log.warn("recording: no {t} sound: {t}", .{ s.src, err });
+                log.warn("no {t} sound: {t}", .{ s.src, err });
                 continue;
             };
             self.mixer.enable(i);
@@ -213,7 +214,7 @@ pub const Engine = struct {
 
     fn videoMain(self: *Engine) void {
         self.videoLoop() catch |err| {
-            std.log.warn("recording: stopped: {t}", .{err});
+            log.warn("stopped: {t}", .{err});
             self.err = err;
             self.has_err.store(true, .release);
             if (self.sink) |*s| s.abort();
@@ -259,7 +260,7 @@ pub const Engine = struct {
             .vaapi = self.opts.vaapi,
         });
         self.sink_ready.store(true, .release);
-        std.log.info("recording: {d}x{d} at {d} fps, {s}", .{ out[0], out[1], self.opts.fps, self.sink.?.backend.label() });
+        log.info("{d}x{d} at {d} fps, {s}", .{ out[0], out[1], self.opts.fps, self.sink.?.backend.label() });
         if (self.sink.?.has_audio) self.audio_thread = try std.Thread.spawn(.{}, audioMain, .{self});
         try self.pump(sw, sh, scaled);
         if (self.abort.load(.acquire)) {

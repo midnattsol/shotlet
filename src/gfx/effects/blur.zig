@@ -43,32 +43,32 @@ const max_blur_radius = 2048;
 /// noise (+-3 levels), keyed by a per-process random secret, is added
 /// afterwards so the result is not a pure function of the pixels below,
 /// which defeats matching blurred text against blurred candidates.
-pub fn blur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, radius: u32) !void {
+pub fn blur(gpa: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, radius: u32) !void {
     const c = clip(r, w, h) orelse return;
     if (radius == 0) return;
-    try boxBlur(alloc, pixels, w, h, c, @min(radius, max_blur_radius));
+    try boxBlur(gpa, pixels, w, h, c, @min(radius, max_blur_radius));
     if (radius >= 3) addNoise(pixels, w, c, r);
 }
 
 /// Blur for looks (backdrops under translucent UI): like `blur`, without
 /// the anti-recovery noise.
-pub fn softBlur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, radius: u32) !void {
+pub fn softBlur(gpa: std.mem.Allocator, pixels: []u32, w: u32, h: u32, r: Rect, radius: u32) !void {
     const c = clip(r, w, h) orelse return;
     if (radius == 0) return;
-    try boxBlur(alloc, pixels, w, h, c, @min(radius, max_blur_radius));
+    try boxBlur(gpa, pixels, w, h, c, @min(radius, max_blur_radius));
 }
 
 /// Three horizontal + vertical box passes of radius `rad` over the clipped
 /// rectangle `c`, with no noise.
-pub fn boxBlur(alloc: std.mem.Allocator, pixels: []u32, w: u32, h: u32, c: Rect, rad: usize) !void {
+pub fn boxBlur(gpa: std.mem.Allocator, pixels: []u32, w: u32, h: u32, c: Rect, rad: usize) !void {
     const cw: usize = @intCast(c.w);
     const ch: usize = @intCast(c.h);
-    const tmp = try alloc.alloc(u32, cw * ch);
-    defer alloc.free(tmp);
-    const sums = try alloc.alloc(u32, cw * 4);
-    defer alloc.free(sums);
-    const ext = try alloc.alloc(u32, 4 * (cw + 2 * rad + 1));
-    defer alloc.free(ext);
+    const tmp = try gpa.alloc(u32, cw * ch);
+    defer gpa.free(tmp);
+    const sums = try gpa.alloc(u32, cw * 4);
+    defer gpa.free(sums);
+    const ext = try gpa.alloc(u32, 4 * (cw + 2 * rad + 1));
+    defer gpa.free(ext);
     const inv: f32 = 1.0 / @as(f32, @floatFromInt(2 * rad + 1));
     for (0..3) |_| {
         hPass(pixels, w, c, rad, inv, ext);

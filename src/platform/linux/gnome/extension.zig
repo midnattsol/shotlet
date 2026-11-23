@@ -3,6 +3,7 @@
 //! or from the copy bundled in the binary, and where its files live.
 
 const std = @import("std");
+const log = std.log.scoped(.gnome);
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
@@ -171,21 +172,21 @@ pub fn installExtension(gpa: std.mem.Allocator, env: Env, bus_opt: ?*dbus.Connec
     if (extensionActive(bus)) return .active;
     const state = shellState(gpa, bus);
     if (state == null) {
-        std.log.warn("GNOME Shell is not running here", .{});
+        log.warn("GNOME Shell is not running here", .{});
         return .failed;
     }
     if (state.? == .unknown) {
         if (installRemote(gpa, bus)) |ok| {
             if (ok and waitActive(bus)) return .active;
-        } else |err| std.log.info("extensions.gnome.org install not possible ({t}); using the bundled copy", .{err});
+        } else |err| log.info("extensions.gnome.org install not possible ({t}); using the bundled copy", .{err});
     }
     const dir = writeBundled(env.home) catch |err| {
-        std.log.warn("could not copy the extension: {t}", .{err});
+        log.warn("could not copy the extension: {t}", .{err});
         return .failed;
     };
-    std.log.info("installed the GNOME Shell extension in {s}", .{dir});
+    log.info("installed the GNOME Shell extension in {s}", .{dir});
     _ = callBool(gpa, bus, "EnableExtension", 5000) catch |err|
-        std.log.warn("could not enable the extension: {t}", .{err});
+        log.warn("could not enable the extension: {t}", .{err});
     if (waitActive(bus)) return .active;
     return .installed_relogin;
 }

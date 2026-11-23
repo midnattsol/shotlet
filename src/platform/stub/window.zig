@@ -123,9 +123,9 @@ pub const Window = struct {
     pub const OpenOptions = types.OpenOptions;
 
     /// Connect to the session's display (Env.session).
-    pub fn init(alloc: std.mem.Allocator, env: Env) Error!Window {
+    pub fn init(gpa: std.mem.Allocator, env: Env) Error!Window {
         _ = env;
-        return .{ .alloc = alloc };
+        return .{ .alloc = gpa };
     }
     pub fn deinit(w: *Window) void {
         w.queue.deinit(w.alloc);
@@ -327,13 +327,13 @@ pub const Window = struct {
         _ = w;
     }
     /// The clipboard's text, owned.
-    pub fn clipboardText(w: *Window, alloc: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) Error!?[]u8 {
-        _ = .{ w, alloc, max_bytes, timeout_ms };
+    pub fn clipboardText(w: *Window, gpa: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) Error!?[]u8 {
+        _ = .{ w, gpa, max_bytes, timeout_ms };
         return null;
     }
     /// The clipboard's content in one of accept_mimes.
-    pub fn clipboardAccepted(w: *Window, alloc: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) Error!?Dropped {
-        _ = .{ w, alloc, max_bytes, timeout_ms };
+    pub fn clipboardAccepted(w: *Window, gpa: std.mem.Allocator, max_bytes: usize, timeout_ms: i64) Error!?Dropped {
+        _ = .{ w, gpa, max_bytes, timeout_ms };
         return null;
     }
     /// Drag a PNG (and its file) out of surface `idx`.

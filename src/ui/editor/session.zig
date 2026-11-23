@@ -81,8 +81,8 @@ fn drainQueue(ed: *Editor) !void {
 
 /// Follow the desktop's appearance while open, without blocking.
 fn pollBus(ed: *Editor) void {
-    const conn = ed.bus orelse return;
-    if (desktop.pump(conn, ed.alloc, &ed.prefs, null)) setPrefs(ed, ed.prefs);
+    const bus = ed.bus orelse return;
+    if (desktop.pump(bus, ed.alloc, &ed.prefs, null)) setPrefs(ed, ed.prefs);
 }
 
 /// Apply appearance preferences: colours and motion.

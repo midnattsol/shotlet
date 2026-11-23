@@ -2,6 +2,7 @@
 //! layout (keyboard.zig) with key repeat, modifiers and focus.
 
 const std = @import("std");
+const log = std.log.scoped(.window);
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const keyboard = @import("../keyboard.zig");
@@ -66,11 +67,11 @@ pub fn handleEvent(w: *Window, opcode: u16, r: *wl.ArgReader) !void {
             w.kb_focus = true;
             w.input_serial = try r.uint();
             w.keys.surface = surface.indexOf(w, try r.uint()) orelse 0;
-            std.log.debug("keyboard focus: surface {d}", .{w.keys.surface});
+            log.debug("keyboard focus: surface {d}", .{w.keys.surface});
         },
         wl.wl_keyboard.ev_leave => {
             w.kb_focus = false;
-            std.log.debug("keyboard focus lost", .{});
+            log.debug("keyboard focus lost", .{});
             w.kb.leave();
         },
         else => {},

@@ -25,9 +25,9 @@ pub const Migrated = [model.n_keys]bool;
 
 /// Apply every key=value line of the config file `path` to `cfg` (a
 /// missing or unreadable file changes nothing).
-pub fn readInto(alloc: std.mem.Allocator, path: []const u8, cfg: *Config) Migrated {
-    const data = sys.readFileAlloc(alloc, path, 64 * 1024) catch return @splat(false);
-    defer alloc.free(data);
+pub fn readInto(gpa: std.mem.Allocator, path: []const u8, cfg: *Config) Migrated {
+    const data = sys.readFileAlloc(gpa, path, 64 * 1024) catch return @splat(false);
+    defer gpa.free(data);
     return applyText(cfg, data);
 }
 

@@ -6,6 +6,7 @@
 //! could never start.
 
 const std = @import("std");
+const log = std.log.scoped(.scrolling_capture);
 const platform = @import("../../platform/api.zig");
 const desktop = platform.desktop;
 const shell = platform.shell;
@@ -83,12 +84,12 @@ fn needsIntegration(n: *Notice, w: shell.Words) void {
 
 /// True when a scrolling capture can run; else the person was told why.
 pub fn ensure(gpa: std.mem.Allocator, env: Env) bool {
-    var conn = desktop.connectBrief(gpa, env) catch |err| {
-        std.log.info("scrolling capture: no desktop session ({t}); trying anyway", .{err});
+    var bus = desktop.connectBrief(gpa, env) catch |err| {
+        log.info("no desktop session ({t}); trying anyway", .{err});
         return true;
     };
-    defer conn.deinit();
-    const n = notice(platform.capture.scrollSupport(gpa, env, &conn), shell.words()) orelse return true;
+    defer bus.deinit();
+    const n = notice(platform.capture.scrollSupport(gpa, env, &bus), shell.words()) orelse return true;
     // stderr ("shotlet scroll: ..."), the log and a card on the screen
     report.problem(env, n.title(), n.body());
     return false;

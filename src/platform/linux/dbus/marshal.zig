@@ -9,8 +9,8 @@ pub const Marshal = struct {
     buf: std.ArrayList(u8) = .empty,
     alloc: std.mem.Allocator,
 
-    pub fn init(alloc: std.mem.Allocator) Marshal {
-        return .{ .alloc = alloc };
+    pub fn init(gpa: std.mem.Allocator) Marshal {
+        return .{ .alloc = gpa };
     }
     pub fn deinit(self: *Marshal) void {
         self.buf.deinit(self.alloc);
@@ -152,8 +152,8 @@ pub fn makeToken(buf: []u8, prefix: []const u8) ![]u8 {
 }
 
 test "putEntry writes the same bytes as the hand-written entry" {
-    const alloc = std.testing.allocator;
-    var a = Marshal.init(alloc);
+    const gpa = std.testing.allocator;
+    var a = Marshal.init(gpa);
     defer a.deinit();
     const d = try a.beginDict();
     try d.entry("s", "text");
@@ -162,7 +162,7 @@ test "putEntry writes the same bytes as the hand-written entry" {
     try d.entry("i", @as(i32, -3));
     d.end();
 
-    var b = Marshal.init(alloc);
+    var b = Marshal.init(gpa);
     defer b.deinit();
     const arr = try b.beginArray(8);
     try b.beginStruct();
@@ -182,8 +182,8 @@ test "putEntry writes the same bytes as the hand-written entry" {
 }
 
 test "a handle token entry carries the token it returns" {
-    const alloc = std.testing.allocator;
-    var m = Marshal.init(alloc);
+    const gpa = std.testing.allocator;
+    var m = Marshal.init(gpa);
     defer m.deinit();
     var buf: [64]u8 = undefined;
     const d = try m.beginDict();

@@ -2,6 +2,7 @@
 //! focused app for consent, so Shotlet asks from a small window of its own.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("../dbus.zig");
 const portal = @import("../portal.zig");
 const sys = @import("../sys.zig");
@@ -125,8 +126,8 @@ const Dialog = struct {
         d.status = "Denied by the portal - Enter to retry";
         if (!d.hint_logged) {
             d.hint_logged = true;
-            std.log.warn("portal denied the request; manual grant (plain DBus):", .{});
-            std.log.warn("  busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore SetPermission sbssas screenshot true screenshot shotlet 1 yes", .{});
+            log.warn("portal denied the request; manual grant (plain DBus):", .{});
+            log.warn("  busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore SetPermission sbssas screenshot true screenshot shotlet 1 yes", .{});
         }
         d.pending.?.deinit(d.gpa);
         d.pending = null;

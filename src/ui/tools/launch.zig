@@ -12,6 +12,7 @@ pub var select_all = false;
 pub var pin_fd: ?sys.fd_t = null;
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const sys = @import("../../platform/api.zig").sys;
 const ipc = @import("../../app/ipc.zig");
 const testutil = @import("../../testutil.zig");
@@ -22,7 +23,7 @@ pub fn backToPin(png: ?[]const u8) bool {
     const fd = pin_fd orelse return false;
     pin_fd = null;
     defer sys.close(fd);
-    if (png) |d| sys.writeAllBlocking(fd, d) catch |err| std.log.warn("pin: could not hand the picture back: {t}", .{err});
+    if (png) |d| sys.writeAllBlocking(fd, d) catch |err| log.warn("pin: could not hand the picture back: {t}", .{err});
     return true;
 }
 

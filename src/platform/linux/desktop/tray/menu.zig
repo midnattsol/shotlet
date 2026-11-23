@@ -25,13 +25,13 @@ pub const items = [_]Item{
 };
 
 /// Answers one call on the menu object; returns the clicked item's action.
-pub fn handle(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !MenuAction {
+pub fn handle(gpa: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !MenuAction {
     if (msg.isCall(iface, "GetLayout")) {
-        try getLayout(alloc, bus, msg);
+        try getLayout(gpa, bus, msg);
     } else if (msg.isCall(iface, "GetGroupProperties")) {
-        try getGroupProperties(alloc, bus, msg);
+        try getGroupProperties(gpa, bus, msg);
     } else if (msg.isCall(iface, "AboutToShow")) {
-        var m = dbus.Marshal.init(alloc);
+        var m = dbus.Marshal.init(gpa);
         defer m.deinit();
         try m.putBool(false);
         try bus.replyTo(msg, "b", m.buf.items);
@@ -53,8 +53,8 @@ fn putItemProps(m: *dbus.Marshal, item: Item) !void {
 }
 
 /// reply: (u(ia{sv}av)), the root and its items without nested children
-fn getLayout(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !void {
-    var m = dbus.Marshal.init(alloc);
+fn getLayout(gpa: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !void {
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putU32(1); // revision
     try m.beginStruct();
@@ -76,8 +76,8 @@ fn getLayout(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.M
 }
 
 /// reply: a(ia{sv})
-fn getGroupProperties(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !void {
-    var m = dbus.Marshal.init(alloc);
+fn getGroupProperties(gpa: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !void {
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     const arr = try m.beginArray(8);
     for (items) |item| {

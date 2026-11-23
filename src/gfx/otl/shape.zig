@@ -57,7 +57,7 @@ const pos_stages = [_]Stage{
 /// `buf` untouched) when the font has no GSUB for `script`, so the caller
 /// can fall back to presentation forms.
 pub fn shape(
-    alloc: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     t: Tables,
     script: Script,
     rtl: bool,
@@ -70,7 +70,7 @@ pub fn shape(
     for (buf.items) |*g| g.class = common.glyphClass(gdef, g.gid, g.umark);
     const n0 = buf.items.len;
     var ctx: Ctx = .{
-        .alloc = alloc,
+        .alloc = gpa,
         .buf = buf,
         .gdef = gdef,
         .table = t.gsub,
@@ -89,13 +89,13 @@ pub fn shape(
 /// Apply only the GSUB lookups of `features` (for `script`, else the
 /// font's default script) to `buf`: no other substitution, no
 /// positioning. For optional features such as tabular figures ("tnum").
-pub fn substitute(alloc: std.mem.Allocator, t: Tables, script: Script, features: []const *const [4]u8, buf: *std.ArrayList(Glyph)) !void {
+pub fn substitute(gpa: std.mem.Allocator, t: Tables, script: Script, features: []const *const [4]u8, buf: *std.ArrayList(Glyph)) !void {
     if (rd16(t.gsub, 0) != 1) return;
     const gdef = common.Gdef.init(t.gdef);
     for (buf.items) |*g| g.class = common.glyphClass(gdef, g.gid, g.umark);
     const n0 = buf.items.len;
     var ctx: Ctx = .{
-        .alloc = alloc,
+        .alloc = gpa,
         .buf = buf,
         .gdef = gdef,
         .table = t.gsub,
@@ -156,7 +156,7 @@ fn advOf(f: *const ttf.Font, gid: u16) i32 {
 }
 
 /// Shape `s` (one run) with `font`; caller frees the result.
-fn testShape(alloc: std.mem.Allocator, font: *const ttf.Font, script: Script, rtl: bool, comptime s: []const u8) !?[]Glyph {
+fn testShape(gpa: std.mem.Allocator, font: *const ttf.Font, script: Script, rtl: bool, comptime s: []const u8) !?[]Glyph {
     const bidi = @import("../bidi.zig");
     var cps: [64]u21 = undefined;
     var n: usize = 0;
@@ -165,40 +165,40 @@ fn testShape(alloc: std.mem.Allocator, font: *const ttf.Font, script: Script, rt
     var masks: [64]u8 = undefined;
     bidi.joiningMasks(cps[0..n], masks[0..n]);
     var buf: std.ArrayList(Glyph) = .empty;
-    errdefer buf.deinit(alloc);
+    errdefer buf.deinit(gpa);
     for (cps[0..n], masks[0..n], 0..) |cp, m, i| {
-        try buf.append(alloc, .{ .gid = font.glyphIndex(cp), .cl0 = @intCast(i), .cl1 = @intCast(i + 1), .mask = m | mask_global, .umark = bidi.class(cp) == .NSM });
+        try buf.append(gpa, .{ .gid = font.glyphIndex(cp), .cl0 = @intCast(i), .cl1 = @intCast(i + 1), .mask = m | mask_global, .umark = bidi.class(cp) == .NSM });
     }
-    if (!try shape(alloc, font.layout, script, rtl, &buf, font, advOf)) {
-        buf.deinit(alloc);
+    if (!try shape(gpa, font.layout, script, rtl, &buf, font, advOf)) {
+        buf.deinit(gpa);
         return null;
     }
-    return try buf.toOwnedSlice(alloc);
+    return try buf.toOwnedSlice(gpa);
 }
 
 const testutil = @import("../../testutil.zig");
 
 test "gsub: arabic joining forms and lam-alef from the font" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     for ([_][]const u8{ testutil.fonts.noto_arabic, testutil.fonts.dejavu_sans }) |path| {
         var font = (try testutil.optionalFont(path)) orelse continue;
         defer font.deinit();
         // بيت: three letters, all changed from their nominal glyphs
-        const g = (try testShape(alloc, &font, .arab, true, "بيت")) orelse continue;
-        defer alloc.free(g);
+        const g = (try testShape(gpa, &font, .arab, true, "بيت")) orelse continue;
+        defer gpa.free(g);
         try std.testing.expectEqual(@as(usize, 3), g.len);
         try std.testing.expect(g[0].gid != font.glyphIndex(0x628));
         try std.testing.expect(g[1].gid != font.glyphIndex(0x64A));
         try std.testing.expect(g[2].gid != font.glyphIndex(0x62A));
         // ٹ ڈ (Urdu, outside Presentation Forms-B for some) still join:
         // ٹٹ -> initial + final
-        const u = (try testShape(alloc, &font, .arab, true, "ٹٹ")).?;
-        defer alloc.free(u);
+        const u = (try testShape(gpa, &font, .arab, true, "ٹٹ")).?;
+        defer gpa.free(u);
         try std.testing.expect(u[0].gid != u[1].gid);
         try std.testing.expect(u[0].gid != font.glyphIndex(0x679));
         // سلام: lam + alef become one glyph covering both characters
-        const s = (try testShape(alloc, &font, .arab, true, "سلام")).?;
-        defer alloc.free(s);
+        const s = (try testShape(gpa, &font, .arab, true, "سلام")).?;
+        defer gpa.free(s);
         try std.testing.expectEqual(@as(usize, 3), s.len);
         try std.testing.expectEqual(@as(u32, 1), s[1].cl0);
         try std.testing.expectEqual(@as(u32, 3), s[1].cl1);
@@ -206,13 +206,13 @@ test "gsub: arabic joining forms and lam-alef from the font" {
 }
 
 test "gpos: harakat and niqqud attach to their base" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     if (try testutil.optionalFont(testutil.fonts.noto_arabic)) |f| {
         var font = f;
         defer font.deinit();
         // بَ: fatha over beh
-        const g = (try testShape(alloc, &font, .arab, true, "بَ")).?;
-        defer alloc.free(g);
+        const g = (try testShape(gpa, &font, .arab, true, "بَ")).?;
+        defer gpa.free(g);
         try std.testing.expectEqual(@as(usize, 2), g.len);
         try std.testing.expectEqual(@as(i32, 0), g[1].attach);
         try std.testing.expectEqual(@as(i32, 0), g[1].adv);
@@ -224,8 +224,8 @@ test "gpos: harakat and niqqud attach to their base" {
         var font = f;
         defer font.deinit();
         // בָּ: dagesh and qamats under/in bet
-        const g = (try testShape(alloc, &font, .hebr, true, "בָּ")).?;
-        defer alloc.free(g);
+        const g = (try testShape(gpa, &font, .hebr, true, "בָּ")).?;
+        defer gpa.free(g);
         var attached: usize = 0;
         for (g) |x| {
             if (x.attach == 0) attached += 1;
@@ -239,7 +239,7 @@ test "chained context on a hand-built GSUB; mutated tables never misbehave" {
     // rlig -> lookups 0, 1 and a dangling 7. Lookup 0: chained context
     // (format 3) whose records run lookup 1 (single: +1) and lookup 0
     // itself (recursion must stop) on glyph 5.
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const words = [_]u16{
         1, 0, 10, 30, 48, // header: scripts @10, features @30, lookups @48
         1, 0x6172, 0x6162, 8, // 10: 'arab' -> 18
@@ -259,14 +259,14 @@ test "chained context on a hand-built GSUB; mutated tables never misbehave" {
     for (words, 0..) |v, i| std.mem.writeInt(u16, t[i * 2 ..][0..2], v, .big);
 
     var buf: std.ArrayList(Glyph) = .empty;
-    defer buf.deinit(alloc);
-    for (0..6) |i| try buf.append(alloc, .{ .gid = @intCast(3 + i % 3), .cl0 = @intCast(i), .cl1 = @intCast(i + 1) });
+    defer buf.deinit(gpa);
+    for (0..6) |i| try buf.append(gpa, .{ .gid = @intCast(3 + i % 3), .cl0 = @intCast(i), .cl1 = @intCast(i + 1) });
     const Adv = struct {
         fn f(_: void, _: u16) i32 {
             return 500;
         }
     };
-    try std.testing.expect(try shape(alloc, .{ .gsub = &t }, .arab, true, &buf, {}, Adv.f));
+    try std.testing.expect(try shape(gpa, .{ .gsub = &t }, .arab, true, &buf, {}, Adv.f));
     var got: [6]u16 = undefined;
     for (buf.items, &got) |g, *o| o.* = g.gid;
     try std.testing.expectEqualSlices(u16, &.{ 3, 4, 6, 3, 4, 6 }, &got);
@@ -280,16 +280,16 @@ test "chained context on a hand-built GSUB; mutated tables never misbehave" {
         for (0..r.intRangeAtMost(u8, 1, 6)) |_| copy[r.uintLessThan(usize, copy.len)] = r.int(u8);
         const len = r.intRangeAtMost(usize, 0, copy.len);
         buf.clearRetainingCapacity();
-        for (0..8) |i| try buf.append(alloc, .{ .gid = @intCast(r.intRangeAtMost(u16, 0, 8)), .cl0 = @intCast(i), .cl1 = @intCast(i + 1), .umark = i % 3 == 2 });
+        for (0..8) |i| try buf.append(gpa, .{ .gid = @intCast(r.intRangeAtMost(u16, 0, 8)), .cl0 = @intCast(i), .cl1 = @intCast(i + 1), .umark = i % 3 == 2 });
         const tables: Tables = .{ .gsub = copy[0..len], .gpos = copy[0..len], .gdef = copy[0..len] };
-        _ = try shape(alloc, tables, if (r.boolean()) .arab else .hebr, r.boolean(), &buf, {}, Adv.f);
+        _ = try shape(gpa, tables, if (r.boolean()) .arab else .hebr, r.boolean(), &buf, {}, Adv.f);
         for (buf.items) |g| try std.testing.expect(g.attach < @as(i32, @intCast(buf.items.len)));
     }
 }
 
 test "one optional feature, from the default script, on a hand-built GSUB" {
     // 'DFLT' only; 'tnum' -> lookup 0: single substitution, glyph 5 -> 105
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const words = [_]u16{
         1, 0, 10, 30, 48, // header: scripts @10, features @30, lookups @48
         1, 0x4446, 0x4C54, 8, // 10: 'DFLT' -> 18
@@ -305,18 +305,18 @@ test "one optional feature, from the default script, on a hand-built GSUB" {
     var t: [words.len * 2]u8 = undefined;
     for (words, 0..) |v, i| std.mem.writeInt(u16, t[i * 2 ..][0..2], v, .big);
     var buf: std.ArrayList(Glyph) = .empty;
-    defer buf.deinit(alloc);
-    for ([_]u16{ 4, 5, 6 }, 0..) |g, i| try buf.append(alloc, .{ .gid = g, .cl0 = @intCast(i), .cl1 = @intCast(i + 1) });
-    try substitute(alloc, .{ .gsub = &t }, .latn, &.{"tnum"}, &buf);
+    defer buf.deinit(gpa);
+    for ([_]u16{ 4, 5, 6 }, 0..) |g, i| try buf.append(gpa, .{ .gid = g, .cl0 = @intCast(i), .cl1 = @intCast(i + 1) });
+    try substitute(gpa, .{ .gsub = &t }, .latn, &.{"tnum"}, &buf);
     try std.testing.expectEqual(@as(u16, 105), buf.items[1].gid);
     try std.testing.expectEqual(@as(u16, 4), buf.items[0].gid);
     // a feature the font does not have changes nothing
-    try substitute(alloc, .{ .gsub = &t }, .latn, &.{"pnum"}, &buf);
+    try substitute(gpa, .{ .gsub = &t }, .latn, &.{"pnum"}, &buf);
     try std.testing.expectEqual(@as(u16, 105), buf.items[1].gid);
 }
 
 test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const bidi = @import("../bidi.zig");
     const fonts = testutil.fonts;
     const seeds = [_]struct { path: []const u8, iters: usize }{
@@ -334,16 +334,16 @@ test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
     const r = prng.random();
     for (seeds) |sd| {
         const orig = (try testutil.optionalFile(sd.path, 4 * 1024 * 1024)) orelse continue;
-        defer alloc.free(orig);
-        const buf = try alloc.dupe(u8, orig);
-        defer alloc.free(buf);
-        var probe = ttf.Font.parse(alloc, orig, 0) catch continue;
+        defer gpa.free(orig);
+        const buf = try gpa.dupe(u8, orig);
+        defer gpa.free(buf);
+        var probe = ttf.Font.parse(gpa, orig, 0) catch continue;
         const tabs = [_][]const u8{ probe.layout.gsub, probe.layout.gpos, probe.layout.gdef };
         probe.deinit();
         var ranges: [3][2]usize = undefined;
         for (tabs, &ranges) |t, *rg| rg.* = .{ @intFromPtr(t.ptr) - @intFromPtr(orig.ptr), t.len };
         var glyphs: std.ArrayList(Glyph) = .empty;
-        defer glyphs.deinit(alloc);
+        defer glyphs.deinit(gpa);
         for (0..sd.iters) |_| {
             @memcpy(buf, orig);
             for (0..r.intRangeAtMost(u8, 1, 24)) |_| {
@@ -358,18 +358,18 @@ test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
                     else => std.mem.writeInt(u16, buf[p..][0..2], r.int(u16) & 0x3F, .big),
                 }
             }
-            var font = ttf.Font.parse(alloc, buf, 0) catch continue;
+            var font = ttf.Font.parse(gpa, buf, 0) catch continue;
             defer font.deinit();
             for ([_]Script{ .arab, .hebr }) |scr| {
                 glyphs.clearRetainingCapacity();
-                for (sample, masks, 0..) |cp, m, i| try glyphs.append(alloc, .{
+                for (sample, masks, 0..) |cp, m, i| try glyphs.append(gpa, .{
                     .gid = font.glyphIndex(cp),
                     .cl0 = @intCast(i),
                     .cl1 = @intCast(i + 1),
                     .mask = m | mask_global,
                     .umark = bidi.class(cp) == .NSM,
                 });
-                _ = try shape(alloc, font.layout, scr, true, &glyphs, &font, advOf);
+                _ = try shape(gpa, font.layout, scr, true, &glyphs, &font, advOf);
                 for (glyphs.items) |g| {
                     try std.testing.expect(g.attach < @as(i32, @intCast(glyphs.items.len)));
                     try std.testing.expect(g.cursive < @as(i32, @intCast(glyphs.items.len)));
@@ -381,7 +381,7 @@ test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
 }
 
 test "reverse chaining runs last glyph first; ligatures label their marks" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     const words = [_]u16{
         1, 0, 10, 30, 46, // header
         1, 0x6172, 0x6162, 8, // 10: 'arab'
@@ -408,17 +408,17 @@ test "reverse chaining runs last glyph first; ligatures label their marks" {
         }
     };
     var buf: std.ArrayList(Glyph) = .empty;
-    defer buf.deinit(alloc);
-    for (0..3) |i| try buf.append(alloc, .{ .gid = 5, .cl0 = @intCast(i), .cl1 = @intCast(i + 1) });
-    _ = try shape(alloc, .{ .gsub = &t }, .arab, true, &buf, {}, Adv.f);
+    defer buf.deinit(gpa);
+    for (0..3) |i| try buf.append(gpa, .{ .gid = 5, .cl0 = @intCast(i), .cl1 = @intCast(i + 1) });
+    _ = try shape(gpa, .{ .gsub = &t }, .arab, true, &buf, {}, Adv.f);
     var got: [3]u16 = undefined;
     for (buf.items, &got) |g, *o| o.* = g.gid;
     // forward order would give 9 9 5
     try std.testing.expectEqualSlices(u16, &.{ 5, 9, 5 }, &got);
 
     buf.clearRetainingCapacity();
-    for ([_]u16{ 3, 6, 4, 6, 4, 6 }, 0..) |gid, i| try buf.append(alloc, .{ .gid = gid, .cl0 = @intCast(i), .cl1 = @intCast(i + 1), .umark = gid == 6 });
-    _ = try shape(alloc, .{ .gsub = &t }, .arab, true, &buf, {}, Adv.f);
+    for ([_]u16{ 3, 6, 4, 6, 4, 6 }, 0..) |gid, i| try buf.append(gpa, .{ .gid = gid, .cl0 = @intCast(i), .cl1 = @intCast(i + 1), .umark = gid == 6 });
+    _ = try shape(gpa, .{ .gsub = &t }, .arab, true, &buf, {}, Adv.f);
     try std.testing.expectEqual(@as(usize, 4), buf.items.len);
     try std.testing.expectEqual(@as(u16, 7), buf.items[0].gid);
     try std.testing.expectEqual(@as(u8, 3), buf.items[0].lig_n);
@@ -444,12 +444,12 @@ test "reverse chaining runs last glyph first; ligatures label their marks" {
 }
 
 test "cursive attachment: Nastaliq words step down to the baseline" {
-    const alloc = std.testing.allocator;
+    const gpa = std.testing.allocator;
     var font = try testutil.systemFont(testutil.fonts.noto_nastaliq);
     defer font.deinit();
     // نستعلیق: a cascade, every letter joined to the next by its anchors
-    const g = (try testShape(alloc, &font, .arab, true, "نستعلیق")).?;
-    defer alloc.free(g);
+    const g = (try testShape(gpa, &font, .arab, true, "نستعلیق")).?;
+    defer gpa.free(g);
     var chained: usize = 0;
     var top: i32 = std.math.minInt(i32);
     var bottom: i32 = std.math.maxInt(i32);

@@ -3,6 +3,7 @@
 //! session), its PipeWire streams, and the shell's own stop button.
 
 const std = @import("std");
+const log = std.log.scoped(.record);
 const dbus = @import("dbus.zig");
 const gnome = @import("gnome.zig");
 const shell1 = @import("gnome/shell1.zig");
@@ -43,9 +44,9 @@ pub fn shellHasControls(_: std.mem.Allocator, bus: *dbus.Connection) bool {
 pub fn pickInShell(gpa: std.mem.Allocator, bus: *dbus.Connection) bool {
     if (!shellHasControls(gpa, bus)) return false;
     if (shell1.recordSelect(bus)) {
-        std.log.info("record: the picker is up through the GNOME integration", .{});
+        log.info("the picker is up through the GNOME integration", .{});
         return true;
-    } else |err| std.log.info("record: GNOME integration: {t}", .{err});
+    } else |err| log.info("GNOME integration: {t}", .{err});
     return false;
 }
 

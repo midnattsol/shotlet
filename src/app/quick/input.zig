@@ -3,6 +3,7 @@
 //! card's life (fade in, stay, fade out).
 
 const std = @import("std");
+const log = std.log.scoped(.quick_access);
 const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/api.zig").window;
 const focus = @import("../../ui/focus.zig");
@@ -34,7 +35,7 @@ pub fn onEvent(self: *Quick, ev: window.InputEvent) void {
             // then belong to whatever the person went back to typing
             // in, not to the thumbnail's shortcuts
             if (self.layer and !self.win.pointer_in) {
-                std.log.debug("quick access: key ignored, the pointer is elsewhere", .{});
+                log.debug("key ignored, the pointer is elsewhere", .{});
             } else onKey(self, k);
         },
     }
@@ -48,7 +49,7 @@ fn onMotion(self: *Quick, x: f64, y: f64) void {
     self.hover = h;
     if (self.press.held()) |p| if (p.control == .body and self.dragging == null and self.press.dragged(x, y, self.factor())) {
         self.press.cancel();
-        self.startDrag(p.card) catch |err| std.log.warn("quick access: drag failed: {t}", .{err});
+        self.startDrag(p.card) catch |err| log.warn("drag failed: {t}", .{err});
     };
 }
 

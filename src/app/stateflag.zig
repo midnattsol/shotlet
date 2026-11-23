@@ -3,6 +3,7 @@
 //! a config file reset and never race the settings writers.
 
 const std = @import("std");
+const log = std.log.scoped(.state);
 const statefile = @import("statefile.zig");
 
 pub const Flag = enum {
@@ -29,7 +30,7 @@ pub fn isSet(home: []const u8, f: Flag) bool {
 /// Set the flag, for good.
 pub fn set(home: []const u8, f: Flag) void {
     statefile.write(home, .state, f.fileName(), "") catch |err|
-        std.log.warn("could not remember {t}: {t}", .{ f, err });
+        log.warn("could not remember {t}: {t}", .{ f, err });
 }
 
 test "a flag is unset until it is set" {

@@ -2,6 +2,7 @@
 //! at runtime (optlib).
 
 const std = @import("std");
+const log = std.log.scoped(.keyboard);
 const optlib = @import("../../../optlib.zig");
 
 pub const Ctx = opaque {};
@@ -61,9 +62,9 @@ const Lib = optlib.Once(optlib.Table(Api), struct {
     fn load(why: *[]const u8) anyerror!optlib.Table(Api) {
         const t = optlib.bindPrefixed(Api, "xkbcommon", "xkb_", &.{"0"}, why) catch |err| {
             if (err == error.NotFound)
-                std.log.info("{s}; keyboard falls back to a US layout", .{why.*})
+                log.info("{s}; falling back to a US layout", .{why.*})
             else
-                std.log.warn("{s}; keyboard falls back to a US layout", .{why.*});
+                log.warn("{s}; falling back to a US layout", .{why.*});
             return err;
         };
         api = t.api;

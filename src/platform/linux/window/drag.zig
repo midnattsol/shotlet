@@ -2,6 +2,7 @@
 //! the icon under the pointer, and the drag's progress (Window.drag_state).
 
 const std = @import("std");
+const log = std.log.scoped(.window);
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
@@ -134,7 +135,7 @@ fn onSend(w: *Window, r: *wl.ArgReader) !void {
     };
     sys.writeAllBlocking(fd, data) catch |err| switch (err) {
         error.BrokenPipe, error.ConnectionReset => {},
-        else => std.log.warn("drag send failed: {t}", .{err}),
+        else => log.warn("drag send failed: {t}", .{err}),
     };
     // before v3 there is no dnd_finished: a read is the drop
     if (w.globals.ddm_version < 3) w.drag_state = .finished;

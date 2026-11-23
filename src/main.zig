@@ -10,6 +10,9 @@ const switches = @import("platform/api/switches.zig");
 
 const is_debug = @import("builtin").mode == .debug;
 
+/// Log lines name their subsystem (src/logfmt.zig).
+pub const std_options: std.Options = .{ .logFn = @import("logfmt.zig").logFn };
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
@@ -81,5 +84,6 @@ test {
     _ = @import("uri.zig");
     _ = @import("geom.zig");
     _ = @import("optlib.zig");
+    _ = @import("logfmt.zig");
     _ = @import("testutil.zig");
 }

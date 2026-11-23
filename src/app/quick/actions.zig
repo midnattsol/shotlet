@@ -3,6 +3,7 @@
 //! drag a card's capture out into other apps.
 
 const std = @import("std");
+const log = std.log.scoped(.quick_access);
 const uri_mod = @import("../../uri.zig");
 const desktop = @import("../../platform/api.zig").desktop;
 const env_mod = @import("../env.zig");
@@ -23,7 +24,7 @@ const Hit = layout.Hit;
 pub fn act(self: *Quick, i: usize, a: Action) void {
     if (i >= self.cards.items.len) return;
     actInner(self, i, a) catch |err| {
-        std.log.warn("quick access: {t} failed: {t}", .{ a, err });
+        log.warn("{t} failed: {t}", .{ a, err });
         notice(self, i, "Failed");
     };
 }
@@ -71,10 +72,10 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
             if (c.meta.saved.len == 0) return;
             const b = self.bus_() orelse return error.NoBus;
             try desktop.revealFile(self.gpa, b, c.meta.saved);
-            std.log.info("quick access: showing {s} in the file manager", .{c.meta.saved});
+            log.info("showing {s} in the file manager", .{c.meta.saved});
         },
         .close => {
-            std.log.info("quick access: closed {s}", .{c.kept.id.slice()});
+            log.info("closed {s}", .{c.kept.id.slice()});
             c.life.leave(sys.monoMs());
         },
     }
@@ -135,7 +136,7 @@ pub fn startDrag(self: *Quick, i: usize) !void {
     defer self.gpa.free(icon_px);
     try self.drag.start(&self.win, data, uri, .{ .pixels = icon_px, .width = iw, .height = ih, .scale = k });
     self.dragging = i;
-    std.log.info("quick access: dragging {s} (file {s})", .{ c.kept.id.slice(), file });
+    log.info("dragging {s} (file {s})", .{ c.kept.id.slice(), file });
 }
 
 /// A file for apps that take paths: the saved one, else a copy with a
@@ -165,9 +166,9 @@ pub fn checkDrag(self: *Quick) void {
     self.dirty = true;
     switch (out) {
         .finished => {
-            std.log.info("quick access: dropped", .{});
+            log.info("dropped", .{});
             if (i < self.cards.items.len) self.remove(i);
         },
-        .cancelled => std.log.info("quick access: drag cancelled", .{}),
+        .cancelled => log.info("drag cancelled", .{}),
     }
 }

@@ -4,6 +4,7 @@
 //! portal permission store, so the next portal capture asks again.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const dbus = @import("../../dbus.zig");
 const config = @import("../../../../app/config.zig");
 const Env = @import("../../../../app/env.zig").Env;
@@ -45,7 +46,7 @@ fn forgetToken(arena: std.mem.Allocator, env: Env, dry_run: bool) bool {
     const cfg = config.load(arena, env.home);
     if (cfg.scToken() == null) return false;
     if (!dry_run) config.saveScreencastToken(arena, env.home, "") catch |err| {
-        std.log.warn("could not forget the restore token: {t}", .{err});
+        log.warn("could not forget the restore token: {t}", .{err});
         return false;
     };
     return true;
@@ -54,7 +55,7 @@ fn forgetToken(arena: std.mem.Allocator, env: Env, dry_run: bool) bool {
 fn removeAll(bus: *dbus.Connection, entries: []const store.Entry) usize {
     var failed: usize = 0;
     for (entries) |e| store.remove(bus, e) catch |err| {
-        std.log.warn("could not remove a {t} permission: {t}", .{ e.table, err });
+        log.warn("could not remove a {t} permission: {t}", .{ e.table, err });
         failed += 1;
     };
     return failed;

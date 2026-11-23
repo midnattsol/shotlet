@@ -3,6 +3,7 @@
 //! each, and unplugging.
 
 const std = @import("std");
+const log = std.log.scoped(.window);
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
@@ -91,7 +92,7 @@ pub fn add(w: *Window, g: wl.Global) !void {
         try o.bind(&w.conn, w.globals.registry);
         try o.getXdg(&w.conn, w.globals.xdg_output_manager);
         break;
-    } else std.log.warn("more than {d} outputs; ignoring one", .{max_outputs});
+    } else log.warn("more than {d} outputs; ignoring one", .{max_outputs});
 }
 
 /// Ask for every known output's xdg_output; whether any output is known.

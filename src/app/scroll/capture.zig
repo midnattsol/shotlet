@@ -8,6 +8,7 @@
 //! run at all is decided before (available.zig).
 
 const std = @import("std");
+const log = std.log.scoped(.scrolling_capture);
 const capture = @import("../capture.zig");
 const png = @import("../../gfx/png.zig");
 const sys = @import("../../platform/api.zig").sys;
@@ -23,14 +24,14 @@ const Session = @import("session.zig").Session;
 /// Null when cancelled.
 pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png.Image {
     // the picker and the control follow the desktop's appearance
-    const th = theme.of(theme.readPrefs(c.conn, 800));
-    std.log.info("scrolling capture: pick a region", .{});
+    const th = theme.of(theme.readPrefs(c.bus, 800));
+    log.info("pick a region", .{});
     const region: geom.Rect = switch (try region_pick.pick(c.gpa, c.win, cap, "Start scrolling capture", th)) {
         .region => |r| .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h },
         .cancelled => return null,
     };
-    std.log.info("scrolling capture: region {d}x{d} at {d},{d}", .{ region.w, region.h, region.x, region.y });
-    const shell = shell_seam.applies() and shell_seam.active(c.conn);
+    log.info("region {d}x{d} at {d},{d}", .{ region.w, region.h, region.x, region.y });
+    const shell = shell_seam.applies() and shell_seam.active(c.bus);
     var hud = try hud_mod.Hud.open(c.win, th);
     defer c.win.closeWindow();
     try showHud(c, &hud, cap, region, shell);
@@ -43,7 +44,7 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
 /// nothing): the control says so until it is closed, instead of
 /// vanishing. Null: nothing to edit.
 fn failed(hud: *hud_mod.Hud, err: anyerror) !?png.Image {
-    std.log.warn("scrolling capture failed ({t}): no frame of the region", .{err});
+    log.warn("scrolling capture failed ({t}): no frame of the region", .{err});
     hud.show(.failed, "Couldn\u{2019}t capture the region", "Close and try again", 0);
     while (true) {
         try hud.draw(null);
@@ -59,7 +60,7 @@ fn showHud(c: flow.Ctx, hud: *hud_mod.Hud, cap: *const capture.Capture, region: 
         try hud.draw(null);
         _ = try hud.poll(50);
         if (!placed) if (besideRegion(cap, region)) |p| {
-            placed = shell_seam.place(c.gpa, c.conn, hud_mod.title, p[0], p[1]);
+            placed = shell_seam.place(c.gpa, c.bus, hud_mod.title, p[0], p[1]);
         };
         if (placed and sys.monoMs() + 1000 > deadline) break;
     }

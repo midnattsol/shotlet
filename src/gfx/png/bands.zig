@@ -34,29 +34,29 @@ pub const Band = struct {
     }
 
     fn compress(self: *Band) !void {
-        const alloc = self.alloc;
+        const gpa = self.alloc;
         const row_len = self.rowLen();
-        const bufs = try alloc.alloc(u8, Rows.bufLen(row_len));
-        defer alloc.free(bufs);
+        const bufs = try gpa.alloc(u8, Rows.bufLen(row_len));
+        defer gpa.free(bufs);
         var rows: Rows = .init(bufs, row_len);
         self.startRows(&rows, self.y0);
 
-        const window = try alloc.alloc(u8, flate.max_window_len);
-        defer alloc.free(window);
-        const comp = try alloc.create(flate.Compress);
-        defer alloc.destroy(comp);
+        const window = try gpa.alloc(u8, flate.max_window_len);
+        defer gpa.free(window);
+        const comp = try gpa.create(flate.Compress);
+        defer gpa.destroy(comp);
         const raw_len = @as(usize, self.y1 - self.y0) * (row_len + 1);
         try self.out.ensureUnusedCapacity(raw_len / 8 + 1024);
         // the probe reuses the window before the real compressor starts
         // writing, so each needs its own
-        const probe_window = try alloc.alloc(u8, flate.max_window_len);
-        defer alloc.free(probe_window);
+        const probe_window = try gpa.alloc(u8, flate.max_window_len);
+        defer gpa.free(probe_window);
         comp.* = try flate.Compress.init(&self.out.writer, window, .raw, .level_6);
 
         // probe state for choosing None vs adaptive filters per segment
         var probe: Probe = .{ .window = probe_window };
-        defer probe.deinit(alloc);
-        if (self.filter) try probe.alloc(alloc, row_len);
+        defer probe.deinit(gpa);
+        if (self.filter) try probe.alloc(gpa, row_len);
 
         self.adler = try self.writeRows(comp, &rows, &probe);
         // a non-final band ends byte-aligned with no BFINAL block, so the
@@ -160,14 +160,14 @@ const Probe = struct {
     window: []u8,
     bufs: []u8 = &.{},
 
-    fn alloc(self: *Probe, a: std.mem.Allocator, row_len: usize) !void {
-        self.comp = try a.create(flate.Compress);
-        self.bufs = try a.alloc(u8, Rows.bufLen(row_len) + 64);
+    fn alloc(self: *Probe, gpa: std.mem.Allocator, row_len: usize) !void {
+        self.comp = try gpa.create(flate.Compress);
+        self.bufs = try gpa.alloc(u8, Rows.bufLen(row_len) + 64);
     }
 
-    fn deinit(self: *Probe, a: std.mem.Allocator) void {
-        a.free(self.bufs);
-        if (self.comp) |p| a.destroy(p);
+    fn deinit(self: *Probe, gpa: std.mem.Allocator) void {
+        gpa.free(self.bufs);
+        if (self.comp) |p| gpa.destroy(p);
     }
 };
 

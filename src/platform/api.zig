@@ -37,7 +37,7 @@ pub const window = backend.window;
 pub const proc = backend.proc;
 
 /// The desktop session: appearance, file dialogs, notifications, "show
-/// in Files" (`Session`, with the neutral types of api/desktop.zig).
+/// in Files" (`Bus`, with the neutral types of api/desktop.zig).
 pub const desktop = backend.desktop;
 
 /// The shell integration (Linux: the GNOME Shell extension): captures

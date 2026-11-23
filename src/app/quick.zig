@@ -25,6 +25,7 @@
 //! card (drawing).
 
 const std = @import("std");
+const log = std.log.scoped(.quick_access);
 const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
@@ -76,13 +77,13 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8, r
     if (!q.cfg.history) pruneCache(gpa, env);
     setup(&q);
     try q.add(root, id);
-    std.log.info("quick access: showing {s} ({s})", .{ id, if (q.layer) "layer shell" else if (q.hint) "plain window" else "window placed by the GNOME extension" });
+    log.info("showing {s} ({s})", .{ id, if (q.layer) "layer shell" else if (q.hint) "plain window" else "window placed by the GNOME extension" });
     try loop(&q);
     // newcomers start their own stack from here on
     q.stopListening();
     q.win.closeWindow();
     if (q.win.hasClipboard()) {
-        std.log.info("quick access: serving the clipboard", .{});
+        log.info("serving the clipboard", .{});
         try q.win.serveClipboard();
     }
 }
@@ -100,7 +101,7 @@ fn setup(q: *Quick) void {
     q.th = theme_mod.load(q.gpa, q.env, 500);
     if (!q.win.hasLayerShell() and shell.applies()) {
         q.hint = if (q.bus_()) |b| !shell.active(b) else true;
-        if (q.hint) std.log.info("quick access: no Shotlet GNOME Shell extension; the thumbnail is an ordinary window", .{});
+        if (q.hint) log.info("no Shotlet GNOME Shell extension; the thumbnail is an ordinary window", .{});
     }
     // an image dropped on a thumbnail opens in the editor
     q.win.accept_mimes = &clipimg.drop_mimes;

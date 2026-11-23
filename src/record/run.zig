@@ -4,6 +4,7 @@
 //! it and showing its thumbnail.
 
 const std = @import("std");
+const log = std.log.scoped(.record);
 const desktop = @import("../platform/api.zig").desktop;
 const media = @import("../platform/api.zig").record;
 const env_mod = @import("../app/env.zig");
@@ -33,7 +34,7 @@ fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Setti
     defer bus.deinit();
     var cfg = config.load(gpa, env.home);
     var server = ctlsock.Server.listen(env.runtime_dir, env.session.tag()) catch |err| {
-        std.log.warn("record: no control socket ({t})", .{err});
+        log.warn("no control socket ({t})", .{err});
         if (err == error.AddressInUse)
             report.problem(env, "Another recording is under way", "Stop it first: shotlet record --stop")
         else
@@ -43,14 +44,14 @@ fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Setti
     defer server.close();
     const area = picked orelse a.area orelse try fullArea(gpa, env);
     var ctl: ?control_mod.Control = if (a.control) control_mod.Control.open(gpa, env, &bus, area) catch |err| blk: {
-        std.log.warn("record: no floating control ({t})", .{err});
+        log.warn("no floating control ({t})", .{err});
         break :blk null;
     } else null;
     defer if (ctl) |*c| c.close();
     if (set.countdown > 0) {
         const go = if (ctl) |*c| c.countdown(set.countdown, &server) else sleepCountdown(set.countdown);
         if (!go) {
-            std.log.info("record: cancelled during the countdown", .{});
+            log.info("cancelled during the countdown", .{});
             return;
         }
     }
@@ -62,11 +63,11 @@ fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Setti
     var rec = switch (session.Recording.begin(gpa, env, &bus, &cfg, set, .{ .area = area, .out = a.out })) {
         .ok => |r| r,
         .cancelled => {
-            std.log.info("record: cancelled", .{});
+            log.info("cancelled", .{});
             return;
         },
         .failed => |e| {
-            std.log.warn("record: could not start: {t}", .{e});
+            log.warn("could not start: {t}", .{e});
             report.failed(env, "Recording didn\u{2019}t start", e);
             return report.Reported;
         },
@@ -80,7 +81,7 @@ fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Setti
         .discard => rec.discard(),
         .stop => {
             const kept = rec.finish(&cfg) catch |err| {
-                std.log.warn("record: could not finish: {t}", .{err});
+                log.warn("could not finish: {t}", .{err});
                 report.failed(env, "The recording couldn\u{2019}t be saved", err);
                 return report.Reported;
             };
@@ -91,16 +92,16 @@ fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Setti
 
 const Outcome = enum { stop, discard };
 
-fn loop(rec: *session.Recording, bus: *desktop.Session, server: *ctlsock.Server, ctl: ?*control_mod.Control, seconds: ?u32) Outcome {
+fn loop(rec: *session.Recording, bus: *desktop.Bus, server: *ctlsock.Server, ctl: ?*control_mod.Control, seconds: ?u32) Outcome {
     var announced = false;
     while (true) {
         if (rec.engine.failed()) |err| {
-            std.log.warn("record: the recording failed ({t})", .{err});
+            log.warn("the recording failed ({t})", .{err});
             return .stop;
         }
         if (!announced and rec.engine.started()) {
             announced = true;
-            std.log.info("record: recording", .{});
+            log.info("recording", .{});
         }
         const elapsed = rec.engine.elapsedMs();
         if (seconds) |s| if (elapsed >= @as(i64, s) * 1000) return .stop;
@@ -131,11 +132,11 @@ fn pollCommands(rec: *session.Recording, server: *ctlsock.Server) ?Outcome {
 }
 
 /// The GNOME top bar's stop button and the record shortcut.
-fn pollBus(rec: *session.Recording, bus: *desktop.Session) bool {
+fn pollBus(rec: *session.Recording, bus: *desktop.Bus) bool {
     return media.pollStop(bus, rec.gpa);
 }
 
-fn waitAny(bus: *desktop.Session, server: *ctlsock.Server, ctl: ?*control_mod.Control) void {
+fn waitAny(bus: *desktop.Bus, server: *ctlsock.Server, ctl: ?*control_mod.Control) void {
     var fds = [_]sys.pollfd{
         .{ .fd = desktop.pollFd(bus), .events = sys.POLL.IN, .revents = 0 },
         .{ .fd = server.fd, .events = sys.POLL.IN, .revents = 0 },

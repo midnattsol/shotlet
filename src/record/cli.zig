@@ -5,6 +5,7 @@
 //! it (so one shortcut starts and stops).
 
 const std = @import("std");
+const log = std.log.scoped(.record);
 const desktop = @import("../platform/api.zig").desktop;
 const media = @import("../platform/api.zig").record;
 const shell = @import("../platform/api.zig").shell;
@@ -76,7 +77,7 @@ pub fn main(gpa: std.mem.Allocator, env: Env, p: *const Parsed) !void {
     }
     // the same shortcut again: stop the recording under way
     if (ctlsock.send(env.runtime_dir, env.session.tag(), "stop", &ans)) |r| {
-        std.log.info("record: stopped the recording under way ({s})", .{r});
+        log.info("stopped the recording under way ({s})", .{r});
         return;
     }
     if (a.area != null or a.full) return run_mod.run(gpa, env, a, set, null);
@@ -122,19 +123,19 @@ pub fn pickOnCapture(gpa: std.mem.Allocator, env: Env, cap: *const capture.Captu
 fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: Settings, cfg: *config.Config, cap: *const capture.Capture, overlays: bool) !void {
     var set = set0;
     text.init(gpa);
-    std.log.info("record: picker up", .{});
+    log.info("picker up", .{});
     const res = picker.pick(gpa, env, cap, &set, overlays, theme.load(gpa, env, 300));
     text.deinit();
     const area = switch (try res) {
         .area => |r| r,
         .cancelled => {
-            std.log.info("record: cancelled in the picker", .{});
+            log.info("cancelled in the picker", .{});
             return;
         },
     };
     if (takeChoices(&cfg.record, &set0, &set)) config.save(gpa, env.home, cfg) catch |err|
-        std.log.warn("could not save the recording choices: {t}", .{err});
-    std.log.info("record: picked {d},{d} {d}x{d}", .{ area.x, area.y, area.w, area.h });
+        log.warn("could not save the recording choices: {t}", .{err});
+    log.info("picked {d},{d} {d}x{d}", .{ area.x, area.y, area.w, area.h });
     try run_mod.run(gpa, env, a, set, area);
 }
 

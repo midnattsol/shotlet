@@ -13,6 +13,7 @@
 //! them wins); they work only while the strip shows.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
@@ -168,11 +169,11 @@ pub fn pick(ed: *Editor, m: Mode) !void {
 fn setText(ed: *Editor, on: bool) void {
     if (ed.tools.text_capture == on) return;
     ed.tools.text_capture = on;
-    std.log.info("capture mode: {s}", .{if (on) "text (the selection's text goes to the clipboard)" else "area"});
+    log.info("capture mode: {s}", .{if (on) "text (the selection's text goes to the clipboard)" else "area"});
 }
 
 fn restart(ed: *Editor, cmd: [:0]const u8) void {
-    std.log.info("capture mode: {s}, started anew", .{cmd});
+    log.info("capture mode: {s}, started anew", .{cmd});
     ed.next_capture = cmd;
     commands.finish(ed, .new_capture);
 }
@@ -185,7 +186,7 @@ fn screen(ed: *Editor) void {
         caches.selDirty(ed);
         ed.doc.sel = r;
         caches.selDirty(ed);
-        std.log.info("capture mode: screen, {d}x{d} selected", .{ r.w, r.h });
+        log.info("capture mode: screen, {d}x{d} selected", .{ r.w, r.h });
         return;
     }
     ed.capmode.screen_rect = r;

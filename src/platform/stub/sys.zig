@@ -105,8 +105,8 @@ pub fn waitReadable(fd: fd_t, deadline_ms: ?i64) Error!bool {
     return error.SyscallFailed;
 }
 /// Read `fd` until EOF, `max` bytes or the deadline (none: no limit).
-pub fn readBounded(alloc: std.mem.Allocator, fd: fd_t, max: usize, deadline_ms: ?i64) Error![]u8 {
-    _ = .{ alloc, fd, max, deadline_ms };
+pub fn readBounded(gpa: std.mem.Allocator, fd: fd_t, max: usize, deadline_ms: ?i64) Error![]u8 {
+    _ = .{ gpa, fd, max, deadline_ms };
     return error.SyscallFailed;
 }
 pub fn fsync(fd: fd_t) void {
@@ -155,8 +155,8 @@ pub fn writeAtomic(path: []const u8, data: []const u8, mode: u32) Error!void {
     _ = .{ path, data, mode };
     return error.AccessDenied;
 }
-pub fn readFileAlloc(alloc: std.mem.Allocator, path: []const u8, max: usize) Error![]u8 {
-    _ = .{ alloc, path, max };
+pub fn readFileAlloc(gpa: std.mem.Allocator, path: []const u8, max: usize) Error![]u8 {
+    _ = .{ gpa, path, max };
     return error.NotFound;
 }
 pub fn readFileBuf(path: []const u8, buf: []u8) Error![]u8 {
@@ -199,19 +199,19 @@ pub fn mkdirMode(path: []const u8, mode: u32) void {
 pub fn mkdirAll(path: []const u8, mode: u32) void {
     _ = .{ path, mode };
 }
-pub fn makeTempDir(alloc: std.mem.Allocator, base: []const u8, prefix: []const u8) Error![]u8 {
-    _ = .{ alloc, base, prefix };
+pub fn makeTempDir(gpa: std.mem.Allocator, base: []const u8, prefix: []const u8) Error![]u8 {
+    _ = .{ gpa, base, prefix };
     return error.CannotCreateTempDir;
 }
 pub fn removeTree(path: []const u8) void {
     _ = path;
 }
-pub fn listDir(alloc: std.mem.Allocator, path: []const u8) Error![]DirEntry {
-    _ = .{ alloc, path };
+pub fn listDir(gpa: std.mem.Allocator, path: []const u8) Error![]DirEntry {
+    _ = .{ gpa, path };
     return error.NotFound;
 }
-pub fn freeNames(alloc: std.mem.Allocator, list: []const DirEntry) void {
-    _ = .{ alloc, list };
+pub fn freeNames(gpa: std.mem.Allocator, list: []const DirEntry) void {
+    _ = .{ gpa, list };
 }
 
 // local sockets (one instance of a process, recording control)

@@ -12,6 +12,7 @@
 //!   result opens in the editor.
 
 const std = @import("std");
+const log = std.log.scoped(.capture);
 const desktop = @import("../../platform/api.zig").desktop;
 const capture = @import("../capture.zig");
 const config = @import("../config.zig");
@@ -32,7 +33,7 @@ const scroll = @import("../scroll/capture.zig");
 pub const Ctx = struct {
     gpa: std.mem.Allocator,
     env: env_mod.Env,
-    conn: *desktop.Session,
+    bus: *desktop.Bus,
     cfg: *config.Config,
     win: *window.Window,
 };
@@ -79,7 +80,7 @@ fn fullRect(cap: *const capture.Capture) geom.Rect {
 fn previous(c: Ctx, cap: *const capture.Capture) ?geom.Rect {
     const key = last_area.layoutKey(cap.monitors, cap.image.width, cap.image.height);
     const r = last_area.load(c.gpa, c.env.home, key);
-    if (r == null) std.log.info("previous area: none yet for this monitor layout", .{});
+    if (r == null) log.info("previous area: none yet for this monitor layout", .{});
     return r;
 }
 
@@ -87,7 +88,7 @@ fn previous(c: Ctx, cap: *const capture.Capture) ?geom.Rect {
 fn windowShot(c: Ctx, cap: *capture.Capture) !Outcome {
     const s = &c.cfg.modes;
     const scale: f64 = if (cap.monitors[0].logical) |l| @as(f64, @floatFromInt(cap.image.width)) / @as(f64, @floatFromInt(@max(1, l.w))) else 1;
-    std.log.info("window capture: {d}x{d}", .{ cap.image.width, cap.image.height });
+    log.info("window capture: {d}x{d}", .{ cap.image.width, cap.image.height });
     cap.image = try window_frame.frame(c.gpa, cap.image, scale, s.window_shadow, beautify(c.cfg));
     cap.monitors[0] = .{ .x = 0, .y = 0, .w = cap.image.width, .h = cap.image.height };
     return instant(c, cap, fullRect(cap), true);
@@ -113,7 +114,7 @@ pub fn screenOpensEditor(c: Ctx) bool {
 /// settings say.
 fn instant(c: Ctx, cap: *capture.Capture, r: geom.Rect, alpha: bool) !Outcome {
     const s = &c.cfg.modes;
-    std.log.info("capture mode: {d}x{d} at {d},{d}, then {t}", .{ r.w, r.h, r.x, r.y, s.after });
+    log.info("capture mode: {d}x{d} at {d},{d}, then {t}", .{ r.w, r.h, r.x, r.y, s.after });
     if (s.after == .editor) return .{ .edit = .{ .sel = r, .keep_alpha = alpha } };
     // a window is already framed; screens get the beautify frame here
     const b: doc_mod.Beautify = if (alpha) .{} else beautify(c.cfg);
@@ -148,9 +149,9 @@ fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, d: settings.
 
 /// Into the screenshots folder; null (logged) when it could not be written.
 fn saveFile(c: Ctx, data: []const u8, thumbnail: bool) ?[]u8 {
-    const dc: deliver_mod.Ctx = .{ .gpa = c.gpa, .env = c.env, .cfg = c.cfg, .bus = c.conn, .win = c.win, .win_closed = true, .thumbnail_shows = thumbnail, .who = "capture" };
+    const dc: deliver_mod.Ctx = .{ .gpa = c.gpa, .env = c.env, .cfg = c.cfg, .bus = c.bus, .win = c.win, .win_closed = true, .thumbnail_shows = thumbnail, .who = "capture" };
     return (deliver_mod.savePng(dc, data, .folder) catch |err| {
-        std.log.warn("could not save the capture ({t}); copying it instead", .{err});
+        log.warn("could not save the capture ({t}); copying it instead", .{err});
         return null;
     }).?;
 }
@@ -159,10 +160,10 @@ fn saveFile(c: Ctx, data: []const u8, thumbnail: bool) ?[]u8 {
 fn copy(c: Ctx, data: []u8) !void {
     clip.copyPng(c.win, data) catch |err| {
         c.gpa.free(data);
-        std.log.warn("could not copy the capture: {t}", .{err});
+        log.warn("could not copy the capture: {t}", .{err});
         return;
     };
-    std.log.info("capture copied to the clipboard", .{});
+    log.info("capture copied to the clipboard", .{});
     try c.win.serveClipboard();
 }
 
@@ -170,7 +171,7 @@ fn copy(c: Ctx, data: []u8) !void {
 /// capture and opens in the editor.
 fn scrolling(c: Ctx, cap: *capture.Capture) !Outcome {
     var tall = (scroll.run(c, cap, c.cfg.modes) catch |err| {
-        std.log.warn("scrolling capture failed ({t})", .{err});
+        log.warn("scrolling capture failed ({t})", .{err});
         return .done;
     }) orelse return .done;
     errdefer tall.deinit(c.gpa);

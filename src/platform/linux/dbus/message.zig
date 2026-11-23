@@ -43,9 +43,9 @@ pub const Message = struct {
     fds: [4]sys.fd_t = @splat(-1),
     n_fds: u8 = 0,
 
-    pub fn deinit(self: *Message, alloc: std.mem.Allocator) void {
+    pub fn deinit(self: *Message, gpa: std.mem.Allocator) void {
         self.closeFds();
-        alloc.free(self.raw);
+        gpa.free(self.raw);
         self.* = undefined;
     }
 

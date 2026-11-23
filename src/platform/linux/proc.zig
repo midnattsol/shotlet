@@ -3,6 +3,7 @@
 //! Shotlet itself started detached (the thumbnail, toasts, the editor).
 
 const std = @import("std");
+const log = std.log.scoped(.proc);
 const sys = @import("sys.zig");
 const linux = std.os.linux;
 
@@ -157,7 +158,7 @@ pub fn spawnSelf(envp: Envp, args: []const [*:0]const u8, keep: ?sys.fd_t) void 
     for (args, 1..) |a, i| argv[i] = a;
     const pid = linux.fork();
     if (linux.errno(pid) != .SUCCESS) {
-        std.log.err("fork failed", .{});
+        log.err("fork failed", .{});
         return;
     }
     if (pid == 0) {

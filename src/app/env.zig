@@ -173,7 +173,7 @@ pub const UserDir = enum {
 /// (localized, e.g. "Imágenes"), then ~/Pictures or ~/Videos. A value
 /// equal to $HOME means "disabled" per the spec, so it falls through to
 /// the default rather than saving into $HOME.
-pub fn userDir(alloc: std.mem.Allocator, buf: []u8, home: []const u8, which: UserDir) ![]u8 {
+pub fn userDir(gpa: std.mem.Allocator, buf: []u8, home: []const u8, which: UserDir) ![]u8 {
     const exported = switch (which) {
         .pictures => xdg.pictures_dir,
         .videos => xdg.videos_dir,
@@ -186,8 +186,8 @@ pub fn userDir(alloc: std.mem.Allocator, buf: []u8, home: []const u8, which: Use
     var cfg_home_buf: PathBuf = undefined;
     const cfg_home = try configHome(&cfg_home_buf, home);
     const dirs_path = try std.fmt.bufPrint(&path_buf, "{s}/user-dirs.dirs", .{cfg_home});
-    if (sys.readFileAlloc(alloc, dirs_path, 64 * 1024)) |data| {
-        defer alloc.free(data);
+    if (sys.readFileAlloc(gpa, dirs_path, 64 * 1024)) |data| {
+        defer gpa.free(data);
         if (parseUserDir(data, which.variable(), home, buf)) |p| return p;
     } else |_| {}
     return std.fmt.bufPrint(buf, "{s}/{s}", .{ home, which.fallback() });

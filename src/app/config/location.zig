@@ -2,6 +2,7 @@
 //! left by Shotlet's former name, cliptux.
 
 const std = @import("std");
+const log = std.log.scoped(.config);
 const sys = @import("../../platform/api.zig").sys;
 const env = @import("../env.zig");
 
@@ -44,11 +45,11 @@ pub fn migrateFrom(olds: []const []const u8, new_dir: []const u8) void {
         // a rename keeps everything; it fails when the new directory already
         // exists with files, or across filesystems; then copy the file alone
         if (sys.rename(old_dir, new_dir)) |_| {
-            std.log.info("moved settings from {s} to {s}", .{ old_dir, new_dir });
+            log.info("moved settings from {s} to {s}", .{ old_dir, new_dir });
             return;
         } else |_| {}
         copyConfig(old_cfg, new_dir, new_cfg) catch continue;
-        std.log.info("copied settings from {s} to {s}", .{ old_cfg, new_cfg });
+        log.info("copied settings from {s} to {s}", .{ old_cfg, new_cfg });
         return;
     }
 }

@@ -5,6 +5,7 @@
 //! without a window (tests, scripts).
 
 const std = @import("std");
+const log = std.log.scoped(.trim);
 const env_mod = @import("../../app/env.zig");
 const config = @import("../../app/config.zig");
 const history = @import("../../app/history.zig");
@@ -143,7 +144,7 @@ const Trim = struct {
         if (exportRange(self.gpa, self.env, &self.info, .{ .start_ms = self.st.start_ms, .end_ms = self.st.end_ms })) {
             self.done = true;
         } else |err| {
-            std.log.warn("trim: failed: {t}", .{err});
+            log.warn("failed: {t}", .{err});
             self.st.busy = if (err == error.NoFfmpeg) "Trimming videos needs the ffmpeg program" else "Could not trim";
         }
     }
@@ -158,9 +159,9 @@ pub fn exportRange(gpa: std.mem.Allocator, env: Env, info: *const keepvid.Info, 
         sys.unlink(dst) catch {};
         return err;
     };
-    std.log.info("trim: wrote {s} ({d}-{d} ms)", .{ dst, r.start_ms, r.end_ms });
+    log.info("wrote {s} ({d}-{d} ms)", .{ dst, r.start_ms, r.end_ms });
     const first = firstPicture(gpa, envp, dst, info) catch |err| {
-        std.log.info("trim: no first picture ({t}); not kept", .{err});
+        log.info("no first picture ({t}); not kept", .{err});
         return;
     };
     defer gpa.free(first);
@@ -234,7 +235,7 @@ fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8,
     const size = frame_mod.outer(draw.width, draw.height);
     try win.open("Trim recording", .{ .fullscreen = false, .transparent = true, .width = size[0], .height = size[1] });
     win.setCursor(.arrow) catch {};
-    std.log.info("trim: {s} ({d} ms)", .{ info.path, info.duration_ms });
+    log.info("{s} ({d} ms)", .{ info.path, info.duration_ms });
     var dirty = true;
     while (!t.done) {
         if (try win.nextEventTimeout(win.pollTimeoutMs(if (t.st.playing) 30 else 200))) |ev| {

@@ -70,7 +70,7 @@ fn typeName(comptime T: ?type) []const u8 {
 }
 
 /// The same type, or the backend's own type in the same place (each
-/// backend has its own Session, Window...; checkType compares those).
+/// backend has its own Bus, Window...; checkType compares those).
 fn sameType(comptime W: ?type, comptime H: ?type) bool {
     const w = W orelse return H == null;
     const h = H orelse return false;
@@ -114,6 +114,6 @@ test "signatures: shared types must match, a backend's own types go by name" {
     try std.testing.expect(comptime sameType([]Rect, []Rect));
     try std.testing.expect(comptime !sameType([]Rect, []const Rect));
     try std.testing.expect(comptime !sameType(?Rect, ?struct { x: i32, y: i32, w: i32, h: i32 }));
-    try std.testing.expect(comptime sameType(*stub.desktop.Session, *struct {}));
+    try std.testing.expect(comptime sameType(*stub.desktop.Bus, *struct {}));
     try std.testing.expect(comptime payload(error{Unavailable}!bool) == bool);
 }

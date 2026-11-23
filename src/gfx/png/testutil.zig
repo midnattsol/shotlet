@@ -10,11 +10,11 @@ const paeth = @import("filters.zig").paeth;
 const Pass = dec.Pass;
 
 /// Decode must fail cleanly (never panic or over-allocate) on mutated input.
-pub fn fuzzDecode(alloc: std.mem.Allocator, seed_png: []const u8, iterations: usize, rng_seed: u64) !void {
+pub fn fuzzDecode(gpa: std.mem.Allocator, seed_png: []const u8, iterations: usize, rng_seed: u64) !void {
     var prng = std.Random.DefaultPrng.init(rng_seed);
     const r = prng.random();
-    const buf = try alloc.alloc(u8, seed_png.len + 64);
-    defer alloc.free(buf);
+    const buf = try gpa.alloc(u8, seed_png.len + 64);
+    defer gpa.free(buf);
     for (0..iterations) |_| {
         var len = seed_png.len;
         @memcpy(buf[0..len], seed_png);
@@ -23,9 +23,9 @@ pub fn fuzzDecode(alloc: std.mem.Allocator, seed_png: []const u8, iterations: us
             if (len == 0) break;
             mutate(r, buf, &len);
         }
-        if (dec.decode(alloc, buf[0..len])) |img| {
+        if (dec.decode(gpa, buf[0..len])) |img| {
             var m = img;
-            m.deinit(alloc);
+            m.deinit(gpa);
         } else |_| {}
     }
 }
@@ -55,30 +55,30 @@ fn mutate(r: std.Random, buf: []u8, len: *usize) void {
 /// Test-only PNG writer for any colour type, bit depth and interlace,
 /// cycling through all five row filters. `sample(x, y, ch)` gives each
 /// channel value (< 2^depth).
-pub fn buildTestPng(alloc: std.mem.Allocator, w: u32, h: u32, ct: u8, depth: u8, interlace: bool, plte: []const u8, comptime sample: fn (u32, u32, u32) u16) ![]u8 {
+pub fn buildTestPng(gpa: std.mem.Allocator, w: u32, h: u32, ct: u8, depth: u8, interlace: bool, plte: []const u8, comptime sample: fn (u32, u32, u32) u16) ![]u8 {
     var raw: std.ArrayList(u8) = .empty;
-    defer raw.deinit(alloc);
+    defer raw.deinit(gpa);
     const fmt: Format = .{ .channels = channelCount(ct), .depth = depth };
     const passes: []const Pass = if (interlace) &dec.adam7 else &.{dec.whole_image};
     var row_no: usize = 0;
     for (passes) |ps| {
         const pw, const ph = ps.size(w, h);
         if (pw == 0 or ph == 0) continue;
-        try appendPass(alloc, &raw, fmt, ps, pw, ph, &row_no, sample);
+        try appendPass(gpa, &raw, fmt, ps, pw, ph, &row_no, sample);
     }
-    var z: std.Io.Writer.Allocating = .init(alloc);
+    var z: std.Io.Writer.Allocating = .init(gpa);
     defer z.deinit();
-    try zlibCompress(alloc, &z, raw.items);
+    try zlibCompress(gpa, &z, raw.items);
 
     var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(alloc);
-    try out.appendSlice(alloc, &chunks.signature);
+    errdefer out.deinit(gpa);
+    try out.appendSlice(gpa, &chunks.signature);
     const ihdr = chunks.ihdr(w, h, depth, ct, interlace);
-    try chunks.writeChunk(alloc, &out, "IHDR", &ihdr);
-    if (plte.len > 0) try chunks.writeChunk(alloc, &out, "PLTE", plte);
-    try chunks.writeChunk(alloc, &out, "IDAT", z.written());
-    try chunks.writeChunk(alloc, &out, "IEND", "");
-    return out.toOwnedSlice(alloc);
+    try chunks.writeChunk(gpa, &out, "IHDR", &ihdr);
+    if (plte.len > 0) try chunks.writeChunk(gpa, &out, "PLTE", plte);
+    try chunks.writeChunk(gpa, &out, "IDAT", z.written());
+    try chunks.writeChunk(gpa, &out, "IEND", "");
+    return out.toOwnedSlice(gpa);
 }
 
 const Format = struct {
@@ -101,19 +101,19 @@ fn channelCount(ct: u8) u32 {
 
 /// Append one pass's filtered scanlines; the filter type cycles with the
 /// running row number `row_no`.
-fn appendPass(alloc: std.mem.Allocator, raw: *std.ArrayList(u8), fmt: Format, ps: Pass, pw: u32, ph: u32, row_no: *usize, comptime sample: fn (u32, u32, u32) u16) !void {
+fn appendPass(gpa: std.mem.Allocator, raw: *std.ArrayList(u8), fmt: Format, ps: Pass, pw: u32, ph: u32, row_no: *usize, comptime sample: fn (u32, u32, u32) u16) !void {
     const lb = (pw * fmt.bits() + 7) / 8;
-    const prev = try alloc.alloc(u8, lb);
-    defer alloc.free(prev);
+    const prev = try gpa.alloc(u8, lb);
+    defer gpa.free(prev);
     @memset(prev, 0);
-    const cur = try alloc.alloc(u8, lb);
-    defer alloc.free(cur);
+    const cur = try gpa.alloc(u8, lb);
+    defer gpa.free(cur);
     for (0..ph) |j| {
         const y: u32 = @intCast(ps.y0 + j * ps.dy);
         packRow(cur, fmt, ps, pw, y, sample);
         const filter: u8 = @intCast(row_no.* % 5);
         row_no.* += 1;
-        try appendFiltered(alloc, raw, filter, cur, prev, @max(1, fmt.bits() / 8));
+        try appendFiltered(gpa, raw, filter, cur, prev, @max(1, fmt.bits() / 8));
         @memcpy(prev, cur);
     }
 }
@@ -142,13 +142,13 @@ fn packRow(cur: []u8, fmt: Format, ps: Pass, pw: u32, y: u32, comptime sample: f
 }
 
 /// Append the filter byte and `cur` filtered against `prev`.
-fn appendFiltered(alloc: std.mem.Allocator, raw: *std.ArrayList(u8), filter: u8, cur: []const u8, prev: []const u8, bpp: usize) !void {
-    try raw.append(alloc, filter);
+fn appendFiltered(gpa: std.mem.Allocator, raw: *std.ArrayList(u8), filter: u8, cur: []const u8, prev: []const u8, bpp: usize) !void {
+    try raw.append(gpa, filter);
     for (cur, 0..) |x, k| {
         const a: u8 = if (k >= bpp) cur[k - bpp] else 0;
         const b = prev[k];
         const c: u8 = if (k >= bpp) prev[k - bpp] else 0;
-        try raw.append(alloc, switch (filter) {
+        try raw.append(gpa, switch (filter) {
             0 => x,
             1 => x -% a,
             2 => x -% b,
@@ -158,10 +158,10 @@ fn appendFiltered(alloc: std.mem.Allocator, raw: *std.ArrayList(u8), filter: u8,
     }
 }
 
-fn zlibCompress(alloc: std.mem.Allocator, z: *std.Io.Writer.Allocating, data: []const u8) !void {
+fn zlibCompress(gpa: std.mem.Allocator, z: *std.Io.Writer.Allocating, data: []const u8) !void {
     try z.ensureUnusedCapacity(64);
-    const window = try alloc.alloc(u8, flate.max_window_len);
-    defer alloc.free(window);
+    const window = try gpa.alloc(u8, flate.max_window_len);
+    defer gpa.free(window);
     var comp = try flate.Compress.init(&z.writer, window, .zlib, .default);
     try comp.writer.writeAll(data);
     try comp.finish();

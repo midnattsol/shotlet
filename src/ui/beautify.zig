@@ -72,8 +72,8 @@ pub const Beautify = struct {
 
     /// Paint the frame (background, shadow) into `dst` and place `shot`
     /// at (pad, pad) with rounded corners. `dst` is out_w×out_h.
-    pub fn paint(self: Beautify, alloc: std.mem.Allocator, dst: []u32, shot: []const u32, w: u32, h: u32) void {
-        _ = alloc;
+    pub fn paint(self: Beautify, gpa: std.mem.Allocator, dst: []u32, shot: []const u32, w: u32, h: u32) void {
+        _ = gpa;
         const g = self.geometry(w, h);
         const bg = self.background();
         const full: geom.Rect = .ofSize(g.out_w, g.out_h);

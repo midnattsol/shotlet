@@ -81,23 +81,23 @@ pub const Scratch = struct {
     line_levels: std.ArrayList(u8) = .empty,
     remap: std.ArrayList(i32) = .empty,
 
-    pub fn deinit(self: *Scratch, alloc: std.mem.Allocator) void {
-        self.cps.deinit(alloc);
-        self.starts.deinit(alloc);
-        self.types.deinit(alloc);
-        self.levels.deinit(alloc);
-        self.order.deinit(alloc);
-        self.items.deinit(alloc);
-        self.shaped.deinit(alloc);
-        self.pforms.deinit(alloc);
-        self.masks.deinit(alloc);
-        self.slots.deinit(alloc);
-        self.run.deinit(alloc);
-        self.lg.deinit(alloc);
-        self.glevels.deinit(alloc);
-        self.line.deinit(alloc);
-        self.line_levels.deinit(alloc);
-        self.remap.deinit(alloc);
+    pub fn deinit(self: *Scratch, gpa: std.mem.Allocator) void {
+        self.cps.deinit(gpa);
+        self.starts.deinit(gpa);
+        self.types.deinit(gpa);
+        self.levels.deinit(gpa);
+        self.order.deinit(gpa);
+        self.items.deinit(gpa);
+        self.shaped.deinit(gpa);
+        self.pforms.deinit(gpa);
+        self.masks.deinit(gpa);
+        self.slots.deinit(gpa);
+        self.run.deinit(gpa);
+        self.lg.deinit(gpa);
+        self.glevels.deinit(gpa);
+        self.line.deinit(gpa);
+        self.line_levels.deinit(gpa);
+        self.remap.deinit(gpa);
     }
 };
 
@@ -256,8 +256,8 @@ fn emitItems(st: *State, s: []const u8) ![]Item {
 
 test "a word cut across lines keeps the forms of the unbroken word" {
     const measure = @import("measure.zig");
-    const alloc = std.testing.allocator;
-    state_mod.init(alloc);
+    const gpa = std.testing.allocator;
+    state_mod.init(gpa);
     defer state_mod.deinit();
     const st = if (state_mod.state) |*p| p else return;
     const word = "\u{679}\u{6CC}\u{644}\u{6CC}\u{641}\u{648}\u{646}"; // ٹیلیفون

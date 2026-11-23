@@ -5,6 +5,7 @@
 //! and routes the editor's events to them.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const config = @import("../../app/config.zig");
 const window = @import("../../platform/api.zig").window;
 const shapes = @import("../shapes.zig");
@@ -77,7 +78,7 @@ pub const State = struct {
 /// Once, when the editor first shows: how it was started.
 pub fn start(ed: *Editor) void {
     ed.tools.text_capture = launch.text_capture;
-    if (ed.tools.text_capture) std.log.info("text capture: the selected area's text goes to the clipboard", .{});
+    if (ed.tools.text_capture) log.info("text capture: the selected area's text goes to the clipboard", .{});
     if (launch.select_all) ed.doc.sel = ed.doc.imageRect();
     // images dropped on the editor open in it
     ed.win.accept_mimes = &open.drop_mimes;
@@ -117,7 +118,7 @@ pub fn onKey(ed: *Editor, k: window.Key) !bool {
 /// A region was just selected (`shotlet text` reads it at once).
 pub fn onSelected(ed: *Editor) void {
     if (!ed.tools.text_capture or ed.doc.sel == null) return;
-    ocr_job.start(ed, .copy_text) catch |err| std.log.warn("copy text: {t}", .{err});
+    ocr_job.start(ed, .copy_text) catch |err| log.warn("copy text: {t}", .{err});
 }
 
 /// After undo (`undone`) or redo: what the step crossed besides shapes.
@@ -142,7 +143,7 @@ pub fn cancel(ed: *Editor) bool {
 /// wait for the next event (ms).
 pub fn tick(ed: *Editor, now: i64) i32 {
     open.poll(ed);
-    ocr_job.poll(ed) catch |err| std.log.warn("text recognition: {t}", .{err});
+    ocr_job.poll(ed) catch |err| log.warn("text recognition: {t}", .{err});
     var wait: i64 = if (ocr_job.busy(ed)) 40 else 1000;
     if (ed.tools.toast.tick(now)) |left| {
         if (left == 0) ed.needs_render = true;
@@ -227,7 +228,7 @@ pub fn startPoint(ed: *const Editor, tool: Tool, ip: Point) Point {
 pub fn committed(s: *const Shape) void {
     if (s.tool != .ruler) return;
     var buf: [96]u8 = undefined;
-    std.log.info("ruler: {s}", .{ruler.Measure.of(s).label(&buf)});
+    log.info("ruler: {s}", .{ruler.Measure.of(s).label(&buf)});
 }
 
 // --- popover segments ---

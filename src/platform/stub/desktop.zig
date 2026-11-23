@@ -11,8 +11,8 @@ pub const Appearance = types.Appearance;
 pub const SaveOptions = types.SaveOptions;
 pub const Choice = types.Choice;
 
-pub const Session = struct {
-    pub fn deinit(self: *Session) void {
+pub const Bus = struct {
+    pub fn deinit(self: *Bus) void {
         _ = self;
     }
 };
@@ -45,43 +45,43 @@ pub fn addresses(arena: std.mem.Allocator, vars: anytype, runtime_dir: []const u
     _ = .{ arena, vars, runtime_dir };
     return .{};
 }
-pub fn connect(gpa: std.mem.Allocator, env: Env) error{Unavailable}!Session {
+pub fn connect(gpa: std.mem.Allocator, env: Env) error{Unavailable}!Bus {
     _ = .{ gpa, env };
     return error.Unavailable;
 }
 /// Connect without telling the desktop who we are (identify() does).
-pub fn connectBrief(gpa: std.mem.Allocator, env: Env) error{Unavailable}!Session {
+pub fn connectBrief(gpa: std.mem.Allocator, env: Env) error{Unavailable}!Bus {
     _ = .{ gpa, env };
     return error.Unavailable;
 }
 /// Tell the desktop's services who we are.
-pub fn identify(gpa: std.mem.Allocator, s: *Session) void {
-    _ = .{ gpa, s };
+pub fn identify(gpa: std.mem.Allocator, bus: *Bus) void {
+    _ = .{ gpa, bus };
 }
 /// The appearance, waiting at most `timeout_ms`.
-pub fn readAppearance(s: *Session, timeout_ms: i64) Appearance {
-    _ = .{ s, timeout_ms };
+pub fn readAppearance(bus: *Bus, timeout_ms: i64) Appearance {
+    _ = .{ bus, timeout_ms };
     return .{};
 }
 /// Follow appearance changes (pump() folds them in).
-pub fn watchAppearance(s: *Session) error{Unavailable}!void {
-    _ = s;
+pub fn watchAppearance(bus: *Bus) error{Unavailable}!void {
+    _ = bus;
 }
 /// What the desktop sent since the last call, without waiting:
 /// appearance changes fold into `look` (true when it changed), the
 /// answer to `dialog` is kept in it.
-pub fn pump(s: *Session, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*Dialog) bool {
-    _ = .{ s, gpa, look, dialog };
+pub fn pump(bus: *Bus, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*Dialog) bool {
+    _ = .{ bus, gpa, look, dialog };
     return false;
 }
 /// Ask where to save a file (blocking); over `over` when given.
-pub fn askSavePath(gpa: std.mem.Allocator, s: *Session, opts: SaveOptions, over: ?*window.Window) error{OutOfMemory}!Choice {
-    _ = .{ gpa, s, opts, over };
+pub fn askSavePath(gpa: std.mem.Allocator, bus: *Bus, opts: SaveOptions, over: ?*window.Window) error{OutOfMemory}!Choice {
+    _ = .{ gpa, bus, opts, over };
     return .unavailable;
 }
 /// Start asking for a folder without blocking; pump() until done().
-pub fn chooseFolder(gpa: std.mem.Allocator, s: *Session, current: ?[]const u8) error{Unavailable}!Dialog {
-    _ = .{ gpa, s, current };
+pub fn chooseFolder(gpa: std.mem.Allocator, bus: *Bus, current: ?[]const u8) error{Unavailable}!Dialog {
+    _ = .{ gpa, bus, current };
     return error.Unavailable;
 }
 /// A finished dialog's answer.
@@ -95,20 +95,20 @@ pub fn daemon(gpa: std.mem.Allocator, env: Env, foreground: bool) error{Unavaila
     return error.Unavailable;
 }
 /// The session's descriptor, to poll with others for what it sends.
-pub fn pollFd(s: *const Session) @import("sys.zig").fd_t {
-    _ = s;
+pub fn pollFd(bus: *const Bus) @import("sys.zig").fd_t {
+    _ = bus;
     return -1;
 }
 /// Whether the session already holds messages (poll would not wake).
-pub fn hasPending(s: *Session) bool {
-    _ = s;
+pub fn hasPending(bus: *Bus) bool {
+    _ = bus;
     return false;
 }
-pub fn notify(gpa: std.mem.Allocator, s: *Session, summary: []const u8, text: []const u8) void {
-    _ = .{ gpa, s, summary, text };
+pub fn notify(gpa: std.mem.Allocator, bus: *Bus, summary: []const u8, text: []const u8) void {
+    _ = .{ gpa, bus, summary, text };
 }
 /// Show `path` selected in the file manager.
-pub fn revealFile(gpa: std.mem.Allocator, s: *Session, path: []const u8) error{Unavailable}!void {
-    _ = .{ gpa, s, path };
+pub fn revealFile(gpa: std.mem.Allocator, bus: *Bus, path: []const u8) error{Unavailable}!void {
+    _ = .{ gpa, bus, path };
     return error.Unavailable;
 }

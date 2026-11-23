@@ -2,6 +2,7 @@
 //! panel's search field can find them by their text.
 
 const std = @import("std");
+const log = std.log.scoped(.history);
 const history = @import("../history.zig");
 const ocr = @import("../../platform/api.zig").ocr;
 const sync = @import("../../sync.zig");
@@ -24,7 +25,7 @@ pub const Ocr = struct {
         defer gpa.free(ids);
         for (ids) |id| {
             if (@atomicLoad(bool, &self.stop, .acquire)) break;
-            readOne(gpa, root, id.slice()) catch |err| std.log.info("ocr of {s} failed: {t}", .{ id.slice(), err });
+            readOne(gpa, root, id.slice()) catch |err| log.info("ocr of {s} failed: {t}", .{ id.slice(), err });
             self.mutex.lock();
             self.done.append(gpa, id) catch {};
             self.mutex.unlock();
@@ -42,7 +43,7 @@ pub const Ocr = struct {
         defer img.deinit(gpa);
         const t = ocr.recognize(gpa, img.pixels, img.width, img.height) orelse "";
         defer if (t.len > 0) gpa.free(t);
-        std.log.debug("history: text of {s}: {s}", .{ id, t[0..@min(t.len, 80)] });
+        log.debug("text of {s}: {s}", .{ id, t[0..@min(t.len, 80)] });
         var meta = try history.readMeta(gpa, root, id);
         defer meta.deinit(gpa);
         if (meta.ocr) |o| gpa.free(o);
@@ -98,7 +99,7 @@ fn reportRead(self: *const Panel) void {
             n += 1;
         };
     }
-    std.log.info("history: read the text of {d} captures", .{n});
+    log.info("read the text of {d} captures", .{n});
 }
 
 /// Reload the meta (with its new text) of the items with this id.

@@ -7,6 +7,7 @@
 //! what failed to stderr.
 
 const std = @import("std");
+const log = std.log.scoped(.gnome);
 const Env = @import("../../../app/env.zig").Env;
 const sys = @import("../sys.zig");
 const extension = @import("extension.zig");
@@ -57,5 +58,5 @@ fn pointAtThisBinary(gpa: std.mem.Allocator, arena: std.mem.Allocator, env: Env)
     const sd = extension.schemaDir(gpa, env, null, &sd_buf) catch return;
     var exe_buf: [1024]u8 = undefined;
     setup.pointAt(arena, env, sd, sys.selfExe(&exe_buf) catch "") catch |err|
-        std.log.info("could not point the extension at this binary yet ({t})", .{err});
+        log.info("could not point the extension at this binary yet ({t})", .{err});
 }

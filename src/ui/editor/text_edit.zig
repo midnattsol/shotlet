@@ -3,6 +3,7 @@
 //! (fitting its text, or fixed so lines wrap).
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
@@ -138,7 +139,7 @@ fn copyTextSelection(ed: *Editor, cut: bool) !void {
     const copy = try ed.alloc.dupe(u8, sel);
     ed.win.setClipboardText(copy) catch |e| {
         ed.alloc.free(copy);
-        std.log.warn("copy text failed: {t}", .{e});
+        log.warn("copy text failed: {t}", .{e});
         return;
     };
     if (cut) _ = t.te.deleteSelection(buf);
@@ -149,10 +150,10 @@ fn copyTextSelection(ed: *Editor, cut: bool) !void {
 pub fn pasteText(ed: *Editor) !void {
     const t = &(ed.text orelse return);
     const txt = (ed.win.clipboardText(ed.alloc, 64 * 1024, 400) catch |e| {
-        std.log.warn("paste failed: {t}", .{e});
+        log.warn("paste failed: {t}", .{e});
         return;
     }) orelse {
-        std.log.info("paste: no text on the clipboard", .{});
+        log.info("paste: no text on the clipboard", .{});
         return;
     };
     defer ed.alloc.free(txt);

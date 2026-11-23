@@ -2,6 +2,7 @@
 //! modifier state -> keysym and UTF-8 text, via xkb or the US fallback.
 
 const std = @import("std");
+const log = std.log.scoped(.keyboard);
 const sys = @import("../sys.zig");
 const switches = @import("../../api/switches.zig");
 const xkb = @import("xkb.zig");
@@ -105,13 +106,13 @@ pub const Keyboard = struct {
     pub fn setKeymapFd(self: *Keyboard, format: u32, fd: i32, size: u32) void {
         if (self.ctx == null or format != xkb.KEYMAP_FORMAT_TEXT_V1 or size == 0) return;
         const mem = sys.mapFd(fd, size) catch {
-            std.log.warn("keymap mmap failed; keeping the previous layout", .{});
+            log.warn("keymap mmap failed; keeping the previous layout", .{});
             return;
         };
         defer sys.unmapFile(mem);
         // the keymap string is NUL terminated within size; refuse otherwise
         const nul = std.mem.indexOfScalar(u8, mem, 0) orelse {
-            std.log.warn("keymap is not NUL terminated; ignoring it", .{});
+            log.warn("keymap is not NUL terminated; ignoring it", .{});
             return;
         };
         self.setKeymapString(mem[0..nul :0]);
@@ -120,7 +121,7 @@ pub const Keyboard = struct {
     pub fn setKeymapString(self: *Keyboard, keymap_text: [:0]const u8) void {
         const ctx = self.ctx orelse return;
         const km = api.keymap_new_from_string(ctx, keymap_text.ptr, xkb.KEYMAP_FORMAT_TEXT_V1, 0) orelse {
-            std.log.warn("could not compile the compositor keymap; keeping the previous layout", .{});
+            log.warn("could not compile the compositor keymap; keeping the previous layout", .{});
             return;
         };
         self.adoptKeymap(km);

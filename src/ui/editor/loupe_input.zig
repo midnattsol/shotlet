@@ -14,6 +14,7 @@
 //! or wheel notch before it shows does too.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
 const config = @import("../../app/config.zig");
@@ -91,7 +92,7 @@ fn zoomBy(ed: *Editor, d: i32) void {
     const next: usize = @intCast(std.math.clamp(@as(i32, @intCast(cur)) + d, 0, levels.len - 1));
     if (levels[next] == ed.loupe.zoom) return;
     ed.loupe.zoom = levels[next];
-    std.log.info("magnifier: zoom {d}x", .{ed.loupe.zoom});
+    log.info("magnifier: zoom {d}x", .{ed.loupe.zoom});
     ed.needs_render = true;
 }
 
@@ -103,10 +104,10 @@ fn copy(ed: *Editor) !void {
     const owned = try ed.alloc.dupe(u8, hex);
     ed.win.setClipboardText(owned) catch |e| {
         ed.alloc.free(owned);
-        std.log.warn("magnifier: copy failed: {t}", .{e});
+        log.warn("magnifier: copy failed: {t}", .{e});
         return;
     };
-    std.log.info("magnifier: copied {s}", .{hex});
+    log.info("magnifier: copied {s}", .{hex});
     ed.tools.history.add(c);
     ui.loupeCopied(ed);
 }

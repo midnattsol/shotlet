@@ -33,9 +33,9 @@ pub const Started = struct {
     /// new restore token to persist for silent future sessions (owned)
     restore_token: ?[]u8 = null,
 
-    pub fn deinit(self: *Started, alloc: std.mem.Allocator) void {
-        alloc.free(self.streams);
-        if (self.restore_token) |t| alloc.free(t);
+    pub fn deinit(self: *Started, gpa: std.mem.Allocator) void {
+        gpa.free(self.streams);
+        if (self.restore_token) |t| gpa.free(t);
         self.* = undefined;
     }
 };
@@ -50,7 +50,7 @@ pub const SelectOptions = struct {
 };
 
 /// An open ScreenCast session.
-pub const Session = struct {
+pub const ScreenCastSession = struct {
     /// the portal's session object
     path: []u8,
     start: Started,
@@ -61,17 +61,17 @@ pub const Session = struct {
 
     /// Close the portal session (GNOME's screen-sharing indicator goes
     /// away). Once; fire-and-forget.
-    pub fn end(self: *Session, bus: *dbus.Connection) void {
+    pub fn end(self: *ScreenCastSession, bus: *dbus.Connection) void {
         if (self.ended) return;
         self.ended = true;
         _ = bus.callMethod(request.bus_name, self.path, "org.freedesktop.portal.Session", "Close", "", &.{}) catch {};
     }
 
     /// end(), then free it.
-    pub fn close(self: *Session, alloc: std.mem.Allocator, bus: *dbus.Connection) void {
+    pub fn close(self: *ScreenCastSession, gpa: std.mem.Allocator, bus: *dbus.Connection) void {
         self.end(bus);
-        alloc.free(self.path);
-        self.start.deinit(alloc);
+        gpa.free(self.path);
+        self.start.deinit(gpa);
         self.* = undefined;
     }
 };
@@ -79,28 +79,28 @@ pub const Session = struct {
 /// Open a session over every monitor: create, select + start, open the
 /// PipeWire remote. With a valid restore token this is silent; otherwise
 /// the compositor shows its source picker (the choice is remembered).
-pub fn open(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: SelectOptions) !Result(Session) {
-    var session: Session = .{ .path = undefined, .start = undefined, .fd = -1 };
-    session.path = switch (try createSession(alloc, bus)) {
+pub fn open(gpa: std.mem.Allocator, bus: *dbus.Connection, opts: SelectOptions) !Result(ScreenCastSession) {
+    var session: ScreenCastSession = .{ .path = undefined, .start = undefined, .fd = -1 };
+    session.path = switch (try createSession(gpa, bus)) {
         .granted => |p| p,
-        else => |o| return notGranted(Session, o),
+        else => |o| return notGranted(ScreenCastSession, o),
     };
     var started = false;
     errdefer {
         session.end(bus);
-        alloc.free(session.path);
-        if (started) session.start.deinit(alloc);
+        gpa.free(session.path);
+        if (started) session.start.deinit(gpa);
     }
-    switch (try selectAndStart(alloc, bus, session.path, opts)) {
+    switch (try selectAndStart(gpa, bus, session.path, opts)) {
         .granted => |st| session.start = st,
         else => |o| {
             session.end(bus);
-            alloc.free(session.path);
-            return notGranted(Session, o);
+            gpa.free(session.path);
+            return notGranted(ScreenCastSession, o);
         },
     }
     started = true;
-    session.fd = try openRemote(alloc, bus, session.path);
+    session.fd = try openRemote(gpa, bus, session.path);
     return .{ .granted = session };
 }
 
@@ -118,54 +118,54 @@ pub fn availableCursorModes(bus: *dbus.Connection) u32 {
 // --- the stages open() runs
 
 /// Stage 1: create a ScreenCast session. Returns the session path (owned).
-fn createSession(alloc: std.mem.Allocator, bus: *dbus.Connection) !Result([]u8) {
+fn createSession(gpa: std.mem.Allocator, bus: *dbus.Connection) !Result([]u8) {
     var tok_buf: [64]u8 = undefined;
     var stok_buf: [64]u8 = undefined;
-    var m = dbus.Marshal.init(alloc);
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     const opts = try m.beginDict();
     const tok = try opts.token("handle_token", &tok_buf, "shotlet_r");
     _ = try opts.token("session_handle_token", &stok_buf, "shotlet_s");
     opts.end();
 
-    var req = try request.call(alloc, bus, iface, "CreateSession", "a{sv}", m.buf.items, tok, request.timeout_quick_ms);
-    defer req.deinit(alloc);
+    var req = try request.call(gpa, bus, iface, "CreateSession", "a{sv}", m.buf.items, tok, request.timeout_quick_ms);
+    defer req.deinit(gpa);
     if (req.outcome.? != .granted) return notGranted([]u8, req.outcome.?);
     var r = try req.results();
     var it = try r.readDictRaw();
     while (try it.next()) |e| {
         // spec says 's'; some versions send 'o'
         if (std.mem.eql(u8, e.key, "session_handle") and (std.mem.eql(u8, e.sig, "s") or std.mem.eql(u8, e.sig, "o")))
-            return .{ .granted = try alloc.dupe(u8, try r.readString()) };
+            return .{ .granted = try gpa.dupe(u8, try r.readString()) };
         try r.skipValue(e.sig);
     }
     return error.NoSessionHandle;
 }
 
 /// Stage 3: get the PipeWire socket fd for a started session.
-fn openRemote(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !sys.fd_t {
-    var m = dbus.Marshal.init(alloc);
+fn openRemote(gpa: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !sys.fd_t {
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putObjectPath(session_path);
     (try m.beginDict()).end();
     var reply = try bus.call(request.bus_name, request.object_path, iface, "OpenPipeWireRemote", "oa{sv}", m.buf.items, request.timeout_quick_ms);
-    defer reply.deinit(alloc);
+    defer reply.deinit(gpa);
     return reply.takeFd() orelse error.NoPipeWireFd;
 }
 
 /// Stage 2: select every monitor and start the cast. GNOME shows its
 /// picker here unless `opts.restore_token` still matches.
-fn selectAndStart(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, opts: SelectOptions) !Result(Started) {
-    const selected = try selectSources(alloc, bus, session_path, opts);
+fn selectAndStart(gpa: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, opts: SelectOptions) !Result(Started) {
+    const selected = try selectSources(gpa, bus, session_path, opts);
     if (selected != .granted) return notGranted(Started, selected);
-    return startCast(alloc, bus, session_path);
+    return startCast(gpa, bus, session_path);
 }
 
 /// SelectSources: every monitor (so the whole desktop is one capture),
 /// the choice persisted until revoked.
-fn selectSources(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, opts: SelectOptions) !Outcome {
+fn selectSources(gpa: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, opts: SelectOptions) !Outcome {
     var tok_buf: [64]u8 = undefined;
-    var m = dbus.Marshal.init(alloc);
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putObjectPath(session_path);
     const d = try m.beginDict();
@@ -177,15 +177,15 @@ fn selectSources(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: 
     if (opts.restore_token) |t| try d.entry("restore_token", t);
     d.end();
 
-    var req = try request.call(alloc, bus, iface, "SelectSources", "oa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
-    defer req.deinit(alloc);
+    var req = try request.call(gpa, bus, iface, "SelectSources", "oa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
+    defer req.deinit(gpa);
     return req.outcome.?;
 }
 
 /// Start the cast and parse what it started.
-fn startCast(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !Result(Started) {
+fn startCast(gpa: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !Result(Started) {
     var tok_buf: [64]u8 = undefined;
-    var m = dbus.Marshal.init(alloc);
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putObjectPath(session_path);
     try m.putString(""); // parent window
@@ -193,40 +193,40 @@ fn startCast(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []co
     const tok = try d.token("handle_token", &tok_buf, "shotlet_r");
     d.end();
 
-    var req = try request.call(alloc, bus, iface, "Start", "osa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
-    defer req.deinit(alloc);
+    var req = try request.call(gpa, bus, iface, "Start", "osa{sv}", m.buf.items, tok, request.timeout_dialog_ms);
+    defer req.deinit(gpa);
     if (req.outcome.? != .granted) return notGranted(Started, req.outcome.?);
     var r = try req.results();
-    return .{ .granted = try parseStartResults(alloc, &r) };
+    return .{ .granted = try parseStartResults(gpa, &r) };
 }
 
 /// Parse the a{sv} results of ScreenCast.Start: every stream with its node
 /// id, logical position and size, and the restore token. Values with an
 /// unexpected signature are skipped, never misread.
-pub fn parseStartResults(alloc: std.mem.Allocator, r: *dbus.Reader) !Started {
+pub fn parseStartResults(gpa: std.mem.Allocator, r: *dbus.Reader) !Started {
     var streams: std.ArrayList(Stream) = .empty;
-    errdefer streams.deinit(alloc);
+    errdefer streams.deinit(gpa);
     var token: ?[]u8 = null;
-    errdefer if (token) |t| alloc.free(t);
+    errdefer if (token) |t| gpa.free(t);
 
     var it = try r.readDictRaw();
     while (try it.next()) |e| {
         if (std.mem.eql(u8, e.key, "streams") and std.mem.eql(u8, e.sig, "a(ua{sv})")) {
-            try parseStreams(alloc, r, &streams);
+            try parseStreams(gpa, r, &streams);
         } else if (std.mem.eql(u8, e.key, "restore_token") and std.mem.eql(u8, e.sig, "s")) {
             const t = try r.readString();
-            if (token) |old| alloc.free(old);
-            token = try alloc.dupe(u8, t);
+            if (token) |old| gpa.free(old);
+            token = try gpa.dupe(u8, t);
         } else {
             try r.skipValue(e.sig);
         }
     }
     if (streams.items.len == 0) return error.NoStream;
-    return .{ .streams = try streams.toOwnedSlice(alloc), .restore_token = token };
+    return .{ .streams = try streams.toOwnedSlice(gpa), .restore_token = token };
 }
 
 /// The "streams" a(ua{sv}) array; streams without a node id are dropped.
-fn parseStreams(alloc: std.mem.Allocator, r: *dbus.Reader, streams: *std.ArrayList(Stream)) !void {
+fn parseStreams(gpa: std.mem.Allocator, r: *dbus.Reader, streams: *std.ArrayList(Stream)) !void {
     const len = try r.readU32();
     r.pad(8);
     if (r.pos > r.data.len or len > r.data.len - r.pos) return error.ShortRead;
@@ -235,7 +235,7 @@ fn parseStreams(alloc: std.mem.Allocator, r: *dbus.Reader, streams: *std.ArrayLi
         r.pad(8);
         if (r.pos >= end) break;
         const st = try parseStream(r);
-        if (st.node_id != 0) try streams.append(alloc, st);
+        if (st.node_id != 0) try streams.append(gpa, st);
     }
     if (r.pos != end) return error.BadArrayLength;
 }
@@ -311,15 +311,15 @@ pub fn startResponseBody(m: *dbus.Marshal, code: u32, token_sig: []const u8) !vo
 }
 
 test "Start results: every stream with position and size" {
-    const alloc = std.testing.allocator;
-    var m = dbus.Marshal.init(alloc);
+    const gpa = std.testing.allocator;
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try startResponseBody(&m, 0, "s");
 
     var r = dbus.Reader{ .data = m.buf.items, .pos = 0 };
     try std.testing.expectEqual(@as(u32, 0), try r.readU32());
-    var st = try parseStartResults(alloc, &r);
-    defer st.deinit(alloc);
+    var st = try parseStartResults(gpa, &r);
+    defer st.deinit(gpa);
     try std.testing.expectEqual(@as(usize, 3), st.streams.len);
     try std.testing.expectEqual(@as(u32, 41), st.streams[0].node_id);
     try std.testing.expectEqual([2]i32{ 1280, -100 }, st.streams[1].position.?);
@@ -330,14 +330,14 @@ test "Start results: every stream with position and size" {
 }
 
 test "Start results: a restore token of the wrong type is ignored" {
-    const alloc = std.testing.allocator;
-    var m = dbus.Marshal.init(alloc);
+    const gpa = std.testing.allocator;
+    var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try startResponseBody(&m, 0, "u");
     var r = dbus.Reader{ .data = m.buf.items, .pos = 0 };
     _ = try r.readU32();
-    var st = try parseStartResults(alloc, &r);
-    defer st.deinit(alloc);
+    var st = try parseStartResults(gpa, &r);
+    defer st.deinit(gpa);
     try std.testing.expect(st.restore_token == null);
     try std.testing.expectEqual(@as(usize, 3), st.streams.len);
 
@@ -345,9 +345,9 @@ test "Start results: a restore token of the wrong type is ignored" {
     var cut: usize = 4;
     while (cut < m.buf.items.len) : (cut += 1) {
         var rr = dbus.Reader{ .data = m.buf.items[0..cut], .pos = 4 };
-        if (parseStartResults(alloc, &rr)) |res| {
+        if (parseStartResults(gpa, &rr)) |res| {
             var x = res;
-            x.deinit(alloc);
+            x.deinit(gpa);
         } else |_| {}
     }
 }

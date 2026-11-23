@@ -260,8 +260,8 @@ fn bitmapOffsetForX(size_px: f64, s: []const u8, x: i32) usize {
 test "bidi layout: visual order, carets and shaping" {
     const width = @import("measure.zig").width;
     const draw = @import("draw.zig").draw;
-    const alloc = std.testing.allocator;
-    state_mod.init(alloc);
+    const gpa = std.testing.allocator;
+    state_mod.init(gpa);
     defer state_mod.deinit();
     const st = if (state_mod.state) |*p| p else return;
     // Hebrew is drawn right to left

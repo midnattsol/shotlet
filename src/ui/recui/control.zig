@@ -34,7 +34,7 @@ pub const Outcome = enum { stop, discard };
 pub const Control = struct {
     gpa: std.mem.Allocator,
     win: window.Window,
-    bus: *desktop.Session,
+    bus: *desktop.Bus,
     /// logical position on the desktop, and the monitor it is on
     pos: [2]i32,
     covers_monitor: bool = false,
@@ -45,7 +45,7 @@ pub const Control = struct {
     state: draw.State = .{},
     last_draw_ms: i64 = 0,
 
-    pub fn open(gpa: std.mem.Allocator, env: Env, bus: *desktop.Session, area: geom.Rect) !Control {
+    pub fn open(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, area: geom.Rect) !Control {
         text.init(gpa);
         errdefer text.deinit();
         var c: Control = .{ .gpa = gpa, .win = try window.Window.init(gpa, env), .bus = bus, .pos = .{ 0, 0 }, .layer = false };

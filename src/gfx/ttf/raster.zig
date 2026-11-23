@@ -15,7 +15,7 @@ pub const Bitmap = struct {
 /// Fill `edges` (pixel space, y down) into a bitmap; null when there is
 /// nothing to draw or the bounds are out of range (`lim` pixels from the
 /// origin, or 4096 pixels per side).
-pub fn render(alloc: std.mem.Allocator, edges: []const [4]f64, lim: f64) !?Bitmap {
+pub fn render(gpa: std.mem.Allocator, edges: []const [4]f64, lim: f64) !?Bitmap {
     if (edges.len == 0) return null;
     const minx, const miny, const maxx, const maxy = bounds(edges);
     if (!(minx > -lim and miny > -lim and maxx < lim and maxy < lim)) return null;
@@ -29,7 +29,7 @@ pub fn render(alloc: std.mem.Allocator, edges: []const [4]f64, lim: f64) !?Bitma
         .h = h,
         .bearing_x = @intFromFloat(x0),
         .bearing_y = @intFromFloat(y0),
-        .alpha = try fillEdges(alloc, edges, x0, y0, w, h),
+        .alpha = try fillEdges(gpa, edges, x0, y0, w, h),
     };
 }
 
@@ -56,21 +56,21 @@ const Edge = struct { top: f64, bot: f64, e: [4]f64 };
 
 /// Nonzero-winding scanline fill with 4x vertical supersampling and
 /// fractional horizontal coverage.
-fn fillEdges(alloc: std.mem.Allocator, edges: []const [4]f64, x0: f64, y0: f64, w: i32, h: i32) ![]u8 {
+fn fillEdges(gpa: std.mem.Allocator, edges: []const [4]f64, x0: f64, y0: f64, w: i32, h: i32) ![]u8 {
     const wu: usize = @intCast(w);
     const hu: usize = @intCast(h);
-    const alpha = try alloc.alloc(u8, wu * hu);
-    errdefer alloc.free(alpha);
+    const alpha = try gpa.alloc(u8, wu * hu);
+    errdefer gpa.free(alpha);
     @memset(alpha, 0);
 
-    const acc = try alloc.alloc(f32, wu);
-    defer alloc.free(acc);
+    const acc = try gpa.alloc(f32, wu);
+    defer gpa.free(acc);
 
     var crossings: std.ArrayList(Crossing) = .empty;
-    defer crossings.deinit(alloc);
+    defer crossings.deinit(gpa);
 
-    const sorted_buf = try alloc.alloc(Edge, edges.len);
-    defer alloc.free(sorted_buf);
+    const sorted_buf = try gpa.alloc(Edge, edges.len);
+    defer gpa.free(sorted_buf);
     const sorted = sortEdges(sorted_buf, edges);
 
     var row: usize = 0;
@@ -79,7 +79,7 @@ fn fillEdges(alloc: std.mem.Allocator, edges: []const [4]f64, x0: f64, y0: f64, 
         var s: usize = 0;
         while (s < samples) : (s += 1) {
             const y = y0 + @as(f64, @floatFromInt(row)) + (@as(f64, @floatFromInt(s)) + 0.5) / samples;
-            try collectCrossings(alloc, &crossings, sorted, y);
+            try collectCrossings(gpa, &crossings, sorted, y);
             if (crossings.items.len < 2) continue;
             std.mem.sort(Crossing, crossings.items, {}, struct {
                 fn lt(_: void, a: Crossing, b: Crossing) bool {
@@ -114,7 +114,7 @@ fn sortEdges(buf: []Edge, edges: []const [4]f64) []Edge {
 }
 
 /// Replace `crossings` with where the edges cross the scanline `y`.
-inline fn collectCrossings(alloc: std.mem.Allocator, crossings: *std.ArrayList(Crossing), sorted: []const Edge, y: f64) !void {
+inline fn collectCrossings(gpa: std.mem.Allocator, crossings: *std.ArrayList(Crossing), sorted: []const Edge, y: f64) !void {
     crossings.clearRetainingCapacity();
     for (sorted) |se| {
         if (se.top > y) break;
@@ -122,7 +122,7 @@ inline fn collectCrossings(alloc: std.mem.Allocator, crossings: *std.ArrayList(C
         const e = se.e;
         const t = (y - e[1]) / (e[3] - e[1]);
         const x = e[0] + (e[2] - e[0]) * t;
-        try crossings.append(alloc, .{ .x = x, .dir = if (e[3] > e[1]) 1 else -1 });
+        try crossings.append(gpa, .{ .x = x, .dir = if (e[3] > e[1]) 1 else -1 });
     }
 }
 

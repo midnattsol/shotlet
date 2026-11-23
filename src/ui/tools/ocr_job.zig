@@ -4,6 +4,7 @@
 //! closes. Without libtesseract both say how to install it.
 
 const std = @import("std");
+const log = std.log.scoped(.editor);
 const ocr = @import("../../platform/api.zig").ocr;
 const page_mod = @import("../../ocr/page.zig");
 const reflow = @import("../../ocr/reflow.zig");
@@ -59,7 +60,7 @@ pub fn start(ed: *Editor, purpose: Purpose) !void {
     ed.needs_render = true;
     if (job.thread != null) return;
     if (!ocr.available()) {
-        std.log.warn("text recognition: no libtesseract. Debian/Ubuntu: apt install tesseract-ocr; Fedora: dnf install tesseract; Arch: pacman -S tesseract", .{});
+        log.warn("text recognition: no libtesseract. Debian/Ubuntu: apt install tesseract-ocr; Fedora: dnf install tesseract; Arch: pacman -S tesseract", .{});
         ed.tools.toast.show(.problem, install_hint, 6000);
         return;
     }
@@ -103,17 +104,17 @@ fn copyText(ed: *Editor, words: []const page_mod.Word) !void {
     const text = try reflow.reflow(ed.alloc, words);
     if (text.len == 0) {
         ed.alloc.free(text);
-        std.log.info("copy text: no text found", .{});
+        log.info("copy text: no text found", .{});
         ed.tools.toast.show(.info, "No text found", 2400);
         return;
     }
     const first = firstLine(text);
     var msg: [200]u8 = undefined;
     const say = std.fmt.bufPrint(&msg, "Copied: {s}", .{first}) catch "Copied";
-    std.log.info("copy text: {d} bytes, {d} lines", .{ text.len, std.mem.count(u8, text, "\n") + 1 });
+    log.info("copy text: {d} bytes, {d} lines", .{ text.len, std.mem.count(u8, text, "\n") + 1 });
     ed.win.setClipboardText(text) catch |e| {
         ed.alloc.free(text);
-        std.log.warn("copy text failed: {t}", .{e});
+        log.warn("copy text failed: {t}", .{e});
         ed.tools.toast.show(.problem, "Copy failed", 2400);
         return;
     };

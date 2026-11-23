@@ -153,7 +153,7 @@ pub const Editor = struct {
     prefs: theme_mod.Prefs = .{},
     theme: theme_mod.Theme = theme_mod.Theme.get(true, null),
     /// session bus, to follow appearance changes while open
-    bus: ?*desktop.Session = null,
+    bus: ?*desktop.Bus = null,
 
     /// of 256, what the dim outside the selection keeps (ui/dim.zig)
     dim_keep: u32,
@@ -216,8 +216,8 @@ pub const Editor = struct {
     /// Ease back to the plain capture before the window goes away.
     pub const fadeOut = fade.out;
 
-    pub fn init(alloc: std.mem.Allocator, win: *Window, img: *const png.Image) Editor {
-        return .{ .alloc = alloc, .win = win, .img = img, .doc = doc_mod.Document.init(alloc, img.width, img.height), .dim_keep = dim.keepFor(img.pixels, img.width, img.height) };
+    pub fn init(gpa: std.mem.Allocator, win: *Window, img: *const png.Image) Editor {
+        return .{ .alloc = gpa, .win = win, .img = img, .doc = doc_mod.Document.init(gpa, img.width, img.height), .dim_keep = dim.keepFor(img.pixels, img.width, img.height) };
     }
 
     /// Dev helper: start with a selection already in place (window pixels).

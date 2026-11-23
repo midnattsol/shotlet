@@ -90,9 +90,9 @@ pub const Layout = struct {
 
     /// Lay out `str` at font size `fs` in a box `box_w` wide (0: as wide
     /// as its longest line, breaking only at newlines).
-    pub fn init(alloc: std.mem.Allocator, str: []const u8, fs: f64, box_w: i32) !Layout {
+    pub fn init(gpa: std.mem.Allocator, str: []const u8, fs: f64, box_w: i32) !Layout {
         var self: Layout = .{ .fs = fs, .lh = text.height(fs), .w = 0 };
-        errdefer self.lines.deinit(alloc);
+        errdefer self.lines.deinit(gpa);
         const fixed = box_w > 0;
         self.w = if (fixed) @max(box_w, minWidth(fs)) else autoWidth(fs, str);
         var start: usize = 0;
@@ -102,9 +102,9 @@ pub const Layout = struct {
             const rtl = paragraphRtl(para);
             if (fixed) {
                 var tmp: std.ArrayList(text.Line) = .empty;
-                defer tmp.deinit(alloc);
-                try text.wrapLines(alloc, fs, .regular, para, self.w, if (rtl) .rtl else .ltr, &tmp);
-                try self.lines.ensureUnusedCapacity(alloc, tmp.items.len);
+                defer tmp.deinit(gpa);
+                try text.wrapLines(gpa, fs, .regular, para, self.w, if (rtl) .rtl else .ltr, &tmp);
+                try self.lines.ensureUnusedCapacity(gpa, tmp.items.len);
                 for (tmp.items) |l| self.lines.appendAssumeCapacity(.{
                     .start = start + l.start,
                     .end = start + l.end,
@@ -120,7 +120,7 @@ pub const Layout = struct {
                 last.soft = false;
                 last.vis_end = last.end;
             } else {
-                try self.lines.append(alloc, .{ .start = start, .end = nl, .vis_end = nl, .rtl = rtl, .soft = false, .para_start = start, .para_end = nl });
+                try self.lines.append(gpa, .{ .start = start, .end = nl, .vis_end = nl, .rtl = rtl, .soft = false, .para_start = start, .para_end = nl });
             }
             if (nl == str.len) break;
             start = nl + 1;
@@ -128,8 +128,8 @@ pub const Layout = struct {
         return self;
     }
 
-    pub fn deinit(self: *Layout, alloc: std.mem.Allocator) void {
-        self.lines.deinit(alloc);
+    pub fn deinit(self: *Layout, gpa: std.mem.Allocator) void {
+        self.lines.deinit(gpa);
     }
 
     pub fn height(self: *const Layout) i32 {
@@ -257,15 +257,15 @@ test "auto width breaks only at newlines" {
 }
 
 test "fixed width wraps; caret moves across wrapped lines" {
-    const alloc = std.testing.allocator;
-    text.init(alloc);
+    const gpa = std.testing.allocator;
+    text.init(gpa);
     defer text.deinit();
     const fs = 20.0;
     const s = "alpha beta gamma delta\nzeta";
     // room for about two words per line
     const w = @max(text.width(fs, "alpha beta"), text.width(fs, "gamma delta")) + 2;
     var l = try testLayout(s, fs, w);
-    defer l.deinit(alloc);
+    defer l.deinit(gpa);
     var buf: [8][]const u8 = undefined;
     const got = lineTexts(&l, s, &buf);
     try std.testing.expectEqual(@as(usize, 3), got.len);
@@ -300,13 +300,13 @@ test "fixed width wraps; caret moves across wrapped lines" {
 }
 
 test "a cut word: End and clicks past it keep the caret upstream" {
-    const alloc = std.testing.allocator;
-    text.init(alloc);
+    const gpa = std.testing.allocator;
+    text.init(gpa);
     defer text.deinit();
     const fs = 20.0;
     const s = "abcdefghijklmnop";
     var l = try testLayout(s, fs, text.width(fs, "abcdef") + 1);
-    defer l.deinit(alloc);
+    defer l.deinit(gpa);
     try std.testing.expect(l.lines.items.len >= 2);
     const first = l.lines.items[0];
     try std.testing.expectEqual(first.end, first.vis_end);
@@ -320,15 +320,15 @@ test "a cut word: End and clicks past it keep the caret upstream" {
 }
 
 test "rtl paragraphs wrap with one direction, right-aligned" {
-    const alloc = std.testing.allocator;
-    text.init(alloc);
+    const gpa = std.testing.allocator;
+    text.init(gpa);
     defer text.deinit();
     const fs = 20.0;
     // Hebrew paragraph with an English word, then an English paragraph
     const s = "\u{5E9}\u{5DC}\u{5D5}\u{5DD} \u{5E2}\u{5D5}\u{5DC}\u{5DD} hello \u{5D2}\u{5D3}\u{5D5}\u{5DC}\nplain english";
     const w = text.width(fs, "\u{5E9}\u{5DC}\u{5D5}\u{5DD} \u{5E2}\u{5D5}\u{5DC}\u{5DD}") + 4;
     var l = try testLayout(s, fs, w);
-    defer l.deinit(alloc);
+    defer l.deinit(gpa);
     const lines = l.lines.items;
     try std.testing.expect(lines.len >= 3);
     // every line of the first paragraph is RTL, including one starting
