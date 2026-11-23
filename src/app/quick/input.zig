@@ -5,21 +5,19 @@
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/api.zig").window;
+const focus = @import("../../ui/focus.zig");
 const layout = @import("layout.zig");
 const stack = @import("stack.zig");
 
 const Quick = stack.Quick;
 const Control = layout.Control;
-const fade_ms = stack.fade_ms;
-const fade_in_ms = stack.fade_in_ms;
 
 pub fn onEvent(self: *Quick, ev: window.InputEvent) void {
     switch (ev) {
         .resize, .frame_done => self.dirty = true,
         .close => {
-            for (self.cards.items) |*c| if (c.fade_from == 0) {
-                c.fade_from = sys.monoMs();
-            };
+            const now = sys.monoMs();
+            for (self.cards.items) |*c| c.life.leave(now);
         },
         .pointer_motion => |m| {
             onMotion(self, m.x, m.y);
@@ -48,14 +46,9 @@ fn onMotion(self: *Quick, x: f64, y: f64) void {
     const h = self.hitAt(x, y);
     if (!std.meta.eql(h, self.hover)) self.dirty = true;
     self.hover = h;
-    if (self.pressed) |p| if (p.control == .body and self.dragging == null) {
-        const k = self.f();
-        const dx = (x - self.press_x) / k;
-        const dy = (y - self.press_y) / k;
-        if (dx * dx + dy * dy > 36) {
-            self.pressed = null;
-            self.startDrag(p.card) catch |err| std.log.warn("quick access: drag failed: {t}", .{err});
-        }
+    if (self.press.held()) |p| if (p.control == .body and self.dragging == null and self.press.dragged(x, y, self.factor())) {
+        self.press.cancel();
+        self.startDrag(p.card) catch |err| std.log.warn("quick access: drag failed: {t}", .{err});
     };
 }
 
@@ -64,7 +57,7 @@ fn onMotion(self: *Quick, x: f64, y: f64) void {
 fn cursorOf(self: *const Quick) window.Cursor {
     const h = self.hover orelse return .arrow;
     if (h.control != .body) return .arrow;
-    const held = if (self.pressed) |p| p.control == .body else false;
+    const held = if (self.press.held()) |p| p.control == .body else false;
     return window.Cursor.hand(held);
 }
 
@@ -81,15 +74,9 @@ fn onButton(self: *Quick, button: window.Button, pressed: bool, x: f64, y: f64) 
         };
     } else if (button == .left) {
         if (pressed) {
-            self.pressed = h;
-            self.press_x = x;
-            self.press_y = y;
+            self.press.down(h, x, y);
             self.focus = null;
-        } else {
-            const p = self.pressed;
-            self.pressed = null;
-            if (p != null and h != null and std.meta.eql(p.?, h.?)) self.activate(h.?);
-        }
+        } else if (self.press.up(h)) |t| self.activate(t);
     }
 }
 
@@ -99,18 +86,19 @@ fn onKey(self: *Quick, k: window.Key) void {
     self.dirty = true;
     const cur = self.current() orelse return;
     const card = &self.cards.items[cur];
+    // Tab and the left/right arrows move focus along a card's controls
+    if (focus.action(k, .horizontal)) |a| return switch (a) {
+        .next, .prev => cycleFocus(self, if (a == .next) .next else .prev),
+        .activate => if (self.focus) |fo| self.activate(fo) else self.act(cur, .copy),
+        .close => if (card.menu) {
+            card.menu = false;
+        } else self.act(cur, .close),
+    };
     switch (k.code) {
-        .escape => {
-            if (card.menu) card.menu = false else self.act(cur, .close);
-        },
-        .tab, .right, .left => cycleFocus(self, k.shift or k.code == .left),
         .up, .down => {
             const n = self.cards.items.len;
             const c: usize = if (k.code == .up) (cur + 1) % n else (cur + n - 1) % n;
             self.focus = .{ .card = c, .control = if (self.focus) |fo| fo.control else .primary };
-        },
-        .enter, .kp_enter, .space => {
-            if (self.focus) |fo| self.activate(fo) else self.act(cur, .copy);
         },
         .delete => self.act(cur, .close),
         .c => if (k.ctrl) self.act(cur, .copy),
@@ -122,14 +110,15 @@ fn onKey(self: *Quick, k: window.Key) void {
 }
 
 /// Move focus to the next (or previous) control, across all cards.
-fn cycleFocus(self: *Quick, back: bool) void {
+fn cycleFocus(self: *Quick, dir: focus.Dir) void {
     const n = self.cards.items.len * focus_order.len;
-    var idx: usize = 0;
-    if (self.focus) |fo| {
-        const pos = std.mem.indexOfScalar(Control, &focus_order, fo.control) orelse 0;
-        idx = fo.card * focus_order.len + pos;
-        idx = if (back) (idx + n - 1) % n else (idx + 1) % n;
-    }
+    const cur: ?usize = if (self.focus) |fo|
+        fo.card * focus_order.len + (std.mem.indexOfScalar(Control, &focus_order, fo.control) orelse 0)
+    else
+        null;
+    // with nothing focused, Tab and Shift+Tab both start at the newest
+    // card's first control
+    const idx = (if (cur == null) 0 else focus.cycle(n, cur, dir)) orelse return;
     self.focus = .{ .card = idx / focus_order.len, .control = focus_order[idx % focus_order.len] };
 }
 
@@ -143,15 +132,15 @@ pub fn tick(self: *Quick) void {
     var i: usize = 0;
     while (i < self.cards.items.len) {
         const c = &self.cards.items[i];
-        if (c.menu or (keep_alive and c.fade_from == 0)) c.deadline_ms = @max(c.deadline_ms, now + 2000);
-        if (c.fade_from == 0 and now >= c.deadline_ms) c.fade_from = now;
+        if (c.menu or (keep_alive and c.life.leaving == 0)) c.deadline_ms = @max(c.deadline_ms, now + 2000);
+        if (now >= c.deadline_ms) c.life.leave(now);
         if (c.notice_until != 0 and now >= c.notice_until) {
             c.notice_until = 0;
             c.notice = "";
             self.dirty = true;
         }
         if (fading(c, now)) self.dirty = true;
-        if (c.fade_from != 0 and now - c.fade_from >= fade_ms) {
+        if (c.life.gone(now)) {
             self.remove(i);
             continue;
         }
@@ -162,7 +151,7 @@ pub fn tick(self: *Quick) void {
 /// Not drawn yet, fading in or out, or its controls fading: a frame per
 /// refresh.
 fn fading(c: *const stack.Card, now: i64) bool {
-    return c.born_ms == 0 or c.fade_from != 0 or now - c.born_ms < fade_in_ms or c.hov.busy(now);
+    return c.life.busy(now) or c.hov.busy(now);
 }
 
 pub fn nextWakeMs(self: *const Quick) i32 {

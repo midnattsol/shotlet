@@ -95,9 +95,9 @@ fn pruneCache(gpa: std.mem.Allocator, env: Env) void {
     } else |_| {}
 }
 
-/// The desktop's accent, the GNOME hint, and dropping images.
+/// The desktop's appearance, the GNOME hint, and dropping images.
 fn setup(q: *Quick) void {
-    if (q.bus_()) |b| q.accent = theme_mod.of(theme_mod.readPrefs(b, 500)).accent_fill;
+    q.th = theme_mod.load(q.gpa, q.env, 500);
     if (!q.win.hasLayerShell() and shell.applies()) {
         q.hint = if (q.bus_()) |b| !shell.active(b) else true;
         if (q.hint) std.log.info("quick access: no Shotlet GNOME Shell extension; the thumbnail is an ordinary window", .{});

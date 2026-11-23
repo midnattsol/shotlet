@@ -14,7 +14,10 @@ const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const window = @import("../../platform/api.zig").window;
 const fui = @import("../../ui/floatui.zig");
+const floatwin = @import("../../ui/floatwin.zig");
 const motion = @import("../../ui/motion.zig");
+const press = @import("../../ui/press.zig");
+const scale = @import("../../ui/scale.zig");
 const theme = @import("../../ui/theme.zig");
 const layout = @import("layout.zig");
 const actions = @import("actions.zig");
@@ -29,22 +32,16 @@ const pad = layout.pad;
 const edge = layout.edge;
 const max_cards = layout.max_cards;
 
-pub const fade_ms = 250;
-pub const fade_in_ms = 150;
-
 pub const Card = struct {
     kept: keep.Kept,
     meta: history.Meta,
     editable: bool,
     thumb: png.Image,
-    scaled: []u32 = &.{},
-    scaled_w: u32 = 0,
-    scaled_h: u32 = 0,
-    /// when it was first drawn (0: not yet); it fades in from there
-    born_ms: i64 = 0,
+    /// the picture fitted to the card at its current size
+    pic: fui.FitCache = .{},
+    /// fading in from its first frame, out once its time is up
+    life: motion.Life = .{},
     deadline_ms: i64,
-    /// fading out since (0: not fading)
-    fade_from: i64 = 0,
     menu: bool = false,
     /// how far its hover controls show (0..1)
     hov: motion.Tween = .{ .dur_ms = theme.motion_fast },
@@ -54,7 +51,7 @@ pub const Card = struct {
     fn deinit(self: *Card, gpa: std.mem.Allocator) void {
         self.meta.deinit(gpa);
         self.thumb.deinit(gpa);
-        gpa.free(self.scaled);
+        self.pic.deinit(gpa);
     }
 };
 
@@ -76,15 +73,16 @@ pub const Quick = struct {
     opened: bool = false,
     size: [2]u32 = .{ 0, 0 },
     hover: ?Hit = null,
-    pressed: ?Hit = null,
-    press_x: f64 = 0,
-    press_y: f64 = 0,
+    /// the left button held on a control (a click is its release there)
+    press: press.Press(Hit) = .{},
     /// keyboard focus: card index and control
     focus: ?Hit = null,
     dirty: bool = true,
+    /// the card being dragged out, and the drag
     dragging: ?usize = null,
-    /// the desktop's accent, for keyboard focus rings
-    accent: u32 = theme.accentFill(theme.default_accent),
+    drag: fui.DragOut = .{},
+    /// the desktop's appearance (quick.setup loads it)
+    th: theme.Theme = theme.of(.{}),
     /// told once the first frame is committed (see quick.run)
     ready_fd: sys.fd_t = -1,
 
@@ -99,9 +97,9 @@ pub const Quick = struct {
     pub const nextWakeMs = input.nextWakeMs;
     pub const render = card_draw.render;
 
-    /// Display scale.
-    pub fn f(self: *const Quick) f64 {
-        return @as(f64, @floatFromInt(self.win.scale120)) / 120.0;
+    /// Physical px per logical px.
+    pub fn factor(self: *const Quick) f64 {
+        return scale.of(self.win.scale120);
     }
 
     pub fn bus_(self: *Quick) ?*desktop.Session {
@@ -228,7 +226,7 @@ pub const Quick = struct {
         var c = self.cards.orderedRemove(i);
         c.deinit(self.gpa);
         self.hover = null;
-        self.pressed = null;
+        self.press.cancel();
         if (self.focus) |fo| {
             if (fo.card >= self.cards.items.len) self.focus = null;
         }
@@ -255,23 +253,13 @@ pub const Quick = struct {
     }
 
     fn openWindow(self: *Quick, sz: [2]u32) !void {
-        if (self.win.hasLayerShell()) {
-            self.layer = true;
-            // keyboard only while the pointer is over it (see the
-            // .pointer_motion event): typing stays in the person's app
-            try self.win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1], .layer = .{
-                .layer = .overlay,
-                .anchor = .{ .bottom = true, .left = true },
-                .width = sz[0],
-                .height = sz[1],
-                .margin = .{ 0, 0, edge, edge },
-                .keyboard = .none,
-            } });
-        } else {
-            try self.win.open("shotlet:quick", .{ .fullscreen = false, .transparent = true, .width = sz[0], .height = sz[1] });
-        }
-        self.win.report_leave = true;
-        self.win.setCursor(.arrow) catch {};
+        // keyboard only while the pointer is over it (see the
+        // .pointer_motion event): typing stays in the person's app
+        self.layer = try floatwin.open(&self.win, .{
+            .size = sz,
+            .anchor = .{ .bottom = true, .left = true },
+            .margin = .{ 0, 0, edge, edge },
+        });
         self.opened = true;
     }
 
@@ -301,9 +289,8 @@ pub const Quick = struct {
     /// What is under a point in buffer coordinates.
     pub fn hitAt(self: *const Quick, bx: f64, by: f64) ?Hit {
         if (bx < 0 or by < 0) return null;
-        const k = self.f();
         var mb: [max_cards]bool = undefined;
-        return layout.hitTest(@intFromFloat(bx / k), @intFromFloat(by / k), @intCast(self.size[1]), self.cards.items.len, self.menus(&mb), self.hint);
+        return layout.hitTest(scale.toLogical(bx, self.factor()), scale.toLogical(by, self.factor()), @intCast(self.size[1]), self.cards.items.len, self.menus(&mb), self.hint);
     }
 
     /// The card actions and shortcuts apply to: focused, hovered, newest.
