@@ -4,7 +4,7 @@
 # backend (api.backend); or speaks its language in code (comments may):
 # Wayland or D-Bus, X keysyms and evdev codes, GTK accelerators. The core goes through src/platform/api.zig, the
 # one file allowed to import the backend; only the e2e drivers' module
-# root (src/testkit.zig, Linux tooling) takes api.backend.native
+# root (src/e2e_module.zig, Linux tooling) takes api.backend.native
 # (docs/PLATFORM.md). Files still being moved out are listed in
 # tools/layers-allowlist.txt and may only leave it. Run from the
 # repository root (zig build check-layers does).
@@ -12,7 +12,7 @@ set -eu
 
 backend=src/platform/linux/
 seam=src/platform/api.zig
-tools_root=src/testkit.zig
+tools_root=src/e2e_module.zig
 allowlist=tools/layers-allowlist.txt
 
 # violations: "<file>: <what>" for every file outside the backend

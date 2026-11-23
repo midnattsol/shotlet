@@ -36,7 +36,7 @@ never a file under `platform/linux/`, never `std.os.linux`, never the raw
   names Wayland or D-Bus, X keysyms or evdev codes (`KEY_*`, `BTN_*`),
   or holds a GTK accelerator (`<Super>`). Its allowlist (tools/layers-allowlist.txt)
   is empty and may only stay so. The e2e drivers' module root
-  (`src/testkit.zig`, Linux tooling) is the one file that takes the Linux
+  (`src/e2e_module.zig`, Linux tooling) is the one file that takes the Linux
   plumbing, through `api.backend.native`. The other direction is not
   checked: the backend still imports a few core files for their types
   and helpers (`app/env.zig`, `app/config.zig`, `app/capture.zig`,
@@ -57,7 +57,7 @@ never a file under `platform/linux/`, never `std.os.linux`, never the raw
 - **Plain declarations, no vtables.** A backend is a struct of
   declarations; the core calls them directly, so drawing, input and the
   event loop cost what they did when they called Wayland directly.
-  Backend types (`Window`, `desktop.Session`, `record.Stream`...) are
+  Backend types (`Window`, `desktop.Bus`, `record.Stream`...) are
   used by value or pointer like any struct.
 - **The contract is checked.** `api/contract.zig` asserts at compile time
   that the backend has every declaration the stub has, and every type
@@ -67,7 +67,7 @@ never a file under `platform/linux/`, never `std.os.linux`, never the raw
   parameters and the same return payload (the error set may differ).
   The types the core shares with the backend (`api/`, `src/geom.zig`,
   `app/`...) must be the very same type; the backend's own types
-  (`Window`, `desktop.Session`...) are matched by name. The stub is the
+  (`Window`, `desktop.Bus`...) are matched by name. The stub is the
   contract written down; check-portable proves the core uses nothing
   beyond it.
 - **Run time, among Linux desktops: inside the backend**, as before. The
@@ -85,7 +85,7 @@ Each is `api.<name>`; the stub file of the same name lists it in full.
 | Seam | The core gets | Linux |
 | --- | --- | --- |
 | `window` | `Window`: one surface or one per output (`open`, `openOutputs`, `openOnOutputAt`), back buffers and `present*`, events (`nextEvent*`, `pollTimeoutMs`, `pollFd`, `flush`), cursors (`setCursor` with a neutral `Cursor`: the compositor's own through cursor-shape-v1, else drawn lookalikes), input method (`setTextInput`, `preedit`), roles (move, maximize, minimize, the `maximized` and `tiled` states, input region and whether clicks pass outside it (`passesClicks`), geometry, title, floating-surface placement and keyboard), `parentHandle` for dialogs, `keyName`; clipboard (`setClipboard*`, `claimClipboardSource`, `serveClipboard`, `clipboardText`, `clipboardAccepted`) and drag and drop (`startDrag`, `accept_mimes`/`dropped`); `Surface`, `Output`. Types in `api/window.zig` and `api/keys.zig`: a key as `KeyCode` (the physical key) + the layout's character + UTF-8, `Button` | `linux/window/` on the raw Wayland client, `linux/keyboard/` (libxkbcommon; `evdev.zig` and `keysymChar` translate) |
-| `desktop` | `Addresses` (where the session's services are, opaque: `Env.session`, `tag()`) and `addresses`, `Session` (`connect`, `connectBrief`, `identify`), appearance (`readAppearance`, `watchAppearance`, `pump`), file dialogs (`askSavePath`, `chooseFolder`, `dialogChoice`), `notify`, `revealFile`, `pollFd`/`hasPending`, the tray `daemon` | D-Bus session bus, Settings/FileChooser portals, Notifications, FileManager1, StatusNotifierItem |
+| `desktop` | `Addresses` (where the session's services are, opaque: `Env.session`, `tag()`) and `addresses`, `Bus` (`connect`, `connectBrief`, `identify`), appearance (`readAppearance`, `watchAppearance`, `pump`), file dialogs (`askSavePath`, `chooseFolder`, `dialogChoice`), `notify`, `revealFile`, `pollFd`/`hasPending`, the tray `daemon` | D-Bus session bus, Settings/FileChooser portals, Notifications, FileManager1, StatusNotifierItem |
 | `shell` | the shell integration: `applies`, `active`, `activeNow`, `state`, `words` (how Settings names it), `install`, `captureInfo`, `note`, `requestCapture`, `loadHanded`, `place`, `finishPendingSetup`, `runCli`, the capture modes' global shortcuts by name, in `app/accel.zig`'s notation (`shortcutStore`, `getShortcut`, `setShortcut`, `setTimerSeconds`) | the Shotlet GNOME Shell extension (`linux/gnome/`; GTK's accelerators in `gnome/gtk_accel.zig`) |
 | `capture` | `screens` (every monitor frozen, asking where needed), `warmup`, `windows`/`canCaptureWindow`/`captureWindow`, `ScrollSource`/`openScroll`/`scrollSupport` (whether a scrolling capture can run, asked before the region is picked), the capture `Path` (`remember`, `lastPath`), `resetPermissions`/`resetSummary`, `permissionsCli` | `linux/capture/` (direct, ScreenCast + PipeWire, Screenshot portal, first-run window, permission store), `linux/kde/`, `linux/wlroots/` |
 | `record` | `open` a `Source` for an area (its `Stream`: `addVideo`, `addAudio`, `failed`, `videoFrames`, `close`), `shellHasControls`, `pickInShell`, `watchStop`, `pollStop`; frame types in `api/record.zig` | the extension's recorder or a ScreenCast session, PipeWire streams |

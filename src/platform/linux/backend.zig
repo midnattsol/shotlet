@@ -41,7 +41,7 @@ comptime {
 }
 
 /// The Linux plumbing itself, for Linux-only tooling outside the core:
-/// the end-to-end drivers (src/testkit.zig). The core never uses it.
+/// the end-to-end drivers (src/e2e_module.zig). The core never uses it.
 pub const native = struct {
     pub const dbus = @import("dbus.zig");
     pub const pw = @import("pw.zig");

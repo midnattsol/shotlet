@@ -54,7 +54,7 @@ fn appModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
 /// podman). The helpers are compiled and unit-tested with `test`, so they
 /// cannot rot unnoticed.
 fn addE2e(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, platform: *std.Build.Module, exe: *std.Build.Step.Compile, test_step: *std.Build.Step) void {
-    const kit = testkit(b, target, optimize, platform);
+    const kit = e2eModule(b, target, optimize, platform);
     const common = b.createModule(.{
         .root_source_file = b.path("tools/drivers/common/root.zig"),
         .target = target,
@@ -87,7 +87,7 @@ fn addE2e(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
     for ([_]*std.Build.Step.Compile{ drive, droptarget, wldrive }) |c| helpers.dependOn(&b.addInstallArtifact(c, .{}).step);
 }
 
-/// An e2e helper executable importing "shotlet" (the testkit) and
+/// An e2e helper executable importing "shotlet" (src/e2e_module.zig) and
 /// "driver_common" (tools/drivers/common), built and unit-tested by
 /// `test`.
 fn addDriver(b: *std.Build, name: []const u8, path: []const u8, kit: *std.Build.Module, common: *std.Build.Module, test_step: *std.Build.Step) *std.Build.Step.Compile {
@@ -156,10 +156,10 @@ fn platformOptions(b: *std.Build, stub: bool) *std.Build.Module {
     return o.createModule();
 }
 
-/// The module the e2e drivers import as "shotlet" (src/testkit.zig).
-fn testkit(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, platform: *std.Build.Module) *std.Build.Module {
+/// The module the e2e drivers import as "shotlet" (src/e2e_module.zig).
+fn e2eModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, platform: *std.Build.Module) *std.Build.Module {
     const m = b.createModule(.{
-        .root_source_file = b.path("src/testkit.zig"),
+        .root_source_file = b.path("src/e2e_module.zig"),
         .target = target,
         .optimize = optimize,
         .link_libc = true,

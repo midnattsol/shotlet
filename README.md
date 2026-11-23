@@ -802,6 +802,14 @@ The suites' variables (the runners set the rest themselves):
 `SHOTLET_E2E_MONITORS="1600x900 1280x720" tools/e2e/session.sh
 zig-out/bin/shotlet shot --from IMG.png`.
 
+### Log lines
+
+Shotlet logs to stderr as `LEVEL: subsystem: message`, for example
+`info: quick access: showing`. Every file logs through its subsystem's
+scoped logger (`std.log.scoped(.quick_access)`); `src/logfmt.zig` adds the
+subsystem name and holds the level rules (err: the action failed, warn:
+degraded, info: the flow, debug: details).
+
 ### Debugging and test switches
 
 Every `SHOTLET_*` variable the program reads, read once at startup
