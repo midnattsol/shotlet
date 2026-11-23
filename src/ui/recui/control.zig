@@ -95,7 +95,9 @@ pub const Control = struct {
         while (true) {
             const left = end - sys.monoMs();
             if (left <= 0) return true;
-            self.state.count = @intCast(@divTrunc(left + 999, 1000));
+            const count: u32 = @intCast(@divTrunc(left + 999, 1000));
+            if (count != self.state.count) self.dirty = true;
+            self.state.count = count;
             if (self.pump()) |b| switch (b) {
                 .cancel, .discard => return false,
                 else => return true,
@@ -135,7 +137,9 @@ pub const Control = struct {
         var clicked: ?draw.Button = null;
         while (self.win.nextEventTimeout(0) catch null) |ev| {
             switch (ev) {
-                .resize, .frame_done => self.dirty = true,
+                // (not on frame_done: a frame only when something changed,
+                // the dot's pulse included)
+                .resize => self.dirty = true,
                 .pointer_motion => |m| {
                     const h = self.hitAt(m.x, m.y);
                     if (h != self.hover) self.dirty = true;

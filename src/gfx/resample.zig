@@ -177,6 +177,13 @@ pub fn fit(sw: u32, sh: u32, dw: u32, dh: u32, mode: Fit) Placement {
 /// dropped (opaque output). For video frames and strips; pictures shown
 /// in the UI use scale/region.
 pub fn box(src: []const u32, ss: usize, sw: usize, sh: usize, dst: []u32, dw: usize, dh: usize) void {
+    if (sw == dw and sh == dh) {
+        // the same size: a copy, made opaque
+        for (0..dh) |y| for (dst[y * dw ..][0..dw], src[y * ss ..][0..dw]) |*d, c| {
+            d.* = 0xFF000000 | c;
+        };
+        return;
+    }
     for (0..dh) |dy| {
         const y0 = dy * sh / dh;
         const y1 = @max(y0 + 1, (dy + 1) * sh / dh);
@@ -190,9 +197,41 @@ pub fn box(src: []const u32, ss: usize, sw: usize, sh: usize, dst: []u32, dw: us
                 acc[2] += c & 0xFF;
             };
             const n: u32 = @intCast((y1 - y0) * (x1 - x0));
-            dst[dy * dw + dx] = 0xFF000000 | ((acc[0] + n / 2) / n) << 16 | ((acc[1] + n / 2) / n) << 8 | ((acc[2] + n / 2) / n);
+            const m = Recip.of(n);
+            dst[dy * dw + dx] = 0xFF000000 | m.div(acc[0] + n / 2) << 16 | m.div(acc[1] + n / 2) << 8 | m.div(acc[2] + n / 2);
         }
     }
+}
+
+/// Division by n as a multiply and a shift: exact for numerators below
+/// 2^20 and n below 2^20 (a box's channel sums), and much cheaper than
+/// three divisions a pixel.
+const Recip = struct {
+    m: u64,
+
+    fn of(n: u32) Recip {
+        return .{ .m = ((@as(u64, 1) << 40) + n - 1) / n };
+    }
+
+    fn div(self: Recip, x: u32) u32 {
+        return @intCast((@as(u64, x) * self.m) >> 40);
+    }
+};
+
+test "the reciprocal divides exactly" {
+    var n: u32 = 1;
+    while (n < 300) : (n += 1) {
+        const r = Recip.of(n);
+        var x: u32 = 0;
+        while (x < 256 * n + n) : (x += 1) try std.testing.expectEqual(x / n, r.div(x));
+    }
+}
+
+test "a box at the same size is the picture, opaque" {
+    const src = [_]u32{ 0x00112233, 0x80445566, 0xFF778899, 0x10AABBCC };
+    var dst: [4]u32 = undefined;
+    box(&src, 2, 2, 2, &dst, 2, 2);
+    try std.testing.expectEqualSlices(u32, &.{ 0xFF112233, 0xFF445566, 0xFF778899, 0xFFAABBCC }, &dst);
 }
 
 const testing = std.testing;

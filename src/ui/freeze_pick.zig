@@ -1,7 +1,7 @@
 //! The frozen desktop a picker chooses an area on: the recording picker
 //! (ui/recui/picker.zig) and the scrolling capture's (ui/region_pick.zig).
 //! One fullscreen surface per monitor shows its part of the capture
-//! (resample.box), dimmed outside the area (ui/dim.zig) and easing in on
+//! (ui/freeze_pane.zig), dimmed outside the area (ui/dim.zig) and easing in on
 //! the first frame and out once done (motion.Life); the area's edge,
 //! handles and size (ui/selchrome.zig) and its gestures (ui/areasel.zig,
 //! kept on one monitor), all in the capture's image pixels. Enter
@@ -12,12 +12,20 @@
 //!   onBar(mode, BarEvent) BarReply        the pointer over it
 //!   paintBar(mode, gpa, cv, at, k, th)    drawn at buffer point `at`
 //!
+//! A frame repaints only what changed: each surface keeps its part of the
+//! capture plain and dimmed, and per back buffer where it drew anything
+//! but the dimmed capture (the area, its chrome, the hint, the bar);
+//! a frame copies back that and the new extent, and a surface with
+//! nothing on it either time is not painted at all (two 4K monitors
+//! would otherwise cost tens of milliseconds a frame).
+//!
 //! Surfaces are matched to the capture's monitors by their logical
 //! rectangles (an exact match shows that monitor); with no match (the
 //! layout unknown: --from, the Screenshot portal) each shows the whole
 //! capture fitted (View.fit).
 
 const std = @import("std");
+const log = std.log.scoped(.area_picker);
 const geom = @import("../geom.zig");
 const window = @import("../platform/api.zig").window;
 const render = @import("../gfx/render.zig");
@@ -36,19 +44,9 @@ const Point = geom.Point;
 const View = view_mod.View;
 const Canvas = render.Canvas;
 
-/// The capture the picker shows.
-pub const Frozen = struct {
-    pixels: []const u32,
-    width: u32,
-    height: u32,
-    /// where each monitor is in the image and in the layout (empty: one
-    /// monitor, the whole image)
-    monitors: []const geom.Monitor = &.{},
-
-    fn bounds(self: Frozen) Rect {
-        return .ofSize(self.width, self.height);
-    }
-};
+const pane_mod = @import("freeze_pane.zig");
+pub const Frozen = pane_mod.Frozen;
+pub const Pane = pane_mod.Pane;
 
 /// The area chosen (image pixels), or none.
 pub const Result = union(enum) { area: Rect, cancelled };
@@ -67,22 +65,6 @@ pub const BarReply = struct {
     over: bool = false,
     repaint: bool = false,
     act: ?enum { confirm, cancel } = null,
-};
-
-/// One surface: its part of the capture at its own size.
-pub const Pane = struct {
-    view: View = .{},
-    base: []u32 = &.{},
-    w: u32 = 0,
-    h: u32 = 0,
-    /// buffer pixels per logical pixel
-    k: f64 = 1,
-    /// the surface's logical rectangle (its output's)
-    logical: Rect = .empty,
-
-    fn bounds(self: *const Pane) Rect {
-        return .ofSize(self.w, self.h);
-    }
 };
 
 /// how near a handle the pointer grabs it, logical px (as the editor's)
@@ -112,6 +94,8 @@ pub const Picker = struct {
     bar: ?struct { surface: u8, at: Point } = null,
     dirty: bool = true,
     result: ?Result = null,
+    /// the first frame went out (the surfaces take the pointer from then)
+    shown: bool = false,
     life: motion.Life = .{ .in_ms = theme.motion_fast, .out_ms = theme.motion_fast },
 
     pub fn init(gpa: std.mem.Allocator, win: *window.Window, frozen: Frozen, th: theme.Theme, hint: []const u8) Picker {
@@ -119,10 +103,7 @@ pub const Picker = struct {
     }
 
     pub fn deinit(self: *Picker) void {
-        for (&self.panes) |*p| {
-            self.gpa.free(p.base);
-            p.* = .{};
-        }
+        for (&self.panes) |*p| p.release(self.gpa);
     }
 
     /// The areas: on one monitor of the capture.
@@ -143,42 +124,19 @@ pub const Picker = struct {
 
     /// Surface `i` is `w` x `h`: its part of the capture at that size.
     fn prepare(self: *Picker, i: usize, w: u32, h: u32) !void {
-        const p = &self.panes[i];
-        self.gpa.free(p.base);
-        p.base = &.{};
-        p.w = 0;
-        if (w == 0 or h == 0) return;
-        const s = self.win.surfaceList()[i];
-        p.logical = if (s.out_w > 0) .{ .x = s.x, .y = s.y, .w = @intCast(s.out_w), .h = @intCast(s.out_h) } else .{ .x = 0, .y = 0, .w = @intCast(@max(1, s.logical_w)), .h = @intCast(@max(1, s.logical_h)) };
-        p.k = @as(f64, @floatFromInt(w)) / @as(f64, @floatFromInt(@max(1, p.logical.w)));
-        p.view = self.viewFor(p.logical, w, h);
-        p.base = try self.gpa.alloc(u32, @as(usize, w) * h);
-        p.w = w;
-        p.h = h;
-        try self.fill(p);
-        self.dirty = true;
+        try self.place(i, w, h);
+        try self.panes[i].fill(self.gpa, self.frozen, self.keep);
     }
 
-    /// The capture under pane `p`, area-averaged onto its buffer
-    /// (letterboxed where the view leaves room).
-    fn fill(self: *Picker, p: *Pane) !void {
-        const f = &self.frozen;
-        const tl = p.view.toImgEdge(.{ .x = 0, .y = 0 });
-        const br = p.view.toImgEdge(.{ .x = @intCast(p.w), .y = @intCast(p.h) });
-        const src = Rect.fromEdges(tl.x, tl.y, br.x, br.y).intersect(f.bounds()) orelse return @memset(p.base, view_mod.letterbox);
-        const dst = p.view.rectToBuf(src).intersect(p.bounds()) orelse return @memset(p.base, view_mod.letterbox);
-        const sx: usize = @intCast(src.x);
-        const off = @as(usize, @intCast(src.y)) * f.width + sx;
-        if (dst.eql(p.bounds())) return resample.box(f.pixels[off..], f.width, @intCast(src.w), @intCast(src.h), p.base, p.w, p.h);
-        @memset(p.base, view_mod.letterbox);
-        const tmp = try self.gpa.alloc(u32, @intCast(dst.area()));
-        defer self.gpa.free(tmp);
-        resample.box(f.pixels[off..], f.width, @intCast(src.w), @intCast(src.h), tmp, @intCast(dst.w), @intCast(dst.h));
-        const dw: usize = @intCast(dst.w);
-        for (0..@intCast(dst.h)) |row| {
-            const at = (@as(usize, @intCast(dst.y)) + row) * p.w + @as(usize, @intCast(dst.x));
-            @memcpy(p.base[at..][0..dw], tmp[row * dw ..][0..dw]);
-        }
+    /// Pane `i` sized `w` x `h` and placed on its monitor, not filled.
+    fn place(self: *Picker, i: usize, w: u32, h: u32) !void {
+        const p = &self.panes[i];
+        p.release(self.gpa);
+        if (w == 0 or h == 0) return;
+        const s = self.win.surfaceList()[i];
+        const l: Rect = if (s.out_w > 0) .{ .x = s.x, .y = s.y, .w = @intCast(s.out_w), .h = @intCast(s.out_h) } else .{ .x = 0, .y = 0, .w = @intCast(@max(1, s.logical_w)), .h = @intCast(@max(1, s.logical_h)) };
+        try p.alloc(self.gpa, w, h, l, self.viewFor(l, w, h));
+        self.dirty = true;
     }
 
     // --- mapping
@@ -345,24 +303,92 @@ pub const Picker = struct {
         self.life.start(now);
         const fade: u32 = @intFromFloat(@round(self.life.alpha(now) * 256));
         for (0..self.n) |i| if (surfs[i].alive) try self.paint(mode, i, fade);
+        if (!self.shown) log.info("up on {d} surfaces", .{self.n});
+        self.shown = true;
     }
 
     fn paint(self: *Picker, mode: anytype, i: usize, fade: u32) !void {
+        const px = (try self.win.backBufferOf(@intCast(i)))[0..self.panes[i].base.len];
+        const told = self.paintInto(mode, i, px, @intCast(self.win.surfaceList()[i].cur_buf), fade) orelse return;
+        try self.win.presentDamaged(@intCast(i), told);
+    }
+
+    /// Pane `i`'s frame into its back buffer `px` (buffer `bi` of two):
+    /// what changed since the frame on screen, or null when nothing did.
+    fn paintInto(self: *Picker, mode: anytype, i: usize, px: []u32, bi: u1, fade: u32) ?Rect {
         const p = &self.panes[i];
-        const px = (try self.win.backBufferOf(@intCast(i)))[0..p.base.len];
-        @memcpy(px, p.base);
+        const now = self.extent(mode, i);
+        // both buffers (so the one shown) have only the dimmed capture,
+        // and so would this frame
+        if (fade == 256 and now.isEmpty() and p.drawn[0].isEmpty() and p.drawn[1].isEmpty()) return null;
+        const redo = if (fade < 256) p.bounds() else now.unite(p.drawn[bi]);
+        self.compose(p, px, redo);
         var cv = Canvas.init(px, p.w, p.h);
+        self.paintChrome(mode, &cv, i);
+        if (fade < 256) mixRows(px, p.base, px, fade);
+        const told = redo.unite(p.drawn[1 - bi]);
+        p.drawn[bi] = if (fade < 256) p.bounds() else now;
+        return told.clip(p.w, p.h) orelse p.bounds();
+    }
+
+    /// The dimmed capture over `r` of pane `p`, bright inside the area.
+    fn compose(self: *const Picker, p: *const Pane, px: []u32, r: Rect) void {
+        const c = r.clip(p.w, p.h) orelse return;
+        const lit: ?Rect = if (self.sel.rect()) |s| p.view.rectToBuf(s) else null;
+        var y = c.y;
+        while (y < c.bottom()) : (y += 1) {
+            const row = @as(usize, @intCast(y)) * p.w;
+            var x0 = c.right();
+            var x1 = c.right();
+            if (lit) |b| if (y >= b.y and y < b.bottom()) {
+                x0 = std.math.clamp(b.x, c.x, c.right());
+                x1 = std.math.clamp(b.right(), x0, c.right());
+            };
+            const a: usize = row + @as(usize, @intCast(c.x));
+            const sa: usize = row + @as(usize, @intCast(x0));
+            const sb: usize = row + @as(usize, @intCast(x1));
+            const e: usize = row + @as(usize, @intCast(c.right()));
+            @memcpy(px[a..sa], p.dimmed[a..sa]);
+            @memcpy(px[sa..sb], p.base[sa..sb]);
+            @memcpy(px[sb..e], p.dimmed[sb..e]);
+        }
+    }
+
+    /// The area, its chrome, the hint and the bar on pane `i`.
+    fn paintChrome(self: *Picker, mode: anytype, cv: *Canvas, i: usize) void {
+        const p = &self.panes[i];
         const s = self.sel.rect();
-        const b: ?Rect = if (s) |r| p.view.rectToBuf(r) else null;
-        dim.outside(px, p.w, p.h, b, self.keep);
-        if (b) |r| self.drawArea(&cv, i, r);
+        if (s) |r| self.drawArea(cv, i, p.view.rectToBuf(r));
         if (s == null and i == self.surface) {
             const sz = selchrome.hintPillSize(self.hint, p.k);
-            _ = selchrome.hintPill(&cv, .{ .x = @divTrunc(cv.w - sz[0], 2), .y = @divTrunc(cv.h - sz[1], 2) }, self.hint, p.k, self.th);
+            _ = selchrome.hintPill(cv, .{ .x = @divTrunc(cv.w - sz[0], 2), .y = @divTrunc(cv.h - sz[1], 2) }, self.hint, p.k, self.th);
         }
-        if (self.bar) |bar| if (bar.surface == i) mode.paintBar(self.gpa, &cv, bar.at, p.k, self.th);
-        if (fade < 256) mixRows(px, p.base, px, fade);
-        try self.win.presentSurface(@intCast(i));
+        if (self.bar) |bar| if (bar.surface == i) mode.paintBar(self.gpa, cv, bar.at, p.k, self.th);
+    }
+
+    /// Where pane `i` shows anything but the dimmed capture this frame
+    /// (generously: the handles' shadows, the size pill, the bar's
+    /// shadow and tooltips); empty when nothing.
+    fn extent(self: *const Picker, mode: anytype, i: usize) Rect {
+        const p = &self.panes[i];
+        var r = Rect.empty;
+        if (self.sel.rect()) |s| {
+            const b = p.view.rectToBuf(s);
+            r = r.unite(b.expand(scale.px(16, p.k)));
+            var buf: [32]u8 = undefined;
+            r = r.unite(selchrome.sizePillRect(selchrome.sizeLabel(&buf, s.w, s.h), b, @intCast(p.w), p.k).expand(scale.px(4, p.k)));
+        } else if (i == self.surface) {
+            const sz = selchrome.hintPillSize(self.hint, p.k);
+            r = r.unite((Rect{ .x = @divTrunc(@as(i32, @intCast(p.w)) - sz[0], 2), .y = @divTrunc(@as(i32, @intCast(p.h)) - sz[1], 2), .w = sz[0], .h = sz[1] }).expand(scale.px(4, p.k)));
+        }
+        if (self.bar) |bar| if (bar.surface == i) {
+            // the bar's rows, all the way across: its shadow, and the
+            // tooltips above or below it
+            const sz = mode.barSize();
+            const room = scale.px(96, p.k);
+            r = r.unite(.{ .x = 0, .y = bar.at.y - room, .w = @intCast(p.w), .h = scale.px(sz[1], p.k) + 2 * room });
+        };
+        return r.clip(p.w, p.h) orelse Rect.empty;
     }
 
     /// As the editor draws a capture's area: its edge, the handles while
@@ -391,7 +417,9 @@ pub const Picker = struct {
         self.n = @min(self.win.surfaceList().len, self.panes.len);
         self.setArea();
         self.win.setCursor(.crosshair) catch {};
-        for (self.win.surfaceList()[0..self.n], 0..) |s, i| if (s.alive) try self.prepare(i, s.width, s.height);
+        // every monitor's part at once, a thread each (two 4K monitors)
+        for (self.win.surfaceList()[0..self.n], 0..) |s, i| if (s.alive) try self.place(i, s.width, s.height);
+        try pane_mod.fillAll(self.gpa, self.frozen, self.panes[0..self.n], self.keep);
         while (self.result == null or self.life.busy(motion.now())) {
             if (self.result != null) self.life.leave(motion.now());
             const wait = self.win.pollTimeoutMs(if (self.life.busy(motion.now())) 8 else 100);
@@ -412,28 +440,6 @@ pub const Picker = struct {
 
 const testing = std.testing;
 
-test "a surface's part of the capture, area-averaged, letterboxed when unmatched" {
-    var px: [16]u32 = undefined;
-    for (&px, 0..) |*c, i| c.* = 0xFF000000 | @as(u32, @intCast(i * 10));
-    var p: Picker = .{ .gpa = testing.allocator, .win = undefined, .frozen = .{ .pixels = &px, .width = 4, .height = 4 }, .th = theme.of(.{}), .hint = "" };
-    defer p.deinit();
-    // the whole capture on a buffer twice as wide: fitted, bars left and right
-    var pane: Pane = .{ .w = 8, .h = 4, .view = View.fit(4, 4, .ofSize(8, 4), 8) };
-    pane.base = try testing.allocator.alloc(u32, 32);
-    defer testing.allocator.free(pane.base);
-    try p.fill(&pane);
-    try testing.expectEqual(view_mod.letterbox, pane.base[0]);
-    try testing.expectEqual(px[0], pane.base[2]);
-    try testing.expectEqual(px[3], pane.base[5]);
-    // a monitor's part at half size: each pixel the mean of four
-    const mon: geom.Monitor = .{ .x = 2, .y = 0, .w = 2, .h = 2, .logical = .{ .x = 0, .y = 0, .w = 1, .h = 1 } };
-    var half: Pane = .{ .w = 1, .h = 1, .view = view_mod.monitorView(mon.pixelRect(), 1, 1) };
-    half.base = try testing.allocator.alloc(u32, 1);
-    defer testing.allocator.free(half.base);
-    try p.fill(&half);
-    try testing.expectEqual(@as(u32, 0xFF000000 | (20 + 30 + 60 + 70 + 2) / 4), half.base[0]);
-}
-
 test "image rects back in the layout, at the surface's scale" {
     var p: Picker = .{ .gpa = testing.allocator, .win = undefined, .frozen = .{ .pixels = &.{}, .width = 5440, .height = 1800 }, .th = theme.of(.{}), .hint = "" };
     // a 2x monitor (2560 logical wide shown on a 5120 px buffer) and a 1x one right of it
@@ -444,4 +450,63 @@ test "image rects back in the layout, at the surface's scale" {
     try testing.expectEqual(Rect{ .x = 2570, .y = 20, .w = 100, .h = 50 }, p.toLogical(.{ .x = 5130, .y = 20, .w = 100, .h = 50 }));
     try testing.expectEqual(Point{ .x = 5130, .y = 20 }, p.imgAt(1, 10, 20));
     try testing.expectEqual(@as(usize, 1), p.paneOf(.{ .x = 5000, .y = 0, .w = 300, .h = 10 }));
+}
+
+test "a frame painted from what changed equals one painted whole" {
+    const w = 320;
+    const h = 200;
+    const gpa = testing.allocator;
+    var img: [w * h]u32 = undefined;
+    for (&img, 0..) |*c, i| c.* = 0xFF000000 | @as(u32, @truncate(std.hash.Wyhash.hash(i / 7, "pick")));
+    var p: Picker = .{ .gpa = gpa, .win = undefined, .frozen = .{ .pixels = &img, .width = w, .height = h }, .th = theme.of(.{}), .hint = "Drag over it", .keep = 180 };
+    defer p.deinit();
+    p.n = 1;
+    p.setArea();
+    p.mouse = .{ .x = 30, .y = 30 };
+    const pane = &p.panes[0];
+    try pane.alloc(gpa, w, h, .ofSize(w, h), view_mod.monitorView(.ofSize(w, h), w, h));
+    try pane.fill(gpa, p.frozen, p.keep);
+    // a bar: a block and, below it, a tooltip-like strip
+    const Mode = struct {
+        pub fn barSize(_: *@This()) [2]i32 {
+            return .{ 60, 20 };
+        }
+        pub fn paintBar(_: *@This(), _: std.mem.Allocator, cv: *Canvas, at: Point, _: f64, _: theme.Theme) void {
+            cv.fillRect(at.x, at.y, 60, 20, 0xFF2266AA);
+            cv.fillRect(at.x, at.y + 28, 90, 12, 0xFF101010);
+        }
+    };
+    var mode: Mode = .{};
+    var bufs: [2][w * h]u32 = .{ @splat(0xFFDEADBE), @splat(0xFFDEADBE) };
+    var ref: [w * h]u32 = undefined;
+    // away: the pointer on another surface (nothing on this one at all)
+    const steps = [_]struct { sel: ?Rect, drag: areasel.Drag = .none, bar: ?Point = null, away: bool = false }{
+        .{ .sel = null },
+        .{ .sel = .{ .x = 20, .y = 20, .w = 100, .h = 80 }, .drag = .{ .drawing = .{ .anchor = .{ .x = 20, .y = 20 }, .limit = .ofSize(w, h) } } },
+        .{ .sel = .{ .x = 20, .y = 20, .w = 150, .h = 120 }, .bar = .{ .x = 40, .y = 150 } },
+        .{ .sel = .{ .x = 100, .y = 50, .w = 60, .h = 40 }, .bar = .{ .x = 80, .y = 100 } },
+        .{ .sel = .{ .x = 100, .y = 50, .w = 60, .h = 40 }, .bar = .{ .x = 80, .y = 100 } },
+        .{ .sel = null },
+        .{ .sel = null },
+        .{ .sel = .{ .x = 290, .y = 5, .w = 30, .h = 30 } },
+        .{ .sel = null, .away = true },
+        .{ .sel = null, .away = true },
+        .{ .sel = null, .away = true },
+        .{ .sel = null },
+    };
+    for (steps, 0..) |st, k| {
+        p.sel.sel = st.sel;
+        p.sel.drag = st.drag;
+        p.bar = if (st.bar) |b| .{ .surface = 0, .at = b } else null;
+        p.surface = if (st.away) 1 else 0;
+        const bi: u1 = @intCast(k % 2);
+        const told = p.paintInto(&mode, 0, &bufs[bi], bi, 256);
+        // the work stays with what changed: a small area, or nothing
+        if (k == 7) try testing.expect(told.?.area() * 2 < w * h);
+        if (k == 10) try testing.expectEqual(@as(?Rect, null), told);
+        p.compose(pane, &ref, pane.bounds());
+        var cv = Canvas.init(&ref, w, h);
+        p.paintChrome(&mode, &cv, 0);
+        try testing.expectEqualSlices(u32, &ref, &bufs[bi]);
+    }
 }
