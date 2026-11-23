@@ -21,6 +21,10 @@ const std = @import("std");
 const render = @import("../gfx/render.zig");
 const shapes = @import("shapes.zig");
 const dim = @import("dim.zig");
+const raster = @import("shapes/raster.zig");
+const color = @import("../gfx/color.zig");
+const sdf = @import("../gfx/render/sdf.zig");
+const ff = @import("scale.zig").ff;
 
 const Canvas = render.Canvas;
 const Rect = shapes.Rect;
@@ -28,9 +32,9 @@ const Point = shapes.Point;
 
 /// beyond the picture's edges
 const outside: u32 = 0xFF161618;
-/// how far grid lines move toward black (light pixels) or white, of 256
-const grid_dark_k = 18;
-const grid_light_k = 22;
+/// how far grid lines move toward black (light pixels) or white
+const grid_dark = 18.0 / 256.0;
+const grid_light = 22.0 / 256.0;
 /// the target pixel's frame: light inside, dark around it
 const mark_inner: u32 = 0xFFFFFFFF;
 const mark_outer: u32 = 0xB3000000;
@@ -99,7 +103,7 @@ pub fn draw(cv: *Canvas, lens: Lens, pixels: Pixels) void {
             const c = cellColor(lens, pixels, u, v);
             const cov = cornerCoverage(r, lens.radius, x, y);
             const i: usize = @intCast(y * cv.w + x);
-            cv.px[i] = if (cov >= 1) c else Canvas.blendPixel(cv.px[i], (c & 0x00FFFFFF) | (@as(u32, @intFromFloat(@round(cov * 255))) << 24));
+            cv.px[i] = if (cov >= 1) c else color.over(cv.px[i], color.fade(c, cov));
         }
     }
     shapes.roundRectRing(cv, r.expand(1), lens.radius + 1, 1, edge_outer);
@@ -165,20 +169,12 @@ fn ringDist(d: i32, cell: i32) i32 {
 
 /// A grid line over `c`: a touch darker on light pixels, lighter on dark.
 fn gridTint(c: u32) u32 {
-    const l = ((c >> 16) & 0xFF) * 299 + ((c >> 8) & 0xFF) * 587 + (c & 0xFF) * 114;
-    return if (l > 140 * 1000) mixRgb(c, 0xFF000000, grid_dark_k) else mixRgb(c, 0xFFFFFFFF, grid_light_k);
-}
-
-/// `a` moved `k`/256 of the way to `b`, opaque.
-fn mixRgb(a: u32, b: u32, k: u32) u32 {
-    const rb = ((a & 0xFF00FF) * (256 - k) + (b & 0xFF00FF) * k) >> 8;
-    const g = ((a & 0x00FF00) * (256 - k) + (b & 0x00FF00) * k) >> 8;
-    return 0xFF000000 | (rb & 0xFF00FF) | (g & 0x00FF00);
+    return if (raster.isLight(c)) color.mix(c, 0xFF000000, grid_dark) else color.mix(c, 0xFFFFFFFF, grid_light);
 }
 
 /// `src` (with its alpha) over the opaque `dst`.
 fn blendOpaque(dst: u32, src: u32) u32 {
-    return Canvas.blendPixel(dst, src) | 0xFF000000;
+    return color.over(dst, src) | 0xFF000000;
 }
 
 /// Coverage of pixel (x, y) by the rounded rect `r` (1 away from the
@@ -188,12 +184,7 @@ fn cornerCoverage(r: Rect, radius: f64, x: i32, y: i32) f64 {
     const in_x = x >= r.x + rad and x < r.right() - rad;
     const in_y = y >= r.y + rad and y < r.bottom() - rad;
     if (in_x or in_y) return 1;
-    const fx = @as(f64, @floatFromInt(x)) + 0.5;
-    const fy = @as(f64, @floatFromInt(y)) + 0.5;
-    const cx = if (x < r.x + rad) @as(f64, @floatFromInt(r.x)) + radius else @as(f64, @floatFromInt(r.right())) - radius;
-    const cy = if (y < r.y + rad) @as(f64, @floatFromInt(r.y)) + radius else @as(f64, @floatFromInt(r.bottom())) - radius;
-    const d = @sqrt((fx - cx) * (fx - cx) + (fy - cy) * (fy - cy)) - radius;
-    return std.math.clamp(0.5 - d, 0, 1);
+    return sdf.cov(sdf.roundRectDist(ff(x) + 0.5, ff(y) + 0.5, ff(r.x), ff(r.y), ff(r.right()), ff(r.bottom()), radius));
 }
 
 test "the centre pixel lands in the middle, framed light then dark" {

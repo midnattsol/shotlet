@@ -3,6 +3,9 @@
 //! caret). Pure; no rendering.
 
 const std = @import("std");
+const utf8 = @import("../gfx/utf8.zig");
+const prevBoundary = utf8.prevBoundary;
+const nextBoundary = utf8.nextBoundary;
 
 pub const TextEdit = struct {
     /// byte offset of the caret, always on a character boundary
@@ -189,20 +192,6 @@ fn wordLeftOf(s: []const u8, from: usize) usize {
     while (i > 0 and isSpace(s[i - 1])) i -= 1;
     while (i > 0 and !isSpace(s[i - 1])) i -= 1;
     return i;
-}
-
-pub fn prevBoundary(s: []const u8, i: usize) usize {
-    if (i == 0) return 0;
-    var j = i - 1;
-    while (j > 0 and (s[j] & 0xC0) == 0x80) j -= 1;
-    return j;
-}
-
-pub fn nextBoundary(s: []const u8, i: usize) usize {
-    if (i >= s.len) return s.len;
-    var j = i + 1;
-    while (j < s.len and (s[j] & 0xC0) == 0x80) j += 1;
-    return j;
 }
 
 pub fn lineStart(s: []const u8, i: usize) usize {

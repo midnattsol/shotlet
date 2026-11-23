@@ -22,14 +22,16 @@ const Session = @import("session.zig").Session;
 
 /// Null when cancelled.
 pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png.Image {
+    // the picker and the control follow the desktop's appearance
+    const th = theme.of(theme.readPrefs(c.conn, 800));
     std.log.info("scrolling capture: pick a region", .{});
-    const region = switch (try region_pick.pick(c.gpa, c.win, cap, .{ .region = .{ .label = "Start scrolling capture" } })) {
-        .region => |r| r,
-        else => return null,
+    const region: geom.Rect = switch (try region_pick.pick(c.gpa, c.win, cap, "Start scrolling capture", th)) {
+        .region => |r| .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h },
+        .cancelled => return null,
     };
     std.log.info("scrolling capture: region {d}x{d} at {d},{d}", .{ region.w, region.h, region.x, region.y });
     const shell = shell_seam.applies() and shell_seam.active(c.conn);
-    var hud = try hud_mod.Hud.open(c.win, theme.of(theme.readPrefs(c.conn, 800)));
+    var hud = try hud_mod.Hud.open(c.win, th);
     defer c.win.closeWindow();
     try showHud(c, &hud, cap, region, shell);
     var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| return failed(&hud, err);

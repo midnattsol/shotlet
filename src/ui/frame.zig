@@ -21,9 +21,11 @@
 const std = @import("std");
 const window = @import("../platform/api.zig").window;
 const render = @import("../gfx/render.zig");
-const effects = @import("../gfx/effects.zig");
+const floatui = @import("floatui.zig");
 const shapes = @import("shapes.zig");
-const fui = @import("floatui.zig");
+const floatwin = @import("floatwin.zig");
+const material = @import("material.zig");
+const scale = @import("scale.zig");
 const theme = @import("theme.zig");
 
 const Window = window.Window;
@@ -32,7 +34,9 @@ const Canvas = render.Canvas;
 pub const pad = 20;
 /// as the history panel: a little rounder than the cards inside
 const radius = theme.popover_radius;
-const shadow_blur = 14;
+/// the material shadow (ui/material.zig), small enough to stay inside
+/// `pad` (theme's card and popover shadows reach further)
+const shadow: theme.Shadow = .{ .color = 0x48000000, .blur = 14, .dy = 5 };
 
 pub fn outer(w: u32, h: u32) [2]u32 {
     return .{ w + 2 * pad, h + 2 * pad };
@@ -63,13 +67,9 @@ pub const Frame = struct {
         self.* = .{};
     }
 
-    fn scale(win: *const Window) f64 {
-        return @as(f64, @floatFromInt(win.scale120)) / 120.0;
-    }
-
     fn padPx(win: *const Window) u32 {
         if (bare(win)) return 0;
-        return @intFromFloat(@round(pad * scale(win)));
+        return @intCast(scale.px(pad, scale.of(win.scale120)));
     }
 
     /// A surface coordinate (buffer pixels) in content pixels.
@@ -116,23 +116,26 @@ pub const Frame = struct {
         self.shade_h = win.height;
         @memset(self.shade, 0);
         const p: i32 = @intCast(padPx(win));
-        const b: u32 = @intFromFloat(@round(shadow_blur * scale(win)));
-        effects.dropShadow(self.shade, win.width, win.height, .{ .x = p, .y = p, .w = @intCast(self.cw), .h = @intCast(self.ch) }, b, @intCast(b / 3), fui.shadow);
+        const r: shapes.Rect = .{ .x = p, .y = p, .w = @intCast(self.cw), .h = @intCast(self.ch) };
+        var cache: material.ShadowCache = .{};
+        defer cache.release(gpa);
+        const k = scale.of(win.scale120);
+        material.shadowStraight(gpa, self.shade, win.width, win.height, r, radius * k, shadow, k, 1, &cache);
     }
 
     /// Edge the content with `edge`, round it onto the shadow and present.
     pub fn present(self: *Frame, win: *Window, edge: u32) !void {
         if (bare(win)) return self.presentBare(win);
-        const k = scale(win);
+        const k = scale.of(win.scale120);
         var cv = Canvas.init(self.content, self.cw, self.ch);
         const rad = radius * k;
-        shapes.roundRectRing(&cv, .{ .x = 0, .y = 0, .w = @intCast(self.cw), .h = @intCast(self.ch) }, rad, @max(1, @round(k)), edge);
+        material.hairline(&cv, .{ .x = 0, .y = 0, .w = cv.w, .h = cv.h }, rad, edge);
         const px = try win.backBuffer();
         @memcpy(px, self.shade[0..px.len]);
         const p: i32 = @intCast(padPx(win));
-        effects.blitRounded(px, win.width, win.height, self.content, self.cw, self.ch, p, p, @intFromFloat(@round(rad)));
-        fui.premultiply(px, win.width, win.height, .{ .x = 0, .y = 0, .w = @intCast(win.width), .h = @intCast(win.height) });
-        try win.present();
+        const content: floatui.Image = .{ .px = self.content, .w = self.cw, .h = self.ch };
+        floatui.place(win.alloc, .{ .px = px, .w = win.width, .h = win.height }, content, .{ p, p }, rad, null, k);
+        try floatwin.presentStraight(win, px);
     }
 
     /// Edge to edge: the opaque content is the whole surface.
