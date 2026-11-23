@@ -301,3 +301,22 @@ test "the window looks: chip fill, lighter when hovered; marks alone are centred
     try std.testing.expect(std.meta.eql(labelFont(1, .list, .{ .strong = true }).style, text.Style.semibold));
     try std.testing.expect(std.meta.eql(labelFont(1, .list, .{}).style, text.Style.regular));
 }
+
+test "a bar icon centred by icons.drawAt sits where integer centring put it, at 100, 125, 150 and 200 %" {
+    // (editor_ui/draw_toolbar.zig drawIconIn: a square button of
+    // theme.button, an icon of theme.icon)
+    defer icons.deinit();
+    for ([_]f64{ 1, 1.25, 1.5, 2 }) |f| {
+        const btn = sc(theme.button, f);
+        const r: Rect = .{ .x = 7, .y = 5, .w = btn, .h = btn };
+        var a: [80 * 80]u32 = @splat(0xFF000000);
+        var b: [80 * 80]u32 = @splat(0xFF000000);
+        var ca = Canvas.init(&a, 80, 80);
+        var cb = Canvas.init(&b, 80, 80);
+        const s = sc(theme.icon, f);
+        icons.draw(&ca, .pen, r.x + @divTrunc(r.w - s, 2), r.y + @divTrunc(r.h - s, 2), s, 0xFFFFFFFF);
+        const ff = @import("scale.zig").ff;
+        icons.drawAt(&cb, .pen, ff(r.x) + ff(r.w) / 2, ff(r.y) + ff(r.h) / 2, theme.icon * f, .{}, 0xFFFFFFFF);
+        try std.testing.expectEqualSlices(u32, &a, &b);
+    }
+}
