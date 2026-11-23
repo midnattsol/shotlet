@@ -9,12 +9,14 @@
 
 const std = @import("std");
 const render = @import("../../gfx/render.zig");
-const effects = @import("../../gfx/effects.zig");
 const text = @import("../../gfx/text.zig");
 const icons = @import("../icons.zig");
-const glyphs = @import("glyphs.zig");
 const theme = @import("../theme.zig");
 const barkit = @import("../barkit.zig");
+const material = @import("../material.zig");
+const selchrome = @import("../selchrome.zig");
+const scale = @import("../scale.zig");
+const press = @import("../press.zig");
 const shapes = @import("../shapes.zig");
 const settings_mod = @import("../../record/settings.zig");
 const Rect = shapes.Rect;
@@ -94,11 +96,9 @@ fn rectOf(l: *const Layout, item: Item) Rect {
 
 pub fn hit(lx: i32, ly: i32) ?Item {
     const l = layout();
-    for (order) |o| {
-        const r = rectOf(&l, o.item);
-        if (lx >= r.x and ly >= r.y and lx < r.x + r.w and ly < r.y + r.h) return o.item;
-    }
-    return null;
+    var targets: [order.len]press.Target(Item) = undefined;
+    for (order, 0..) |o, i| targets[i] = .{ .r = rectOf(&l, o.item), .t = o.item };
+    return press.hitTest(Item, &targets, lx, ly);
 }
 
 /// What an item does to the settings (the caller handles .record and
@@ -120,16 +120,19 @@ pub fn toggle(st: *State, item: Item) void {
     }
 }
 
-pub fn tooltip(st: *const State, item: Item) []const u8 {
+/// What an item's tooltip says: its name, and its shortcut key.
+pub const Tip = struct { name: []const u8, key: []const u8 = "" };
+
+pub fn tooltip(st: *const State, item: Item) Tip {
     return switch (item) {
-        .record => "Start recording (Enter)",
-        .mp4 => "Video (MP4)",
-        .gif => "Animated GIF",
-        .mic => if (st.set.format == .gif) "Microphone (not in GIFs)" else "Microphone",
-        .system => if (st.set.format == .gif) "System sound (not in GIFs)" else "System sound",
-        .clicks => if (st.overlays) "Show clicks" else "Show clicks: GNOME with Shotlet's integration only",
-        .keys => if (st.overlays) "Show keystrokes" else "Show keystrokes: GNOME with Shotlet's integration only",
-        .close => "Cancel (Esc)",
+        .record => .{ .name = "Start recording", .key = "Enter" },
+        .mp4 => .{ .name = "Video (MP4)" },
+        .gif => .{ .name = "Animated GIF" },
+        .mic => .{ .name = if (st.set.format == .gif) "Microphone (not in GIFs)" else "Microphone" },
+        .system => .{ .name = if (st.set.format == .gif) "System sound (not in GIFs)" else "System sound" },
+        .clicks => .{ .name = if (st.overlays) "Show clicks" else "Show clicks: GNOME with Shotlet's integration only" },
+        .keys => .{ .name = if (st.overlays) "Show keystrokes" else "Show keystrokes: GNOME with Shotlet's integration only" },
+        .close => .{ .name = "Cancel", .key = "Esc" },
     };
 }
 
@@ -158,53 +161,30 @@ fn isDisabled(st: *const State, item: Item) bool {
     };
 }
 
-fn sc(v: f64, k: f64) i32 {
-    return @intFromFloat(@round(v * k));
-}
+const px = scale.px;
 
-fn scr(r: Rect, k: f64) Rect {
-    const f = struct {
-        fn f(v: i32) f64 {
-            return @floatFromInt(v);
-        }
-    }.f;
-    return .{ .x = sc(f(r.x), k), .y = sc(f(r.y), k), .w = sc(f(r.w), k), .h = sc(f(r.h), k) };
-}
-
-/// Paint the bar at buffer x, y (scale k) onto an opaque canvas.
-pub fn paint(gpa: std.mem.Allocator, canvas: *render.Canvas, x: i32, y: i32, k: f64, st: *const State) void {
+/// Paint the bar at buffer x, y (scale k) onto an opaque canvas: the
+/// bar's shadow and Glass material over what the canvas holds, then the
+/// items; the tooltip of the item under the pointer below it. `shadow`
+/// keeps the shadow between frames.
+pub fn paint(gpa: std.mem.Allocator, cv: *render.Canvas, x: i32, y: i32, k: f64, st: *const State, shadow: *material.ShadowCache) void {
     const l = layout();
     const th = st.th;
-    const cw: u32 = @intCast(sc(@floatFromInt(l.width), k));
-    const ch: u32 = @intCast(sc(hf, k));
-    const card = gpa.alloc(u32, @as(usize, cw) * ch) catch return;
-    defer gpa.free(card);
-    glass(gpa, canvas, x, y, card, cw, ch, k, th);
-    var cv = render.Canvas.init(card, cw, ch);
-    const sep_y = sc((hf - theme.sep_h) / 2, k);
-    for (l.seps) |sx| barkit.separator(&cv, sc(@floatFromInt(sx), k), sep_y, sc(theme.sep_h, k), th);
-    for (order) |o| paintItem(&cv, k, st, o.item, scr(rectOf(&l, o.item), k));
+    const r: Rect = .{ .x = x, .y = y, .w = px(l.width, k), .h = px(h, k) };
     const rad = theme.bar_radius * k;
-    shapes.roundRectRing(&cv, .{ .x = 0, .y = 0, .w = @intCast(cw), .h = @intCast(ch) }, rad, 1, th.hairline);
-    // the editor's bar shadow, a little tighter (a plain drop shadow)
-    const sh = th.bar_shadow;
-    const r: effects.Rect = .{ .x = x, .y = y, .w = @intCast(cw), .h = @intCast(ch) };
-    effects.dropShadow(canvas.px, @intCast(canvas.w), @intCast(canvas.h), r, @intCast(sc(sh.blur * 0.6, k)), sc(sh.dy * 0.6, k), sh.color);
-    effects.blitRounded(canvas.px, @intCast(canvas.w), @intCast(canvas.h), card, cw, ch, x, y, @intFromFloat(@round(rad)));
-    if (st.hover) |hv| paintTip(canvas, x, y + @as(i32, @intCast(ch)) + sc(8, k), k, th, tooltip(st, hv));
-}
-
-/// The bar's material: what lies behind it, blurred and tinted.
-fn glass(gpa: std.mem.Allocator, canvas: *const render.Canvas, x: i32, y: i32, card: []u32, cw: u32, ch: u32, k: f64, th: theme.Theme) void {
-    for (0..ch) |yy| for (0..cw) |xx| {
-        const sx = x + @as(i32, @intCast(xx));
-        const sy = y + @as(i32, @intCast(yy));
-        const inside = sx >= 0 and sy >= 0 and sx < canvas.w and sy < canvas.h;
-        card[yy * cw + xx] = if (inside) canvas.px[@as(usize, @intCast(sy)) * @as(usize, @intCast(canvas.w)) + @as(usize, @intCast(sx))] else th.material_solid;
-    };
-    const rad: u32 = @intCast(@max(2, sc(theme.backdrop_blur / 2, k)));
-    effects.softBlur(gpa, card, cw, ch, .{ .x = 0, .y = 0, .w = @intCast(cw), .h = @intCast(ch) }, rad) catch {};
-    for (card) |*p| p.* = render.Canvas.blendPixel(p.*, th.material) | 0xFF000000;
+    material.shadow(gpa, cv, r, rad, th.bar_shadow, k, 1, shadow);
+    material.glass(gpa, cv, r, rad, th, k);
+    const sep_y = y + px((hf - theme.sep_h) / 2, k);
+    for (l.seps) |sx| barkit.separator(cv, x + px(sx, k), sep_y, px(theme.sep_h, k), th);
+    for (order) |o| {
+        const ir = scale.rect(rectOf(&l, o.item), k);
+        paintItem(cv, k, st, o.item, .{ .x = x + ir.x, .y = y + ir.y, .w = ir.w, .h = ir.h });
+    }
+    if (st.hover) |hv| {
+        const tip = tooltip(st, hv);
+        const sz = selchrome.tooltipSize(tip.name, tip.key, k);
+        selchrome.tooltip(cv, .{ .x = x, .y = r.bottom() + px(8, k), .w = sz[0], .h = sz[1] }, tip.name, tip.key, k, th);
+    }
 }
 
 fn paintItem(cv: *render.Canvas, k: f64, st: *const State, item: Item, r: Rect) void {
@@ -219,32 +199,23 @@ fn paintItem(cv: *render.Canvas, k: f64, st: *const State, item: Item, r: Rect) 
     const look: barkit.Look = if (isOn(st, item)) .toggled else .plain;
     barkit.fill(cv, r, k, th, look, if (disabled) 0 else hover);
     const col = barkit.ink(th, look, disabled);
-    const cx = r.x + @divTrunc(r.w, 2);
-    const cy = r.y + @divTrunc(r.h, 2);
-    const is = sc(theme.icon, k);
-    switch (item) {
+    const icon: icons.Icon = switch (item) {
         .mp4, .gif => {
             const fs = theme.font_label * k;
             const label = formatLabel(item);
+            const cx = r.x + @divTrunc(r.w, 2);
+            const cy = r.y + @divTrunc(r.h, 2);
             text.draw(cv, cx - @divTrunc(text.width(fs, label), 2), cy - @divTrunc(text.height(fs), 2), fs, col, label);
+            return;
         },
-        .mic => glyphs.drawCentered(cv, .mic, cx, cy, is, col),
-        .system => glyphs.drawCentered(cv, .speaker, cx, cy, is, col),
-        .clicks => glyphs.drawCentered(cv, .click, cx, cy, is, col),
-        .keys => icons.drawCentered(cv, .keyboard, cx, cy, is, col),
-        .close => icons.drawCentered(cv, .close, cx, cy, is, col),
-        .record => {},
-    }
-}
-
-/// A tooltip as the editor draws them.
-fn paintTip(canvas: *render.Canvas, x: i32, y: i32, k: f64, th: theme.Theme, s: []const u8) void {
-    const fs = theme.font_small * k;
-    const w = text.width(fs, s) + sc(20, k);
-    const tip_h = text.height(fs) + sc(8, k);
-    canvas.fillRoundRectAA(x, y + sc(2, k), w, tip_h, 7 * k, 0x1F000000);
-    canvas.fillRoundRectAA(x, y, w, tip_h, 7 * k, th.pill_bg);
-    text.draw(canvas, x + sc(10, k), y + sc(4, k), fs, th.pill_fg, s);
+        .mic => .mic,
+        .system => .speaker,
+        .clicks => .click,
+        .keys => .keyboard,
+        .close => .close,
+        .record => return,
+    };
+    icons.drawAt(cv, icon, scale.ff(r.x) + scale.ff(r.w) / 2, scale.ff(r.y) + scale.ff(r.h) / 2, theme.icon * k, .{}, col);
 }
 
 test "bar items do not overlap and hit back" {

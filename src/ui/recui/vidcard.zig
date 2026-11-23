@@ -5,8 +5,9 @@
 const std = @import("std");
 const fui = @import("../floatui.zig");
 const render = @import("../../gfx/render.zig");
-const text = @import("../../gfx/text.zig");
-const glyphs = @import("glyphs.zig");
+const theme = @import("../theme.zig");
+const scale = @import("../scale.zig");
+const press = @import("../press.zig");
 const control_draw = @import("control_draw.zig");
 const Rect = @import("../shapes.zig").Rect;
 
@@ -27,6 +28,9 @@ pub const View = struct {
     hovered: bool = false,
     notice: []const u8 = "",
     alpha: f64 = 1,
+    /// the desktop's appearance (the controls over the picture look the
+    /// same in both; the card behind a narrow picture follows it)
+    th: theme.Theme = theme.Theme.get(true, null),
 };
 
 pub fn windowSize() [2]u32 {
@@ -44,83 +48,61 @@ pub fn controlRect(c: Control) Rect {
     };
 }
 
+/// the controls, top-most first (the body last: anything else on the card)
+const targets = blk: {
+    var t: [5]press.Target(Control) = undefined;
+    for (.{ .close, .trim, .copy, .save_as, .body }, 0..) |c, i| t[i] = .{ .r = controlRect(c), .t = c };
+    break :blk t;
+};
+
 /// What is under a logical point of the window.
 pub fn hit(x: i32, y: i32) ?Control {
-    const lx = x - pad;
-    const ly = y - pad;
-    if (lx < 0 or ly < 0 or lx >= card_w or ly >= card_h) return null;
-    for ([_]Control{ .close, .trim, .copy, .save_as }) |c| {
-        const r = controlRect(c);
-        if (lx >= r.x and ly >= r.y and lx < r.x + r.w and ly < r.y + r.h) return c;
-    }
-    return .body;
+    return press.hitTest(Control, &targets, x - pad, y - pad);
 }
 
-fn sc(v: i32, k: f64) i32 {
-    return @intFromFloat(@round(@as(f64, @floatFromInt(v)) * k));
-}
+const px = scale.px;
+const ff = scale.ff;
 
 /// Paint the card onto the window buffer (straight alpha).
-pub fn paint(gpa: std.mem.Allocator, px: []u32, bw: u32, bh: u32, k: f64, v: *const View) void {
-    const cw: u32 = @intCast(sc(card_w, k));
-    const ch: u32 = @intCast(sc(card_h, k));
+pub fn paint(gpa: std.mem.Allocator, buf: []u32, bw: u32, bh: u32, k: f64, v: *const View) void {
+    const cw: u32 = @intCast(px(card_w, k));
+    const ch: u32 = @intCast(px(card_h, k));
     const card = gpa.alloc(u32, @as(usize, cw) * ch) catch return;
     defer gpa.free(card);
-    @memset(card, fui.card_bg);
-    fui.drawImageFill(gpa, card, cw, ch, v.pic, v.pic_w, v.pic_h);
+    fui.drawImage(gpa, .{ .px = card, .w = cw, .h = ch }, .{ .px = v.pic, .w = v.pic_w, .h = v.pic_h }, .auto, theme.Opaque.of(v.th).panel);
     var cv = render.Canvas.init(card, cw, ch);
     badge(&cv, k, v);
     if (v.hovered) controls(&cv, k, v);
-    if (v.notice.len > 0) notice(&cv, k, v.notice);
-    const sp = sc(pad, k);
-    const lw: u32 = cw + @as(u32, @intCast(2 * sp));
-    const lh: u32 = ch + @as(u32, @intCast(2 * sp));
-    const layer = gpa.alloc(u32, @as(usize, lw) * lh) catch return;
-    defer gpa.free(layer);
-    @memset(layer, 0);
-    fui.placeCard(layer, lw, lh, card, cw, ch, sp, sp, @intCast(sc(12, k)), @intCast(sc(20, k)));
-    fui.fadeAlpha(layer, v.alpha);
-    fui.blitOver(px, bw, bh, layer, lw, lh, 0, 0);
+    if (v.notice.len > 0) fui.notice(&cv, .{ .x = 0, .y = 0, .w = @intCast(cw), .h = @intCast(ch) }, v.notice, k, v.th);
+    const at = px(pad, k);
+    fui.compositeFaded(gpa, .{ .px = buf, .w = bw, .h = bh }, .{ .px = card, .w = cw, .h = ch }, .{ at, at }, 12 * k, v.th.card_shadow, v.alpha, k) catch {};
 }
 
+/// The duration (and "GIF") in a dark pill: bottom right, under the
+/// trim button while hovered.
 fn badge(cv: *render.Canvas, k: f64, v: *const View) void {
     var buf: [40]u8 = undefined;
     var tb: [32]u8 = undefined;
     const t = control_draw.formatTime(&tb, v.duration_ms + 500);
     const s = if (v.gif) std.fmt.bufPrint(&buf, "GIF \u{00B7} {s}", .{t}) catch t else t;
-    const fs = 11.5 * k;
-    const w = text.widthStyled(fs, .semibold, s) + sc(14, k) + sc(14, k);
-    const h = sc(22, k);
-    const x = cv.w - w - sc(8, k);
-    const y = if (v.hovered) sc(8 + 26 + 6, k) else cv.h - h - sc(8, k);
-    cv.fillRoundRectAA(x, y, w, h, 11 * k, 0xCC000000);
-    glyphs.draw(cv, .play, x + sc(5, k), y + @divTrunc(h - sc(12, k), 2), sc(12, k), 0xFFFFFFFF);
-    text.drawStyled(cv, x + sc(19, k), y + @divTrunc(h - text.heightStyled(fs, .semibold), 2), fs, 0xFFFFFFFF, .semibold, s);
+    const w = fui.scrimPillWidth(s, .play, k);
+    const h = px(fui.scrim_pill_h, k);
+    const x = cv.w - w - px(8, k);
+    const y = if (v.hovered) px(8 + 26 + 6, k) else cv.h - h - px(8, k);
+    fui.scrimPill(cv, .{ .x = x, .y = y, .w = w, .h = h }, s, .play, .strong, k, v.th);
 }
 
 fn controls(cv: *render.Canvas, k: f64, v: *const View) void {
-    cv.fillRect(0, 0, cv.w, cv.h, 0x40000000);
+    cv.fillRect(0, 0, cv.w, cv.h, v.th.scrim(.soft));
     for ([_]Control{ .close, .trim }) |c| {
         const r = controlRect(c);
-        const cx = (@as(f64, @floatFromInt(r.x)) + 13) * k;
-        const cy = (@as(f64, @floatFromInt(r.y)) + 13) * k;
-        cv.fillCircleAA(cx, cy, 13 * k, if (v.hover == c) fui.btn_round_hover else fui.btn_round);
-        if (c == .close) fui.icon(cv, .close, cx, cy, 14 * k, fui.white) else glyphs.drawCentered(cv, .scissors, @intFromFloat(cx), @intFromFloat(cy), sc(15, k), fui.white);
+        const icon: @import("../icons.zig").Icon = if (c == .close) .close else .scissors;
+        fui.roundButton(cv, (ff(r.x) + 13) * k, (ff(r.y) + 13) * k, 13 * k, icon, .{ .hot = v.hover == c }, k, v.th);
     }
     for ([_]Control{ .copy, .save_as }) |c| {
-        const r = controlRect(c);
-        const rr: Rect = .{ .x = sc(r.x, k), .y = sc(r.y, k), .w = sc(r.w, k), .h = sc(r.h, k) };
-        cv.fillRoundRectAA(rr.x, rr.y, rr.w, rr.h, 8 * k, if (v.hover == c) fui.pill_hover else fui.pill);
-        fui.textCentered(cv, rr, 13 * k, fui.pill_text, .semibold, if (c == .copy) "Copy" else "Save as\u{2026}");
+        const label = if (c == .copy) "Copy" else "Save as\u{2026}";
+        fui.pillButton(cv, scale.rect(controlRect(c), k), label, .light, 13, .{ .hot = v.hover == c }, k, v.th);
     }
-}
-
-fn notice(cv: *render.Canvas, k: f64, s: []const u8) void {
-    const tw = text.widthStyled(13 * k, .semibold, s) + sc(28, k);
-    const nh = sc(30, k);
-    const nr: Rect = .{ .x = @divTrunc(cv.w - tw, 2), .y = @divTrunc(cv.h - nh, 2), .w = tw, .h = nh };
-    cv.fillRoundRectAA(nr.x, nr.y, nr.w, nr.h, 15 * k, 0xE6000000);
-    fui.textCentered(cv, nr, 13 * k, fui.white, .semibold, s);
 }
 
 test "card controls hit" {

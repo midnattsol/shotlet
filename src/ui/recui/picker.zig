@@ -11,8 +11,7 @@ const capture = @import("../../app/capture.zig");
 const env_mod = @import("../../app/env.zig");
 const window = @import("../../platform/api.zig").window;
 const render = @import("../../gfx/render.zig");
-const text = @import("../../gfx/text.zig");
-const yuv = @import("../../encode/yuv.zig");
+const resample = @import("../../gfx/resample.zig");
 const settings_mod = @import("../../record/settings.zig");
 const selmod = @import("picker_sel.zig");
 const bar = @import("picker_bar.zig");
@@ -22,6 +21,10 @@ const mixRows = @import("../../gfx/effects.zig").mixRows;
 const dim = @import("../dim.zig");
 const selchrome = @import("../selchrome.zig");
 const shapes = @import("../shapes.zig");
+const scale = @import("../scale.zig");
+const press = @import("../press.zig");
+const focus = @import("../focus.zig");
+const material = @import("../material.zig");
 const Rect = selmod.Rect;
 const Point = selmod.Point;
 
@@ -53,15 +56,18 @@ pub const Picker = struct {
     edge_handle: ?usize = null,
     /// of 256, what the dim outside the area keeps (ui/dim.zig)
     dim_keep: u32 = 256,
-    pressed_bar: ?bar.Item = null,
+    /// the bar item pressed (it acts when released over it)
+    pressed_bar: press.Press(bar.Item) = .{},
+    bar_shadow: material.ShadowCache = .{},
     dirty: bool = true,
     result: ?Result = null,
-    /// first frame drawn, and the fade out begun (0: not yet)
-    shown_ms: i64 = 0,
-    leaving_ms: i64 = 0,
+    /// the dim easing in from the first frame, and out once there is a
+    /// result
+    life: motion.Life = .{ .in_ms = theme.motion_fast, .out_ms = theme.motion_fast },
 
     pub fn deinit(self: *Picker) void {
         for (self.panes[0..self.n]) |p| self.gpa.free(p.base);
+        self.bar_shadow.release(self.gpa);
         self.win.deinit();
     }
 
@@ -113,7 +119,7 @@ pub const Picker = struct {
                 const p = self.toLogical(b.surface, b.x, b.y);
                 if (b.button == .right and b.pressed) self.result = .cancelled;
                 if (b.button != .left) return;
-                if (b.pressed) self.onPress(p) else self.onRelease(p);
+                if (b.pressed) self.onPress(p, b.x, b.y) else self.onRelease(p);
                 self.win.setCursor(self.cursorAt(p)) catch {};
             },
             .key => |k| if (k.pressed) self.onKey(k),
@@ -130,7 +136,7 @@ pub const Picker = struct {
         p.base = try self.gpa.alloc(u32, @as(usize, w) * h);
         const img = &self.cap.image;
         const off = p.src.y * img.width + p.src.x;
-        yuv.downscale(img.pixels[off..], img.width, p.src.w, p.src.h, p.base, w, h);
+        resample.box(img.pixels[off..], img.width, p.src.w, p.src.h, p.base, w, h);
         p.bw = w;
         p.bh = h;
         self.dirty = true;
@@ -173,15 +179,15 @@ pub const Picker = struct {
             .selecting => return .crosshair,
             .none => {},
         }
-        if (self.st.hover != null or self.pressed_bar != null) return .arrow;
+        if (self.st.hover != null or self.pressed_bar.held() != null) return .arrow;
         if (self.sel.handleAt(p)) |h| return selchrome.handleCursor(h);
         if (self.sel.sel) |s| if (selmod.inside(s, p)) return .grab;
         return .crosshair;
     }
 
-    fn onPress(self: *Picker, p: Point) void {
+    fn onPress(self: *Picker, p: Point, x: f64, y: f64) void {
         if (self.barItemAt(p)) |it| {
-            self.pressed_bar = it;
+            self.pressed_bar.down(it, x, y);
             return;
         }
         self.sel.press(p);
@@ -189,9 +195,8 @@ pub const Picker = struct {
     }
 
     fn onRelease(self: *Picker, p: Point) void {
-        if (self.pressed_bar) |it| {
-            self.pressed_bar = null;
-            if (self.barItemAt(p) == it) self.activate(it);
+        if (self.pressed_bar.held() != null) {
+            if (self.pressed_bar.up(self.barItemAt(p))) |it| self.activate(it);
             return;
         }
         self.sel.release(p);
@@ -210,13 +215,13 @@ pub const Picker = struct {
     }
 
     fn onKey(self: *Picker, k: window.Key) void {
-        switch (k.code) {
-            .escape => self.result = .cancelled,
-            .enter, .kp_enter => {
+        switch (focus.action(k, .none) orelse return) {
+            .close => self.result = .cancelled,
+            .activate => {
                 const s = self.sel.sel orelse self.sel.monitorAt(self.mouse) orelse return;
                 self.result = .{ .area = s };
             },
-            else => {},
+            .next, .prev => {},
         }
     }
 
@@ -240,26 +245,9 @@ pub const Picker = struct {
         self.bar_at = .{ .x = x, .y = y };
     }
 
-    /// How far the dim is in, 0..256: fading in from the first frame, out
-    /// once there is a result.
-    fn level(self: *Picker, now: i64) u32 {
-        if (!motion.enabled) return if (self.leaving_ms != 0) 0 else 256;
-        if (self.shown_ms == 0) self.shown_ms = now;
-        var t = motion.easeOut(@as(f64, @floatFromInt(now - self.shown_ms)) / theme.motion_fast);
-        if (self.leaving_ms != 0) t = @min(t, 1 - motion.easeOut(@as(f64, @floatFromInt(now - self.leaving_ms)) / theme.motion_fast));
-        return @intFromFloat(@round(@max(0, t) * 256));
-    }
-
-    /// Still fading in or out (a frame per refresh).
-    fn fading(self: *const Picker) bool {
-        const now = motion.now();
-        if (!motion.enabled) return false;
-        if (self.leaving_ms != 0) return now - self.leaving_ms < theme.motion_fast;
-        return self.shown_ms == 0 or now - self.shown_ms < theme.motion_fast;
-    }
-
     fn draw(self: *Picker) !void {
-        if (self.fading()) self.dirty = true;
+        const now = motion.now();
+        if (self.life.busy(now)) self.dirty = true;
         if (!self.dirty) return;
         self.placeBar();
         for (0..self.n) |i| {
@@ -267,18 +255,16 @@ pub const Picker = struct {
             if (s.frame_pending or self.panes[i].bw == 0) return;
         }
         self.dirty = false;
-        const k = self.level(motion.now());
+        self.life.start(now);
+        const k: u32 = @intFromFloat(@round(self.life.alpha(now) * 256));
         for (0..self.n) |i| try self.renderPane(@intCast(i), k);
     }
 
+    /// A logical desktop rect in pane i's buffer pixels (by its edges).
     fn bufRect(self: *const Picker, i: usize, r: Rect) Rect {
-        const p = self.panes[i];
-        const k = self.scaleOf(i);
-        const x0: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.x - p.rect.x)) * k));
-        const y0: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.y - p.rect.y)) * k));
-        const x1: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.right() - p.rect.x)) * k));
-        const y1: i32 = @intFromFloat(@round(@as(f64, @floatFromInt(r.bottom() - p.rect.y)) * k));
-        return .{ .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+        const o = self.panes[i].rect;
+        const b = scale.rect(.{ .x = r.x - o.x, .y = r.y - o.y, .w = r.w, .h = r.h }, self.scaleOf(i));
+        return .{ .x = b.x, .y = b.y, .w = b.w, .h = b.h };
     }
 
     fn renderPane(self: *Picker, i: u8, k_dim: u32) !void {
@@ -293,7 +279,7 @@ pub const Picker = struct {
         if (self.sel.sel == null and i == self.paneAt(self.mouse)) drawHint(&cv, k, self.st.th);
         if (self.bar_at) |at| {
             const b = self.bufRect(i, .{ .x = at.x, .y = at.y, .w = 1, .h = 1 });
-            if (selmod.inside(p.rect, at)) bar.paint(self.gpa, &cv, b.x, b.y, k, &self.st);
+            if (selmod.inside(p.rect, at)) bar.paint(self.gpa, &cv, b.x, b.y, k, &self.st, &self.bar_shadow);
         }
         if (k_dim < 256) mixRows(px[0..p.base.len], p.base, px[0..p.base.len], k_dim);
         try self.win.presentSurface(i);
@@ -325,15 +311,11 @@ fn shapeRect(r: Rect) shapes.Rect {
     return .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
 }
 
+/// The hint in the middle of the pane, before anything is chosen.
 fn drawHint(cv: *render.Canvas, k: f64, th: theme.Theme) void {
     const s = "Drag to choose what to record \u{00B7} click: the whole screen \u{00B7} Esc: cancel";
-    const fs = 14 * k;
-    const tw = text.width(fs, s) + @as(i32, @intFromFloat(32 * k));
-    const hh = text.height(fs) + @as(i32, @intFromFloat(18 * k));
-    const x = @divTrunc(cv.w - tw, 2);
-    const y = @divTrunc(cv.h - hh, 2);
-    selchrome.pill(cv, .{ .x = x, .y = y, .w = tw, .h = hh }, 12 * k, th);
-    text.draw(cv, x + @as(i32, @intFromFloat(16 * k)), y + @as(i32, @intFromFloat(9 * k)), fs, th.pill_fg, s);
+    const sz = selchrome.hintPillSize(s, k);
+    _ = selchrome.hintPill(cv, .{ .x = @divTrunc(cv.w - sz[0], 2), .y = @divTrunc(cv.h - sz[1], 2) }, s, k, th);
 }
 
 /// Show the picker over the frozen desktop `cap`; the chosen area, or
@@ -352,9 +334,9 @@ pub fn pick(gpa: std.mem.Allocator, env: env_mod.Env, cap: *const capture.Captur
     try p.win.openOutputs("Shotlet");
     p.setup();
     p.win.setCursor(.crosshair) catch {};
-    while (p.result == null or p.fading()) {
-        if (p.result != null and p.leaving_ms == 0) p.leaving_ms = motion.now();
-        if (try p.win.nextEventTimeout(p.win.pollTimeoutMs(if (p.fading()) 8 else 100))) |ev| {
+    while (p.result == null or p.life.busy(motion.now())) {
+        if (p.result != null) p.life.leave(motion.now());
+        if (try p.win.nextEventTimeout(p.win.pollTimeoutMs(if (p.life.busy(motion.now())) 8 else 100))) |ev| {
             if (p.result == null) try p.onEvent(ev);
             while (p.win.queue.items.len > 0) {
                 const e = try p.win.nextEvent();

@@ -18,6 +18,9 @@ const trim = @import("../../record/trim.zig");
 const strip_mod = @import("../../record/strip.zig");
 const draw = @import("trim_draw.zig");
 const frame_mod = @import("../frame.zig");
+const theme = @import("../theme.zig");
+const scale = @import("../scale.zig");
+const press = @import("../press.zig");
 const Env = env_mod.Env;
 
 const Trim = struct {
@@ -37,9 +40,11 @@ const Trim = struct {
     pic_buf: []u32 = &.{},
     done: bool = false,
     frame: frame_mod.Frame = .{},
-    /// where a press on no control went down (logical): dragging from
-    /// there moves the window, which has no title bar
-    move_from: ?[2]i32 = null,
+    /// the button pressed (it acts when released over it)
+    pressed: press.Press(draw.Part) = .{},
+    /// a press on no control: dragging from there moves the window,
+    /// which has no title bar
+    move: press.Press(void) = .{},
 
     /// The strip picture nearest to `ms`.
     fn pictureAt(self: *Trim, ms: i64) void {
@@ -66,20 +71,32 @@ const Trim = struct {
         self.pictureAt(self.st.pos_ms);
     }
 
-    fn onPress(self: *Trim, x: i32, y: i32) void {
+    /// A press at logical x, y (`phys`: the same in physical px).
+    fn onPress(self: *Trim, x: i32, y: i32, phys: [2]f64) void {
         const p = draw.hit(x, y, &self.st) orelse {
-            self.move_from = .{ x, y };
+            self.move.down({}, phys[0], phys[1]);
             return;
         };
         switch (p) {
-            .play => self.togglePlay(),
-            .cancel => self.done = true,
-            .save => self.save(),
+            .play, .cancel, .save => self.pressed.down(p, phys[0], phys[1]),
             .start, .end => self.dragging = p,
             .strip => {
                 self.dragging = .strip;
                 self.seek(draw.msAt(x, self.info.duration_ms));
             },
+        }
+    }
+
+    /// A release over logical x, y: a click when on the button pressed.
+    fn onRelease(self: *Trim, x: i32, y: i32) void {
+        self.dragging = null;
+        self.move.cancel();
+        const p = self.pressed.up(draw.hit(x, y, &self.st)) orelse return;
+        switch (p) {
+            .play => self.togglePlay(),
+            .cancel => self.done = true,
+            .save => self.save(),
+            else => {},
         }
     }
 
@@ -198,7 +215,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8, o
 fn runWindow(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8, info: keepvid.Info, range: trim.Range) !void {
     text.init(gpa);
     defer text.deinit();
-    var t: Trim = .{ .gpa = gpa, .env = env, .root = root, .id = id, .info = info, .strip = null, .st = .{ .duration_ms = info.duration_ms, .start_ms = range.start_ms, .end_ms = range.end_ms, .pos_ms = range.start_ms } };
+    const th = theme.load(gpa, env, 300);
+    var t: Trim = .{ .gpa = gpa, .env = env, .root = root, .id = id, .info = info, .strip = null, .st = .{ .duration_ms = info.duration_ms, .start_ms = range.start_ms, .end_ms = range.end_ms, .pos_ms = range.start_ms, .th = th } };
     defer gpa.free(t.pic_buf);
     defer t.frame.deinit(gpa);
     var pbuf: [1200]u8 = undefined;
@@ -246,27 +264,30 @@ fn cursorOf(hover: ?draw.Part) window.Cursor {
     };
 }
 
-fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
-    const k = @as(f64, @floatFromInt(win.scale120)) / 120.0;
+/// A pointer position on the window (physical px) in the content's
+/// logical pixels.
+fn contentPoint(win: *const window.Window, x: f64, y: f64) [2]i32 {
     const F = frame_mod.Frame;
+    const k = scale.of(win.scale120);
+    return .{ scale.toLogical(F.toContent(win, x), k), scale.toLogical(F.toContent(win, y), k) };
+}
+
+fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
     switch (ev) {
         .close => t.done = true,
         .pointer_motion => |m| {
-            const x: i32 = @intFromFloat(F.toContent(win, m.x) / k);
-            const y: i32 = @intFromFloat(F.toContent(win, m.y) / k);
-            t.onDrag(x);
-            if (t.move_from) |p| if (@abs(x - p[0]) + @abs(y - p[1]) > 4) {
-                t.move_from = null;
+            const p = contentPoint(win, m.x, m.y);
+            t.onDrag(p[0]);
+            if (t.move.dragged(m.x, m.y, scale.of(win.scale120))) {
+                t.move.cancel();
                 try win.startMove();
-            };
-            t.st.hover = if (t.dragging == null) draw.hit(x, y, &t.st) else t.dragging;
+            }
+            t.st.hover = if (t.dragging == null) draw.hit(p[0], p[1], &t.st) else t.dragging;
             win.setCursor(cursorOf(t.st.hover)) catch {};
         },
         .pointer_button => |b| if (b.button == .left) {
-            if (b.pressed) t.onPress(@intFromFloat(F.toContent(win, b.x) / k), @intFromFloat(F.toContent(win, b.y) / k)) else {
-                t.dragging = null;
-                t.move_from = null;
-            }
+            const p = contentPoint(win, b.x, b.y);
+            if (b.pressed) t.onPress(p[0], p[1], .{ b.x, b.y }) else t.onRelease(p[0], p[1]);
         },
         .key => |key| if (key.pressed) switch (key.code) {
             .escape => t.done = true,
@@ -282,8 +303,8 @@ fn onEvent(t: *Trim, win: *window.Window, ev: window.InputEvent) !void {
 fn paint(t: *Trim, win: *window.Window) !bool {
     if (win.frame_pending or win.width == 0) return false;
     var cv = try t.frame.begin(t.gpa, win);
-    draw.paint(t.gpa, &cv, @as(f64, @floatFromInt(win.scale120)) / 120.0, &t.st);
-    try t.frame.present(win, draw.edge);
+    draw.paint(t.gpa, &cv, scale.of(win.scale120), &t.st);
+    try t.frame.present(win, draw.edge(t.st.th));
     return true;
 }
 
