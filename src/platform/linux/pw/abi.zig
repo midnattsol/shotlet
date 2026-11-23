@@ -27,9 +27,15 @@ pub const SPA_FORMAT_mediaSubtype: u32 = 2;
 pub const SPA_FORMAT_VIDEO_format: u32 = 0x20001;
 pub const SPA_FORMAT_VIDEO_size: u32 = 0x20003;
 pub const SPA_FORMAT_VIDEO_framerate: u32 = 0x20004;
+pub const SPA_FORMAT_AUDIO_format: u32 = 0x10001;
+pub const SPA_FORMAT_AUDIO_rate: u32 = 0x10003;
+pub const SPA_FORMAT_AUDIO_channels: u32 = 0x10004;
 
+pub const SPA_MEDIA_TYPE_audio: u32 = 1;
 pub const SPA_MEDIA_TYPE_video: u32 = 2;
 pub const SPA_MEDIA_SUBTYPE_raw: u32 = 1;
+
+pub const SPA_AUDIO_FORMAT_S16_LE: u32 = 0x103;
 
 pub const SPA_CHOICE_Range: u32 = 1;
 pub const SPA_CHOICE_Enum: u32 = 3;
@@ -127,8 +133,10 @@ pub const Api = struct {
     thread_loop_get_loop: *const fn (?*anyopaque) callconv(.c) ?*anyopaque,
     context_new: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque,
     context_destroy: *const fn (?*anyopaque) callconv(.c) void,
+    context_connect: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque,
     context_connect_fd: *const fn (?*anyopaque, c_int, ?*anyopaque, usize) callconv(.c) ?*anyopaque,
     core_disconnect: *const fn (?*anyopaque) callconv(.c) c_int,
+    properties_new_string: *const fn ([*:0]const u8) callconv(.c) ?*anyopaque,
     stream_new: *const fn (?*anyopaque, [*:0]const u8, ?*anyopaque) callconv(.c) ?*anyopaque,
     stream_destroy: *const fn (?*anyopaque) callconv(.c) void,
     stream_disconnect: *const fn (?*anyopaque) callconv(.c) c_int,
