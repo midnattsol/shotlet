@@ -30,7 +30,8 @@ jobs:
           version: 0.17.0
 
       - name: Check formatting
-        run: zig fmt --check src build.zig
+        # the Zig sources the guards check (tools/sources.sh: src build.zig tools)
+        run: . tools/sources.sh && zig fmt --check $zig_roots
 
       - name: Run tests
         # includes a portal integration test on a private dbus-daemon

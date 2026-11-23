@@ -1,42 +1,33 @@
 //! shotlet-wldrive: virtual keyboard, pointer and screenshots for the
 //! container e2e suite (tools/container/run.sh), on wlroots compositors
 //! (sway, labwc) and on KWin. The counterpart of tools/e2e/drive.zig,
-//! which does the same through Mutter's RemoteDesktop API on GNOME.
+//! which does the same through Mutter's RemoteDesktop API on GNOME; both
+//! answer the drivers' commands (tools/drivers/common/commands.zig) one
+//! per line. `monitors` answers "NAME:X,Y,WxH@SCALE ..." in the logical
+//! layout, numbered left to right; `find` and `shot` work in the
+//! monitor's buffer pixels; `keysym`, `film` and `cut` are Mutter's only.
 //!
-//! - wlroots: zwlr_virtual_pointer_v1 + zwp_virtual_keyboard_v1 for input,
-//!   zwlr_screencopy_v1 for pictures of an output.
-//! - KWin: org_kde_kwin_fake_input for input (restricted: kwin_wayland must
-//!   run with KWIN_WAYLAND_NO_PERMISSION_CHECKS=1), org.kde.KWin.ScreenShot2
-//!   over D-Bus for pictures (KWIN_SCREENSHOT_NO_PERMISSION_CHECKS=1).
+//! - wlroots: zwlr_virtual_pointer_v1 + zwp_virtual_keyboard_v1 for input
+//!   (the keymap file in WLDRIVE_KEYMAP), zwlr_screencopy_v1 for pictures
+//!   of an output.
+//! - KWin: org_kde_kwin_fake_input for input and org.kde.KWin.ScreenShot2
+//!   over D-Bus for pictures. Both are restricted, and KWin grants them as
+//!   on a real desktop, through the desktop entry whose Exec is this
+//!   binary (shotlet-wldrive.desktop, written by tools/container/inner.sh:
+//!   X-KDE-Wayland-Interfaces and X-KDE-DBUS-Restricted-Interfaces); no
+//!   KWIN_*_NO_PERMISSION_CHECKS.
 //!
-//! Refuses to run unless SHOTLET_CONTAINER is set (the runner sets it), so
-//! it can never type into a real desktop by accident. One command per line
-//! on stdin, answered with one line on stdout: `ok [value]` or `err why`.
-//! Monitors (MON) are numbered left to right, or named by connector.
-//!
-//!   key COMBO [down|up]   tap (or press/release) evdev keys: ctrl+c, a, #30
-//!   type TEXT             tap the keys for lowercase letters, digits, space
-//!   move MON X Y          absolute motion, logical pixels of monitor MON
-//!   down|up|click [BTN]   left (default), right, middle
-//!   wheel STEPS           vertical scroll (+ is down)
-//!   monitors              "NAME:X,Y,WxH@SCALE ..." in the logical layout
-//!   shot MON PATH         write the monitor's picture as a PNG; answers WxH
-//!   find MON RRGGBB [TOL [MINW [X0 Y0 X1 Y1]]]
-//!                         "cx cy w h" of the first blob of that colour, in
-//!                         the monitor's buffer pixels
-//!   findpng PATH RRGGBB [TOL [MINW [X0 Y0 X1 Y1]]]   the same in a PNG file
-//!   png PATH | pixel PATH X Y
-//!   mkpng PATH W H RRGGBB a test picture: that colour framed in grey
-//!   textpng PATH SIZE TEXT  black TEXT on white (Shotlet's text renderer)
-//!   sleep MS | quit
+//! Refuses to run outside the e2e sandbox (sandbox.zig), so it can never
+//! type into a real desktop by accident.
 
 const std = @import("std");
 const kit = @import("shotlet");
 const wl = kit.wayland;
 const dbus = kit.dbus;
 const sys = kit.sys;
+const common = @import("driver_common");
+const loop = common.loop;
 const proto = @import("wldrive/proto.zig");
-const commands = @import("wldrive/commands.zig");
 const Driver = @import("wldrive/Driver.zig");
 
 var gpa_state: std.heap.DebugAllocator(.{}) = .init;
@@ -44,22 +35,19 @@ var gpa_state: std.heap.DebugAllocator(.{}) = .init;
 pub fn main(init: std.process.Init) !void {
     const gpa = gpa_state.allocator();
     const vars = init.environ_map;
-    if (vars.get("SHOTLET_CONTAINER") == null) {
-        std.debug.print("shotlet-wldrive: run me inside tools/container/run.sh\n", .{});
-        std.process.exit(2);
-    }
+    common.sandbox.require(vars, "shotlet-wldrive", &.{.container});
     const runtime = vars.get("XDG_RUNTIME_DIR") orelse return error.NoRuntimeDir;
     const display = vars.get("WAYLAND_DISPLAY") orelse "wayland-0";
 
-    var d: Driver = .{ .gpa = gpa, .conn = try wl.Connection.connect(gpa, runtime, display) };
+    var d: Driver = .{ .gpa = gpa, .conn = try wl.Connection.connect(gpa, runtime, display), .bus_addr = vars.get("DBUS_SESSION_BUS_ADDRESS") };
     defer d.conn.deinit();
     d.registry = try d.conn.getRegistry();
     try d.roundtrip();
     try bindOutputs(&d);
     try setupInput(&d, vars);
     try d.roundtrip();
-    reply("ok ready", .{});
-    try serve(&d);
+    loop.reply("ok ready", .{});
+    try loop.serve(&d, common.commands.run);
 }
 
 /// Outputs: logical position, size and connector name, left to right.
@@ -83,7 +71,7 @@ fn setupInput(d: *Driver, vars: *const std.process.Environ.Map) !void {
         d.kwin = true;
         try d.conn.request(d.g.fake, proto.fake.authenticate, &.{ .{ .string = "shotlet-wldrive" }, .{ .string = "e2e tests" } });
         if (d.g.fake_version < 4) return fail("org_kde_kwin_fake_input v{d}: no keyboard", .{d.g.fake_version});
-        d.bus = try dbus.Connection.connectSession(d.gpa, vars.get("DBUS_SESSION_BUS_ADDRESS") orelse return error.NoBus);
+        d.bus = try dbus.Connection.connectSession(d.gpa, d.bus_addr orelse return error.NoBus);
     } else if (d.g.vp_mgr != 0 and d.g.vk_mgr != 0 and d.g.seat != 0) {
         d.pointer = d.conn.newId();
         try d.conn.request(d.g.vp_mgr, proto.vp_mgr.create_virtual_pointer, &.{ .{ .object = d.g.seat }, .{ .new_id = d.pointer } });
@@ -96,43 +84,11 @@ fn setupInput(d: *Driver, vars: *const std.process.Environ.Map) !void {
     }
 }
 
-/// Answer one command per line on stdin until `quit` or its end.
-fn serve(d: *Driver) !void {
-    var buf: [4096]u8 = undefined;
-    var len: usize = 0;
-    while (true) {
-        if (std.mem.indexOfScalar(u8, buf[0..len], '\n')) |nl| {
-            const quit = answer(d, std.mem.trim(u8, buf[0..nl], " \t\r"));
-            std.mem.copyForwards(u8, buf[0..], buf[nl + 1 .. len]);
-            len -= nl + 1;
-            if (quit) return;
-            continue;
-        }
-        if (len == buf.len) return error.LineTooLong;
-        const n = try sys.read(0, buf[len..]);
-        if (n == 0) return;
-        len += n;
-    }
-}
-
-/// Run one line (blank and # lines are ignored) and reply to it; whether
-/// it was `quit`.
-fn answer(d: *Driver, line: []const u8) bool {
-    if (line.len > 0 and line[0] != '#') {
-        if (commands.run(d, line)) |val| {
-            if (val.len > 0) reply("ok {s}", .{val}) else reply("ok", .{});
-        } else |err| reply("err {t}", .{err});
-    }
-    return std.mem.eql(u8, line, "quit");
-}
-
 fn fail(comptime fmt: []const u8, args: anytype) !void {
-    reply("err " ++ fmt, args);
+    loop.reply("err " ++ fmt, args);
     return error.Setup;
 }
 
-fn reply(comptime fmt: []const u8, args: anytype) void {
-    var out: [512]u8 = undefined;
-    const s = std.fmt.bufPrint(&out, fmt ++ "\n", args) catch "err reply too long\n";
-    sys.writeAll(1, s) catch {};
+test {
+    _ = Driver;
 }

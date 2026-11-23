@@ -4,118 +4,118 @@ const version = @import("tools/version.zig");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-
-    const exe = b.addExecutable(.{
-        .name = "shotlet",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            // libc is needed only for dlopen(libpipewire); everything else
-            // talks wire protocols directly
-            .link_libc = true,
-        }),
-    });
-    addGnomeExtension(b, exe.root_module);
-    const platform = platformOptions(b, false);
-    exe.root_module.addImport("platform_options", platform);
     const version_mod = versionModule(b);
-    exe.root_module.addImport("version", version_mod);
-    b.installArtifact(exe);
+    const platform = platformOptions(b, false);
 
+    const exe = b.addExecutable(.{ .name = "shotlet", .root_module = appModule(b, target, optimize, platform, version_mod) });
+    b.installArtifact(exe);
     addManPage(b, exe);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
     run_cmd.addPassthruArgs();
-    const run_step = b.step("run", "Run shotlet");
-    run_step.dependOn(&run_cmd.step);
+    b.step("run", "Run shotlet").dependOn(&run_cmd.step);
 
-    const tests = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-    });
-    addGnomeExtension(b, tests.root_module);
-    tests.root_module.addImport("version", version_mod);
-    tests.root_module.addImport("platform_options", platform);
-    const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_tests.step);
-    addSizeChecks(b, test_step);
-    addPortableCheck(b, version_mod, test_step);
+    const tests = b.addTest(.{ .root_module = appModule(b, target, optimize, platform, version_mod) });
+    test_step.dependOn(&b.addRunArtifact(tests).step);
     const version_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("tools/version.zig"),
         .target = b.graph.host,
     }) });
     test_step.dependOn(&b.addRunArtifact(version_tests).step);
+    addGuards(b, test_step);
+    addPortableCheck(b, version_mod, test_step);
+    addE2e(b, target, optimize, platform, exe, test_step);
+}
 
-    // end-to-end suite: shotlet driven by a virtual keyboard and pointer in
-    // a private headless GNOME session (tools/e2e.sh skips without one)
-    const drive = b.addExecutable(.{
-        .name = "shotlet-drive",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tools/e2e/drive.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-            .imports = &.{.{ .name = "shotlet", .module = testkit(b, target, optimize, platform) }},
-        }),
+/// The program's root module (src/main.zig) for `target`, with what it
+/// imports: the GNOME Shell extension, the version and the platform
+/// option. libc is needed only for dlopen (libpipewire and friends);
+/// everything else talks wire protocols directly.
+fn appModule(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, platform: *std.Build.Module, version_mod: *std.Build.Module) *std.Build.Module {
+    const m = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
     });
-    const droptarget = b.addExecutable(.{
-        .name = "shotlet-droptarget",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tools/e2e/droptarget.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-            .imports = &.{.{ .name = "shotlet", .module = testkit(b, target, optimize, platform) }},
-        }),
+    addGnomeExtension(b, m);
+    m.addImport("version", version_mod);
+    m.addImport("platform_options", platform);
+    return m;
+}
+
+/// The end-to-end suites and their helpers. The GNOME suite drives
+/// shotlet with a virtual keyboard and pointer in a private headless
+/// GNOME session (tools/e2e.sh skips without one); the container suite
+/// does the same on wlroots (sway, labwc) and KWin, each scenario in a
+/// throwaway container (tools/container/run.sh skips without docker or
+/// podman). The helpers are compiled and unit-tested with `test`, so they
+/// cannot rot unnoticed.
+fn addE2e(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, platform: *std.Build.Module, exe: *std.Build.Step.Compile, test_step: *std.Build.Step) void {
+    const kit = testkit(b, target, optimize, platform);
+    const common = b.createModule(.{
+        .root_source_file = b.path("tools/drivers/common/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .imports = &.{.{ .name = "shotlet", .module = kit }},
     });
-    // the container suite's input driver (wlroots and KWin)
-    const wldrive = b.addExecutable(.{
-        .name = "shotlet-wldrive",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tools/container/wldrive.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-            .imports = &.{.{ .name = "shotlet", .module = testkit(b, target, optimize, platform) }},
-        }),
-    });
-    // compiled with the tests so they cannot rot unnoticed
-    test_step.dependOn(&drive.step);
-    // and the driver's own (its film's frame fit)
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = drive.root_module })).step);
-    test_step.dependOn(&droptarget.step);
-    test_step.dependOn(&wldrive.step);
-    const run_e2e = b.addSystemCommand(&.{"tools/e2e.sh"});
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = "driver-common-test", .root_module = common })).step);
+    const drive = addDriver(b, "shotlet-drive", "tools/e2e/drive.zig", kit, common, test_step);
+    const droptarget = addDriver(b, "shotlet-droptarget", "tools/e2e/droptarget.zig", kit, common, test_step);
+    const wldrive = addDriver(b, "shotlet-wldrive", "tools/container/wldrive.zig", kit, common, test_step);
+
+    const run_e2e = addScript(b, "tools/e2e.sh");
     run_e2e.addArtifactArg(exe);
     run_e2e.addArtifactArg(drive);
     run_e2e.addArtifactArg(droptarget);
     run_e2e.addPassthruArgs();
-    run_e2e.has_side_effects = true;
-    const e2e_step = b.step("e2e", "Run the end-to-end suite (private headless GNOME session)");
-    e2e_step.dependOn(&run_e2e.step);
-    // the same kind of suite on wlroots (sway, labwc) and KWin, each in a
-    // throwaway container (tools/container/run.sh skips without docker or
-    // podman)
-    const run_ctr = b.addSystemCommand(&.{"tools/container/run.sh"});
+    b.step("e2e", "Run the end-to-end suite (private headless GNOME session)").dependOn(&run_e2e.step);
+
+    const run_ctr = addScript(b, "tools/container/run.sh");
     run_ctr.addArg("--bins");
     run_ctr.addArtifactArg(exe);
     run_ctr.addArtifactArg(wldrive);
     run_ctr.addArtifactArg(droptarget);
     run_ctr.addPassthruArgs();
-    run_ctr.has_side_effects = true;
-    const ctr_step = b.step("e2e-container", "Run the end-to-end suite on sway, labwc and KWin in containers");
-    ctr_step.dependOn(&run_ctr.step);
-    const drive_step = b.step("e2e-driver", "Install the e2e input driver (zig-out/bin/shotlet-drive)");
-    drive_step.dependOn(&b.addInstallArtifact(drive, .{}).step);
-    drive_step.dependOn(&b.addInstallArtifact(droptarget, .{}).step);
-    drive_step.dependOn(&b.addInstallArtifact(wldrive, .{}).step);
+    b.step("e2e-container", "Run the end-to-end suite on sway, labwc and KWin in containers").dependOn(&run_ctr.step);
+
+    const helpers = b.step("e2e-driver", "Install the e2e helpers (zig-out/bin/shotlet-drive, shotlet-wldrive, shotlet-droptarget)");
+    for ([_]*std.Build.Step.Compile{ drive, droptarget, wldrive }) |c| helpers.dependOn(&b.addInstallArtifact(c, .{}).step);
+}
+
+/// An e2e helper executable importing "shotlet" (the testkit) and
+/// "driver_common" (tools/drivers/common), built and unit-tested by
+/// `test`.
+fn addDriver(b: *std.Build, name: []const u8, path: []const u8, kit: *std.Build.Module, common: *std.Build.Module, test_step: *std.Build.Step) *std.Build.Step.Compile {
+    const c = b.addExecutable(.{
+        .name = name,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(path),
+            .target = kit.resolved_target,
+            .optimize = kit.optimize,
+            .link_libc = true,
+            .imports = &.{
+                .{ .name = "shotlet", .module = kit },
+                .{ .name = "driver_common", .module = common },
+            },
+        }),
+    });
+    test_step.dependOn(&c.step);
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = b.fmt("{s}-test", .{name}), .root_module = c.root_module })).step);
+    return c;
+}
+
+/// A repository script run as a build step, from the repository root
+/// (it may change things outside the cache, so it always runs).
+fn addScript(b: *std.Build, path: []const u8) *std.Build.Step.Run {
+    const run = b.addSystemCommand(&.{path});
+    run.setName(std.fs.path.basename(path));
+    run.setCwd(b.path("."));
+    run.has_side_effects = true;
+    return run;
 }
 
 /// The "version" module (tools/version.zig's `string`): `-Dversion` for a
@@ -170,8 +170,7 @@ fn testkit(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builti
 /// `zig build check-portable`: the whole program and its tests, built
 /// against the stub backend for Windows and macOS (semantic analysis
 /// only, nothing is emitted), proving everything outside
-/// src/platform/linux is free of Linux. `check-layers` (with `test`)
-/// fails when a file outside the backend imports it.
+/// src/platform/linux is free of Linux.
 fn addPortableCheck(b: *std.Build, version_mod: *std.Build.Module, test_step: *std.Build.Step) void {
     const step = b.step("check-portable", "Compile the portable core for Windows and macOS against the stub backend");
     const targets = [_]std.Target.Query{
@@ -181,15 +180,7 @@ fn addPortableCheck(b: *std.Build, version_mod: *std.Build.Module, test_step: *s
     for (targets) |q| {
         const target = b.resolveTargetQuery(q);
         inline for (.{ "exe", "test" }) |kind| {
-            const m = b.createModule(.{
-                .root_source_file = b.path("src/main.zig"),
-                .target = target,
-                .optimize = .Debug,
-                .link_libc = true,
-            });
-            addGnomeExtension(b, m);
-            m.addImport("version", version_mod);
-            m.addImport("platform_options", platformOptions(b, true));
+            const m = appModule(b, target, .Debug, platformOptions(b, true), version_mod);
             const c = if (comptime std.mem.eql(u8, kind, "exe"))
                 b.addExecutable(.{ .name = "shotlet-portable", .root_module = m })
             else
@@ -198,13 +189,6 @@ fn addPortableCheck(b: *std.Build, version_mod: *std.Build.Module, test_step: *s
             step.dependOn(&c.step);
         }
     }
-
-    const layers = b.addSystemCommand(&.{ "sh", "tools/check-layers.sh" });
-    layers.setName("check-layers.sh");
-    layers.setCwd(b.path("."));
-    layers.has_side_effects = true;
-    b.step("check-layers", "Fail when a file outside src/platform/linux imports it or names Wayland, D-Bus, keysyms, evdev or GTK accelerators").dependOn(&layers.step);
-    test_step.dependOn(&layers.step);
     test_step.dependOn(step);
 }
 
@@ -236,21 +220,31 @@ fn addGnomeExtension(b: *std.Build, m: *std.Build.Module) void {
     m.addAnonymousImport("gnome_ext_schema_compiled", .{ .root_source_file = b.path(dir ++ "schemas/gschemas.compiled") });
 }
 
-/// `check-size` fails when a source file outgrows the line limit (files
-/// still over it are allowlisted in tools/size-allowlist.txt and may only
-/// shrink); `test` runs it too. `long-fns` lists overlong functions.
-fn addSizeChecks(b: *std.Build, test_step: *std.Build.Step) void {
-    const check = b.addSystemCommand(&.{ "sh", "tools/check-size.sh" });
-    check.setName("check-size.sh");
-    check.setCwd(b.path("."));
-    check.has_side_effects = true;
-    b.step("check-size", "Fail when a source file grows past 600 lines").dependOn(&check.step);
-    test_step.dependOn(&check.step);
+/// The source guards, all run by `test` but `long-fns`: `check-size`
+/// fails when a source file outgrows the line limit (files still over it
+/// are allowlisted in tools/size-allowlist.txt and may only shrink);
+/// `check-layers` when a file outside the backend reaches into it;
+/// `long-fns` lists overlong functions. The limits and the files checked
+/// are tools/sources.sh's.
+fn addGuards(b: *std.Build, test_step: *std.Build.Step) void {
+    const size = addScript(b, "tools/check-size.sh");
+    b.step("check-size", b.fmt("Fail when a source file grows past {d} lines", .{sourcesLimit("size_limit")})).dependOn(&size.step);
+    test_step.dependOn(&size.step);
 
-    const fns = b.addSystemCommand(&.{ "sh", "tools/long-fns.sh" });
-    fns.setName("long-fns.sh");
-    fns.setCwd(b.path("."));
+    const layers = addScript(b, "tools/check-layers.sh");
+    b.step("check-layers", "Fail when a file outside src/platform/linux imports it or names Wayland, D-Bus, keysyms, evdev or GTK accelerators").dependOn(&layers.step);
+    test_step.dependOn(&layers.step);
+
+    const fns = addScript(b, "tools/long-fns.sh");
     fns.addPassthruArgs();
-    fns.has_side_effects = true;
-    b.step("long-fns", "List functions longer than 80 lines (a report, never fails)").dependOn(&fns.step);
+    b.step("long-fns", b.fmt("List functions longer than {d} lines (a report, never fails; -- N for another limit)", .{sourcesLimit("fn_limit")})).dependOn(&fns.step);
+}
+
+/// A limit set in tools/sources.sh (`NAME=N`), the one place for them.
+fn sourcesLimit(comptime name: []const u8) u32 {
+    var lines = std.mem.splitScalar(u8, @embedFile("tools/sources.sh"), '\n');
+    while (lines.next()) |line| {
+        if (std.mem.startsWith(u8, line, name ++ "=")) return std.fmt.parseInt(u32, line[name.len + 1 ..], 10) catch break;
+    }
+    @panic("tools/sources.sh: no " ++ name ++ "=N");
 }

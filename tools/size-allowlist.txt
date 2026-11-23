@@ -1,2 +1,2 @@
-# Files over the 600-line limit, with the size they may not exceed.
+# Files over the line limit (size_limit in tools/sources.sh), with the size they may not exceed.
 # Shrink them and lower or remove their entry; never raise one.

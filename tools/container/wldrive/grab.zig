@@ -11,14 +11,9 @@ const Driver = @import("Driver.zig");
 const Output = proto.Output;
 const sc_mgr = proto.sc_mgr;
 const sc_frame = proto.sc_frame;
-const eql = @import("util.zig").eql;
-
-/// 0xAARRGGBB pixels, owned by the caller.
-pub const Frame = struct {
-    pixels: []u32,
-    width: u32,
-    height: u32,
-};
+const common = @import("driver_common");
+const Frame = common.images.Frame;
+const eql = common.loop.eql;
 
 /// One frame of an output with zwlr_screencopy_v1 (v3), into wl_shm.
 pub fn screencopy(d: *Driver, o: *const Output) !Frame {
@@ -93,7 +88,7 @@ const ShmCopy = struct {
                 px[y * f[1] + x] = 0xFF000000 | if (swap) (p & 0xFF00) | ((p >> 16) & 0xFF) | ((p & 0xFF) << 16) else p;
             }
         }
-        return .{ .pixels = px, .width = f[1], .height = f[2] };
+        return .{ .pixels = px, .width = f[1], .height = f[2], .alloc = gpa };
     }
 };
 
@@ -128,7 +123,7 @@ pub fn kwin(d: *Driver, o: *const Output) !Frame {
     for (0..img.h) |y| for (0..img.w) |x| {
         px[y * img.w + x] = std.mem.readInt(u32, raw[y * img.stride + x * 4 ..][0..4], .little) | 0xFF000000;
     };
-    return .{ .pixels = px, .width = img.w, .height = img.h };
+    return .{ .pixels = px, .width = img.w, .height = img.h, .alloc = d.gpa };
 }
 
 /// Ask KWin for the screen `name` at its native resolution, into the pipe

@@ -6,6 +6,7 @@ pub const vp_mgr = struct {
     pub const create_virtual_pointer = 0;
 };
 pub const vp = struct {
+    pub const motion = 0;
     pub const motion_absolute = 1;
     pub const button = 2;
     pub const axis = 3;
@@ -23,6 +24,7 @@ pub const vk = struct {
 };
 pub const fake = struct {
     pub const authenticate = 0;
+    pub const pointer_motion = 1;
     pub const button = 2;
     pub const axis = 3;
     pub const pointer_motion_absolute = 9; // since 3

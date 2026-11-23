@@ -1,25 +1,24 @@
 //! shotlet-droptarget: a maximized window that takes drops, for the e2e
-//! tests (tools/e2e.sh). Accepts the MIME types given on the command line,
-//! best first (default image/png, then text/uri-list), and prints one line
-//! per drop on stdout: `drop MIME BYTES HEAD`, HEAD being the first 4 bytes
+//! tests (tools/e2e.sh, tools/container/run.sh). Accepts the MIME types
+//! given on the command line, best first (default image/png, then
+//! text/uri-list), and prints one line per drop on stdout: `drop MIME BYTES HEAD`, HEAD being the first 4 bytes
 //! in hex for image/png, else the text (first line). Typed keys print
 //! `text CHARS`, clicks `click X Y`.
-//! Refuses to run outside the private session of tools/e2e/session.sh.
+//! Refuses to run outside the e2e sandbox (GNOME's private session or a
+//! container; tools/drivers/common/sandbox.zig).
 
 const std = @import("std");
 const kit = @import("shotlet");
 const window = kit.window;
 const sys = kit.sys;
+const sandbox = @import("driver_common").sandbox;
 
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const gpa = std.heap.smp_allocator;
     const args = try init.minimal.args.toSlice(arena);
     const vars = init.environ_map;
-    if (vars.get("HL_INNER") == null) {
-        std.debug.print("shotlet-droptarget: run me inside tools/e2e/session.sh\n", .{});
-        std.process.exit(2);
-    }
+    sandbox.require(vars, "shotlet-droptarget", &.{ .gnome, .container });
     var mimes: std.ArrayList([]const u8) = .empty;
     for (args[1..]) |a| try mimes.append(arena, a);
     if (mimes.items.len == 0) try mimes.appendSlice(arena, &.{ "image/png", "text/uri-list" });

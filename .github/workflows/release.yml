@@ -21,7 +21,7 @@ jobs:
           version: 0.17.0
 
       - name: Run tests
-        run: zig build test
+        run: zig build test --summary all
 
       # both architectures in one job, so a single SHA256SUMS covers every
       # artifact of the release
@@ -34,8 +34,7 @@ jobs:
             rm -rf zig-out
             zig build -Doptimize=safe -Dtarget="$target" -Dversion="$GITHUB_REF_NAME"
             name="shotlet-${GITHUB_REF_NAME}-linux-${arch}"
-            mkdir -p "dist/$name"
-            cp -r zig-out/bin/shotlet io.github.midnattsol.Shotlet.desktop assets install.sh uninstall.sh gnome-extension README.md LICENSE "dist/$name/"
+            tools/package.sh "dist/$name"
             tar -C dist -czf "$name.tar.gz" "$name"
           done
           sha256sum shotlet-*.tar.gz > SHA256SUMS

@@ -1,16 +1,13 @@
 #!/bin/sh
-# Fails when a source file grows past the line limit. Files already over
-# it are listed in tools/size-allowlist.txt with their size and may only
-# shrink. Run from the repository root (zig build check-size does).
+# Fails when a source file (tools/sources.sh) grows past the line limit
+# ($size_limit there). Files already over it are listed in
+# tools/size-allowlist.txt with their size and may only shrink. Run from
+# the repository root (zig build check-size does).
 set -eu
 
-limit=600
+. tools/sources.sh
+limit=$size_limit
 allowlist=tools/size-allowlist.txt
-
-sources() {
-    find src tools -name '*.zig' -o -name '*.sh' -path 'tools/*'
-    find gnome-extension -name '*.js'
-}
 
 # allowed <file>: the allowlisted size, or nothing
 allowed() {
@@ -18,7 +15,7 @@ allowed() {
 }
 
 fail=0
-for f in $(sources | sort); do
+for f in $(sources); do
     n=$(wc -l < "$f")
     max=$(allowed "$f")
     if [ -n "$max" ]; then
