@@ -6,7 +6,6 @@
 const std = @import("std");
 const window = @import("../../platform/api.zig").window;
 const config = @import("../../app/config.zig");
-const theme_mod = @import("../theme.zig");
 const icons = @import("../icons.zig");
 const scale = @import("../scale.zig");
 const ff = scale.ff;
@@ -101,7 +100,7 @@ fn drawViewSwitcher(ui: *Ui, st: *const State, width: i32, hh: i32) !void {
     var widths: [tabs.len]i32 = undefined;
     var total: i32 = -gap;
     for (tabs, 0..) |t, i| {
-        widths[i] = ui.sc(14) + ui.sc(16) + ui.sc(8) + ui.width(14, .semibold, t[1]) + ui.sc(14);
+        widths[i] = ui.sc(14) + barkit.faceWidth(ui.f, .tab, tabFace(t, false)) + ui.sc(14);
         total += widths[i] + gap;
     }
     var x = @divTrunc(width - total, 2);
@@ -112,27 +111,21 @@ fn drawViewSwitcher(ui: *Ui, st: *const State, width: i32, hh: i32) !void {
     }
 }
 
+fn tabFace(t: Tab, sel: bool) barkit.Face {
+    return .{ .label = t[1], .mark = .{ .glyph = .{ .icon = t[2] } }, .inset = 14, .on = sel };
+}
+
 fn drawTab(ui: *Ui, t: Tab, sel: bool, x: i32, ty: i32, tw: i32, th_h: i32) !void {
-    const th = ui.th;
-    const hov = ui.hovered(x, ty, tw, th_h);
-    if (sel) {
-        ui.c.fillRoundRectAA(x, ty, tw, th_h, 8 * ui.f, th.view_sel);
-    } else if (hov) ui.c.fillRoundRectAA(x, ty, tw, th_h, 8 * ui.f, theme_mod.fade(th.view_sel, 0.6));
-    const is = ui.sc(16);
-    icons.drawStroke(&ui.c, t[2], x + ui.sc(14), ty + @divTrunc(th_h - is, 2), is, 2, th.text);
-    ui.label(x + ui.sc(14) + is + ui.sc(8), ty, th_h, 14, th.text, .semibold, t[1]);
-    try ui.add(.{ .x = x, .y = ty, .w = tw, .h = th_h, .hit = .{ .view = t[0] }, .radius = 8 });
+    const hov: f64 = if (ui.hovered(x, ty, tw, th_h)) 1 else 0;
+    barkit.button(&ui.c, .{ .x = x, .y = ty, .w = tw, .h = th_h }, ui.f, ui.th, .tab, hov, tabFace(t, sel));
+    try ui.add(.{ .x = x, .y = ty, .w = tw, .h = th_h, .hit = .{ .view = t[0] }, .radius = barkit.window_radius });
 }
 
 fn drawCloseButton(ui: *Ui, width: i32, hh: i32) !void {
-    const th = ui.th;
     const bs = ui.sc(26);
     const bx = width - ui.sc(12) - bs;
     const by = @divTrunc(hh - bs, 2);
-    const hov = ui.hovered(bx, by, bs, bs);
-    const r = ff(bs) / 2.0;
-    ui.c.fillCircleAA(ff(bx) + r, ff(by) + r, r, w.chipFill(th, hov));
-    const is = ui.sc(14);
-    icons.drawStroke(&ui.c, .close, bx + @divTrunc(bs - is, 2), by + @divTrunc(bs - is, 2), is, 2.5, th.text);
-    try ui.add(.{ .x = bx, .y = by, .w = bs, .h = bs, .hit = .win_close, .radius = r });
+    const hov: f64 = if (ui.hovered(bx, by, bs, bs)) 1 else 0;
+    barkit.button(&ui.c, .{ .x = bx, .y = by, .w = bs, .h = bs }, ui.f, ui.th, .list, hov, .{ .mark = .{ .glyph = .{ .icon = .close }, .size = 14, .stroke = 2.5 }, .round = true });
+    try ui.add(.{ .x = bx, .y = by, .w = bs, .h = bs, .hit = .win_close, .radius = ff(bs) / 2.0 });
 }
