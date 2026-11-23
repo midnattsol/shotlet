@@ -21,6 +21,7 @@ const hit = @import("hit.zig");
 const discard = @import("discard.zig");
 const capmode = @import("capmode.zig");
 const loupe_input = @import("loupe_input.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 const Key = window.Key;
@@ -145,7 +146,7 @@ fn runBind(ed: *Editor, a: config.Action) !void {
 /// Keys with no modifier meaning of their own.
 fn plainKey(ed: *Editor, k: Key) !void {
     switch (k.code) {
-        .escape => if (!try history.cancelOne(ed)) discard.close(ed),
+        .escape => try escape(ed),
         .tab => ui.moveFocus(ed, if (k.shift) -1 else 1),
         .enter, .kp_enter, .space => try activate(ed, k),
         .delete, .backspace => try selection.deleteSelected(ed),
@@ -161,8 +162,24 @@ fn plainKey(ed: *Editor, k: Key) !void {
     }
 }
 
+/// Esc undoes the innermost thing in progress (a menu, a tool's mode,
+/// the text being typed, a shape drawn or moved, a selected shape...);
+/// with only the area left, or the area being dragged, it closes (as
+/// macOS's and CleanShot X's pickers: one Esc leaves, it does not first
+/// clear the area).
+fn escape(ed: *Editor) !void {
+    const dragging = ed.drag == .area;
+    if (dragging) area.cancel(ed);
+    // a tool's mode (crop) is left first, even mid-drag
+    if (!dragging or ed.tools.mode != .none) {
+        if (try history.cancelOne(ed)) return;
+    }
+    discard.close(ed);
+}
+
 /// Enter or Space: press the focused button; without focus, Enter edits
-/// the selected text, else copies.
+/// the selected text, else copies the area (with none, what a click at
+/// the pointer takes: editor/area.zig).
 fn activate(ed: *Editor, k: Key) !void {
     if (ed.focus) |f| {
         if (f < ed.buttons.items.len) try commands.onButton(ed, ed.buttons.items[f].kind);
@@ -172,5 +189,6 @@ fn activate(ed: *Editor, k: Key) !void {
     if (ed.selected) |i| {
         if (ed.doc.shapes.items[i].tool == .text) return text_edit.startText(ed, i, false, .{ .x = std.math.maxInt(i32) / 2, .y = std.math.maxInt(i32) / 2 });
     }
+    area.confirm(ed);
     try exporter.copyToClipboard(ed);
 }

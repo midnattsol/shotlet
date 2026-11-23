@@ -9,6 +9,7 @@ const shapes = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const crop = @import("crop.zig");
 const tools = @import("mod.zig");
+const area = @import("../editor/area.zig");
 
 const Editor = editor_mod.Editor;
 const Canvas = render.Canvas;
@@ -36,25 +37,11 @@ pub fn setAspect(ed: *Editor, a: tools.Aspect) !void {
     ed.selDirty();
 }
 
-/// A press while cropping: move or resize the frame, or draw a new one.
+/// A press while cropping: move or resize the frame, or draw a new one
+/// (the editor's area selection, editor/area.zig).
 pub fn onPress(ed: *Editor) bool {
     if (ed.tools.mode != .crop) return false;
-    const m = ed.mouse;
-    const ip = clampImg(ed, ed.imgAt(m));
-    if (ed.selBuf()) |n| {
-        if (shapes.handleAt(n, m, ed.handleRadius())) |h| {
-            ed.drag = .{ .resizing_sel = .{ .handle = h, .orig = ed.doc.sel.?.normalized() } };
-            return true;
-        }
-        if (n.contains(m.x, m.y)) {
-            ed.drag = .{ .moving_sel = .{ .orig = ed.doc.sel.?.normalized(), .start = ip } };
-            return true;
-        }
-    }
-    ed.selDirty();
-    ed.doc.sel = .{ .x = ip.x, .y = ip.y, .w = 0, .h = 0 };
-    ed.drag = .{ .selecting = ip };
-    ed.drag_anchor = ip;
+    area.press(ed, ed.mouse, ed.imgAt(ed.mouse));
     return true;
 }
 
@@ -67,11 +54,11 @@ fn clampImg(ed: *const Editor, p: Point) Point {
 
 /// The frame follows the pointer at the chosen aspect ratio.
 pub fn constrain(ed: *Editor) void {
-    if (ed.tools.mode != .crop) return;
+    if (ed.tools.mode != .crop or ed.drag != .area) return;
     const k = crop.ratio(ed.tools.aspect) orelse return;
-    const r = switch (ed.drag) {
-        .selecting => crop.fromCorner(ed.drag_anchor, clampImg(ed, ed.imgAt(ed.mouse)), k),
-        .resizing_sel => |rs| crop.constrainResize(rs.orig, rs.handle, ed.doc.sel.?, k),
+    const r = switch (ed.area.drag) {
+        .drawing => |d| crop.fromCorner(d.anchor, clampImg(ed, ed.imgAt(ed.mouse)), k),
+        .resizing => |rs| crop.constrainResize(rs.orig, rs.handle, ed.doc.sel.?, k),
         else => return,
     };
     ed.selDirty();

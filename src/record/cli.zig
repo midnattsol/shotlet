@@ -124,7 +124,7 @@ fn pickOn(gpa: std.mem.Allocator, env: Env, a: Args, set0: Settings, cfg: *confi
     var set = set0;
     text.init(gpa);
     log.info("picker up", .{});
-    const res = picker.pick(gpa, env, cap, &set, overlays, theme.load(gpa, env, 300));
+    const res = picker.pick(gpa, env, cap.frozen(), &set, overlays, theme.load(gpa, env, 300));
     text.deinit();
     const area = switch (try res) {
         .area => |r| r,

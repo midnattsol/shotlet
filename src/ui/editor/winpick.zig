@@ -1,16 +1,16 @@
 //! Clicking a window while selecting an area, as on macOS: with the
 //! windows' frames from the capture (api.capture.windows), the window under
 //! the pointer is lit (bright, the rest dimmed, an accent outline); a
-//! click without a drag selects exactly it, a drag still draws a free
-//! area. With no frames (a desktop that does not say where its windows
+//! click without a drag selects exactly it (ui/areasel.zig, editor/
+//! area.zig), a drag still draws a free area. With no frames (a desktop that does not say where its windows
 //! are) none of this shows.
 
 const std = @import("std");
-const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const shapes_mod = @import("../shapes.zig");
 const ui = @import("../editor_ui.zig");
 const render = @import("../../gfx/render.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 const Rect = shapes_mod.Rect;
@@ -45,39 +45,27 @@ pub fn onPress(ed: *Editor) void {
     ed.capmode.press = ed.capmode.hover;
 }
 
-/// The selection being dragged: past a click's size the window under
-/// the press is let go (dimmed again).
+/// The area being drawn out: past a click's size the window under the
+/// press is let go (dimmed again).
 pub fn onDrag(ed: *Editor) void {
     const i = ed.capmode.press orelse return;
-    if (tiny(ed)) return;
+    if (ed.area.clickPending()) return;
     ed.capmode.press = null;
     ed.capmode.hover = null;
     dirty(ed, i);
 }
 
-/// The press ended as a click: select the window under it. True when
-/// it did.
-pub fn clickSelect(ed: *Editor) bool {
-    const i = ed.capmode.press orelse return false;
+/// The press ended (a click takes the window, ui/areasel.zig): nothing
+/// is lit any more.
+pub fn released(ed: *Editor) void {
+    if (ed.capmode.press) |i| dirty(ed, i);
     ed.capmode.press = null;
     ed.capmode.hover = null;
-    if (i >= ed.capmode.windows.len) return false;
-    const r = Rect.intersect(ed.capmode.windows[i], ed.doc.imageRect()) orelse return false;
-    ed.doc.sel = r;
-    log.info("window clicked: {d}x{d} at {d},{d}", .{ r.w, r.h, r.x, r.y });
-    return true;
 }
 
 /// A press on a window that has not moved enough to be a drag.
 pub fn mayBeClick(ed: *const Editor) bool {
-    return ed.capmode.press != null and ed.drag == .selecting and tiny(ed);
-}
-
-/// The selection is still too small to be one (a click).
-pub fn tiny(ed: *const Editor) bool {
-    const s = (ed.doc.sel orelse return true).normalized();
-    const min = ed.pn().view.lenToImg(4.0);
-    return @as(f64, @floatFromInt(s.w)) < min or @as(f64, @floatFromInt(s.h)) < min;
+    return ed.capmode.press != null and area.drawing(ed) and ed.area.clickPending();
 }
 
 /// The lit window in this pane's buffer pixels, if one is.

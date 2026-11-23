@@ -5,7 +5,9 @@
 #          window picker (ScreenShot2.CaptureInteractive, authorized by
 #          the installed desktop entry), and on wlroots an area selection
 #          with a note that windows are not offered. Then the editor's
-#          mode strip, and a click on a window selecting it on KWin. Last,
+#          mode strip, and a click on a window selecting it on KWin (on
+#          wlroots, the monitor). The area's gestures (area_steps) in the
+#          editor, the recording picker and the scrolling capture's. Last,
 #          `shotlet scroll`: the region picker (direct capture), and with
 #          SHOTLET_NO_DIRECT=1 the notice that it cannot run here, exit 1.
 
@@ -15,6 +17,7 @@ scenario_modes() {
     modes_fullscreen
     modes_window
     modes_area
+    modes_gestures
     modes_scroll
 }
 
@@ -64,10 +67,45 @@ modes_area() {
         wsize=$(grep -o "window clicked: [0-9]*x[0-9]*" "$SHOT_LOG" | tail -1 | grep -o "[0-9]*x[0-9]*")
         check "  ... and Enter copies exactly it (${wsize:-?})" clip_is winclick "$wsize" 5
     else
-        sleep 0.5 # (nothing to wait for: give a wrong selection the time to show)
-        check "  ... no windows to click on $COMP: a click selects nothing" no_log "window clicked: "
+        check "  ... no windows to click on $COMP: a click takes the monitor" wait_log 5 "monitor clicked: ${MW}x${MH} at 0,0"
+        check "  ... not a window" no_log "window clicked: "
         keys esc
     fi
+    stop_shotlet
+}
+
+# area_steps: one area through every gesture (ui/areasel.zig, the same in
+# each picker): drawn out, a corner dragged, moved from inside, nudged by
+# the arrows (Shift: 10 px, Alt: the bottom-right corner); Enter takes
+# exactly 501,310 601x400
+area_steps() {
+    slow_drag 0 400 250 650 425 900 600
+    slow_drag 0 900 600 1000 650
+    slow_drag 0 700 450 800 500
+    keys right shift+down alt+right
+    sleep 0.3
+    keys enter
+}
+
+# the gestures in the editor, the recording picker (the area it hands on,
+# not the recording) and the scrolling capture's picker
+modes_gestures() {
+    run_shotlet gestures area
+    check "the editor's area" wait_editor 15
+    area_steps
+    check "  ... dragged, resized, moved, nudged: Enter copies exactly 601x400" clip_is gestures 601x400 5
+    stop_shotlet
+    run_shotlet rec-pick record --gif --seconds 1 --no-countdown --no-control
+    check "the recording picker" wait_log 15 "picker up"
+    sleep 1 # (the picker takes the keyboard a moment after it logs)
+    area_steps
+    check "  ... the same gestures: Enter records 501,310 601x400" wait_log 5 "picked 501,310 601x400"
+    stop_shotlet
+    run_shotlet scroll-pick scroll
+    check "the scrolling capture's picker" wait_log 15 "scrolling capture: pick a region"
+    sleep 1
+    area_steps
+    check "  ... the same gestures: Enter scrolls 601x400 at 501,310" wait_log 5 "region 601x400 at 501,310"
     stop_shotlet
 }
 

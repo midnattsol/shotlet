@@ -34,7 +34,8 @@ Wayland and DBus wire protocols directly.
 - Copies straight to the clipboard (nothing written to disk), saves to
   your Pictures folder, or asks where to save (Save As, through the
   desktop's file chooser). `Enter`/`Ctrl+C` copy and close, `Ctrl+S`
-  save, `Esc` cancels then quits. Saved files are named `shotlet-YYYYMMDD-HHMMSS.png` in local
+  save, `Esc` quits (it first undoes what is in progress: a menu, the
+  text being typed, a shape being drawn). Saved files are named `shotlet-YYYYMMDD-HHMMSS.png` in local
   time and never overwrite an existing file (`-2`, `-3`, ... are added).
 - After Save (or also after Copy, as you choose), a floating thumbnail (as
   in CleanShot X) stays in the bottom-left corner for a few seconds: copy it again, save it, drag
@@ -211,6 +212,20 @@ always while pointing and dragging, or never; an older
 `loupe=selecting` or `loupe=auto` reads as `hold`. The colour picker
 (`I`) uses the same lens.
 
+**Picking an area** works the same in the editor, the recording picker
+and the scrolling capture's picker: drag out an area (`Shift`: a square,
+`Alt`: from its centre, hold `Space` to move it), drag inside it to move
+it, drag a corner, or an edge's middle (it shows as the pointer comes
+near), to resize it; its size in pixels sits above it. A click without
+dragging takes the window under the pointer where windows are known
+(below), else the whole monitor; `Enter` with nothing selected takes
+what a click there would. `Enter` confirms; one `Esc` leaves, selection
+or not, as macOS's and CleanShot X's pickers do. A recording or a
+scrolling capture reads one monitor, so there the area stays on the
+monitor it is mostly on; in the editor it may span monitors. Only the
+bar under the area differs: the editor's toolbar, Record, Start
+scrolling capture.
+
 **Arrow keys** move the selection by a pixel (`Shift`: 10): the whole
 of it, or once you have dragged one of its edges or corners, that edge
 or corner (`Alt`+arrows: the right and bottom edges); with `Ctrl` held
@@ -250,7 +265,8 @@ windows are is taken with the capture, never live:
   (`ScreenShot2.CaptureInteractive`, authorized by the desktop entry like
   the other screenshots). wlroots compositors tell clients nothing about
   windows: there it selects an area instead.
-- **Scrolling capture**: drag over what scrolls, then Start (or Enter).
+- **Scrolling capture**: pick the area that scrolls (as above), then
+  Start scrolling capture on the bar under it (or Enter).
   Shotlet turns the wheel there step by step and stitches the frames
   (sticky headers and footers kept once, repeated rows handled, frames
   verified pixel by pixel) until the page stops moving, you press Stop,
@@ -471,8 +487,9 @@ The choice is remembered. Cancelling the picker just ends the capture.
 
 `shotlet record` (or the tray's "Record screen", or the GNOME
 integration's record key, `<Shift><Super>r` by default) shows the
-desktop frozen and dimmed: drag an area, move or resize it by its
-handles, or click for the whole monitor. The bar under the area picks
+desktop frozen and dimmed: pick an area as in the editor (drag it out,
+move or resize it by its handles, nudge it with the arrows, or click for
+the whole monitor). The bar under the area picks
 MP4 or GIF, the microphone, the system sound, and on GNOME (through the
 integration) whether clicks and keystrokes are drawn into the video;
 Record or `Enter` starts, `Esc` cancels. Those choices are remembered.
@@ -561,14 +578,14 @@ the editor for the full list.
 
 | Key | Action |
 | --- | --- |
-| Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it) |
+| Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it); a click takes the monitor |
 | Click a window | select that window (before a selection; GNOME with the extension, KDE) |
 | `G` `W` `D` `J` `O` `Q` `H` | before a selection: area, window, screen, scrolling, text, record, timer (the mode strip) |
 | hold `Ctrl` | while picking an area or moving an edge: the magnifier |
 | `Alt`, `C`, wheel, `-` `=` | while picking an area: show and copy the pixel's `#RRGGBB`, zoom the magnifier |
 | `Enter` / `Ctrl+C` | copy to the clipboard and close |
 | `Ctrl+S` / `Ctrl+Shift+S` | save / save as |
-| `Esc` / right click | cancel the current action; `Esc` again closes (with unsaved annotations it asks first: `Esc` once more discards them) |
+| `Esc` / right click | cancel the current action (a menu, a tool's mode, text, a shape being drawn or selected); `Esc` with only the selection left, or while it is dragged, closes (with unsaved annotations it asks first: `Esc` once more discards them) |
 | `V` `P` `L` `A` `R` `E` `M` | select, pen, line, arrow, rectangle, ellipse, marker |
 | `X` (again) | blur, then pixelate, then solid redaction |
 | `N` `T` | counter badge, text |
@@ -682,6 +699,8 @@ Each job has one place; use it rather than writing another:
 | Telling the person about a problem: card, stderr, log | `src/app/report.zig` |
 | A command's output and exit status | `src/cli/out.zig` |
 | Colours and metrics of every surface, light and dark | `src/ui/theme.zig` (buttons: `src/ui/barkit.zig`) |
+| Picking an area: drag, move, resize, click, arrows | `src/ui/areasel.zig` (the editor through `src/ui/editor/area.zig`) |
+| A picker over the frozen desktop (surfaces, dim, fade, the area's chrome) | `src/ui/freeze_pick.zig` (the recording and scrolling capture pickers) |
 | The `SHOTLET_*` switches | `src/platform/api/switches.zig` |
 | Unit-test helpers (temporary dirs and `$HOME`, images, fonts) | `src/testutil.zig` |
 

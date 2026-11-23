@@ -16,6 +16,7 @@ const text_edit = @import("text_edit.zig");
 const history = @import("history.zig");
 const render = @import("render.zig");
 const loupe_input = @import("loupe_input.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 
@@ -91,14 +92,14 @@ fn trackModifiers(ed: *Editor, k: window.Key) !void {
         .shift_left, .shift_right => ed.mod_shift = k.pressed,
         .alt_left, .alt_right => ed.mod_alt = k.pressed,
         .space => {
-            const dragging = ed.drag == .selecting or ed.drag == .drawing;
+            const dragging = area.drawing(ed) or ed.drag == .drawing;
             if (k.pressed and dragging) ed.space.held = true;
             if (!k.pressed) ed.space.held = false;
         },
         else => return,
     }
     // re-apply the constraint at the current pointer position
-    if (ed.drag == .selecting or ed.drag == .drawing) {
+    if (area.drawing(ed) or ed.drag == .drawing) {
         ed.space.last = null;
         try drag.onMotion(ed);
     }

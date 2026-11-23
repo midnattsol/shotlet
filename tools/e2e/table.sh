@@ -52,6 +52,11 @@ modes-scroll-manual | 1600x900           | ext                    | scroll_auto=
 modes-scroll-stops  | 1600x900           | ext                    | why a scrolling capture pauses or stops: didn't move, no match, height limit, Esc
 modes-scroll-dark   | 1600x900           | ext                    | the same in the dark appearance
 scroll-unavailable  | 1600x900           | -                      | shotlet scroll without the extension says why and exits 1; works after a new login
+area-editor         | 1600x900           | ext                    | the editor's area: drag, resize, move, arrows, size, Enter, Shift, click, Esc
+area-record         | 1600x900           | ext                    | the same in the recording picker
+area-scroll         | 1600x900           | ext                    | the same in the scrolling capture's picker
+area-shots          | 1600x900           | ext manual             | each area picker idle, dragging, selected, a handle hovered (pictures)
+area-shots-dark     | 1600x900           | ext manual             | the same in the dark appearance
 modes-keys          | 1600x900           | ext                    | each mode's key set from the CLI and from Settings; keys GNOME holds stay unbound
 tools               | 1600x900           | -                      | the editor's extra tools on a test picture: picker, ruler, spotlight, crop, magnifier; pin refused
 rec-shell           | 1600x900           | ext                    | an MP4 through the extension: no dialog, size, rate, clicks, sound, the thumbnail, one at a time

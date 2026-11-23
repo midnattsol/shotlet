@@ -22,7 +22,6 @@ const press = @import("../press.zig");
 const scale = @import("../scale.zig");
 const theme = @import("../theme.zig");
 const text = @import("../../gfx/text.zig");
-const region = @import("../../record/region.zig");
 const geom = @import("../../geom.zig");
 const engine_mod = @import("../../record/engine.zig");
 const ctlsock = @import("../../record/ctlsock.zig");
@@ -180,7 +179,7 @@ fn monitorOf(win: *window.Window, area: geom.Rect) geom.Rect {
         rects[n] = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
         n += 1;
     }
-    const i = region.bestMonitor(area, rects[0..n]) orelse return area;
+    const i = geom.bestMonitor(area, rects[0..n]) orelse return area;
     return rects[i];
 }
 

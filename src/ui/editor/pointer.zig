@@ -17,7 +17,7 @@ const commands = @import("commands.zig");
 const selection = @import("selection.zig");
 const text_edit = @import("text_edit.zig");
 const drawing = @import("drawing.zig");
-const winpick = @import("winpick.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 const Point = shapes_mod.Point;
@@ -130,34 +130,14 @@ fn grabShapeHandle(ed: *Editor, i: usize, h: u3) !void {
     ed.drag = .{ .resizing_shape = .{ .handle = h, .orig = orig } };
 }
 
-/// The select tool (or no selection yet): pick a shape, grab the
-/// selection's handles or body, or start a new selection.
+/// The select tool (or no selection yet): pick a shape, else the area
+/// selection takes the press (grab its handles or body, or draw anew).
 fn pressSelect(ed: *Editor, m: Point, ip: Point, double: bool) !void {
     if (ed.doc.sel != null) {
         if (ed.doc.hit(ip, hit.hitTol(ed))) |i| return grabShape(ed, i, ip, double);
-        selection.deselectShape(ed);
-        const n = ed.selBuf().?;
-        if (shapes_mod.handleAt(n, m, ed.handleRadius())) |h| {
-            ed.drag = .{ .resizing_sel = .{ .handle = h, .orig = ed.doc.sel.?.normalized() } };
-            ed.sel_edge = h;
-            ui.loupeEdgeDragged(ed);
-            return;
-        }
-        ed.sel_edge = null;
-        if (n.contains(m.x, m.y)) {
-            ed.drag = .{ .moving_sel = .{ .orig = ed.doc.sel.?.normalized(), .start = ip } };
-            return;
-        }
     }
     selection.deselectShape(ed);
-    caches.selDirty(ed);
-    winpick.onPress(ed);
-    const a = hit.clampImg(ed, ip);
-    ed.doc.sel = .{ .x = a.x, .y = a.y, .w = 0, .h = 0 };
-    ed.drag = .{ .selecting = a };
-    ed.drag_anchor = a;
-    ed.space.last = null;
-    caches.selDirty(ed);
+    area.press(ed, m, ip);
 }
 
 /// Select shape `i` and start moving it; a double click on a text edits it.

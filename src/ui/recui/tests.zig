@@ -10,5 +10,4 @@ comptime {
     _ = @import("control_draw.zig");
     _ = @import("picker.zig");
     _ = @import("picker_bar.zig");
-    _ = @import("picker_sel.zig");
 }

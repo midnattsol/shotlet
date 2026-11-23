@@ -10,17 +10,15 @@ const ui = @import("../editor_ui.zig");
 const motion = @import("../motion.zig");
 const tools = @import("../tools/mod.zig");
 const caretAt = @import("../caret.zig").caretAt;
-const hit = @import("hit.zig");
-const caches = @import("caches.zig");
 const props = @import("props.zig");
 const selection = @import("selection.zig");
 const drawing = @import("drawing.zig");
 const winpick = @import("winpick.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 const DragMode = editor.DragMode;
 const Point = shapes_mod.Point;
-const Rect = shapes_mod.Rect;
 
 pub fn onMotion(ed: *Editor) !void {
     const m = ed.mouse;
@@ -28,19 +26,7 @@ pub fn onMotion(ed: *Editor) !void {
     switch (ed.drag) {
         .none => try hover(ed, m),
         .size_slider => try props.setThickness(ed, ui.sliderValue(ed, m)),
-        .selecting => dragSelecting(ed, ip),
-        .moving_sel => |mv| {
-            caches.selDirty(ed);
-            ed.doc.sel = mv.orig;
-            ed.doc.moveSelection(ip.x - mv.start.x, ip.y - mv.start.y);
-            caches.selDirty(ed);
-        },
-        .resizing_sel => |rs| {
-            caches.selDirty(ed);
-            ed.doc.sel = shapes_mod.resizeWithHandle(rs.orig, rs.handle, hit.clampImg(ed, ip));
-            caches.selDirty(ed);
-            tools.afterSelDrag(ed);
-        },
+        .area => area.motion(ed, ip),
         .drawing => try drawing.update(ed, ip),
         .moving_shape => |*mv| dragMovingShape(ed, mv, ip),
         .resizing_shape => |*rs| dragResizingShape(ed, rs, ip),
@@ -78,19 +64,6 @@ fn hover(ed: *Editor, m: Point) !void {
     if (ui.loupeActive(ed)) ed.needs_render = true;
     winpick.hover(ed);
     tools.onHover(ed);
-}
-
-/// A new selection from the anchor to `ip` (Shift: square, Alt: from
-/// the centre, Space: move it), kept on the image.
-fn dragSelecting(ed: *Editor, ip: Point) void {
-    caches.selDirty(ed);
-    const q = hit.clampImg(ed, ip);
-    drawing.spaceMove(ed, q);
-    const cs = shapes_mod.dragCorners(ed.drag_anchor, q, ed.mod_shift, ed.mod_alt);
-    ed.doc.sel = Rect.intersect(Rect.fromCorners(cs[0], cs[1]), ed.doc.imageRect()) orelse Rect.fromCorners(q, q);
-    caches.selDirty(ed);
-    winpick.onDrag(ed);
-    tools.afterSelDrag(ed);
 }
 
 fn dragMovingShape(ed: *Editor, mv: *DragMode.MovingShape, ip: Point) void {
@@ -140,12 +113,9 @@ pub fn onRelease(ed: *Editor) !void {
     const d = ed.drag;
     ed.drag = .none;
     switch (d) {
-        .selecting => endSelecting(ed),
-        .moving_sel, .resizing_sel => {
-            caches.selDirty(ed);
-            if (ed.sel_edge) |h| ed.sel_edge = shapes_mod.normalizedHandle(ed.doc.sel.?, h);
-            ed.doc.sel = Rect.intersect(ed.doc.sel.?.normalized(), ed.doc.imageRect());
-            caches.selDirty(ed);
+        .area => {
+            ed.drag = .area;
+            area.release(ed);
         },
         .drawing => try drawing.commit(ed),
         .moving_shape => |mv| {
@@ -165,26 +135,4 @@ pub fn onRelease(ed: *Editor) !void {
         .picking, .size_slider, .text_select, .none => {},
     }
     ed.needs_render = true;
-}
-
-/// A new selection is done. Too small to be one, it was a click: that
-/// picks the window under it (when the desktop said where windows are),
-/// else the monitor under it when there are several.
-fn endSelecting(ed: *Editor) void {
-    const s = ed.doc.sel.?.normalized();
-    caches.selDirty(ed);
-    if (winpick.tiny(ed)) {
-        ed.doc.sel = null;
-        if (!winpick.clickSelect(ed) and ed.monitors.len > 1) {
-            const ip = ed.imgAt(ed.mouse);
-            for (ed.monitors) |mon| {
-                const r = Rect{ .x = @intCast(mon.x), .y = @intCast(mon.y), .w = @intCast(mon.w), .h = @intCast(mon.h) };
-                if (r.contains(ip.x, ip.y)) ed.doc.sel = r;
-            }
-        }
-    } else {
-        ed.doc.sel = s;
-    }
-    caches.selDirty(ed);
-    tools.onSelected(ed);
 }

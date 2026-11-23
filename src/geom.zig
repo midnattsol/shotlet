@@ -137,6 +137,21 @@ pub fn monitorAt(mons: []const Monitor, p: ?[2]i32) usize {
     return 0;
 }
 
+/// The rect (index into `rects`) that most of `r` lies on; null when it
+/// meets none (a recorded area's monitor, a selection's).
+pub fn bestMonitor(r: Rect, rects: []const Rect) ?usize {
+    var best: ?usize = null;
+    var best_area: i64 = 0;
+    for (rects, 0..) |m, i| {
+        const a = if (r.intersect(m)) |x| x.area() else 0;
+        if (a > best_area) {
+            best_area = a;
+            best = i;
+        }
+    }
+    return best;
+}
+
 /// The bounding box of the monitors' logical rects (1x1 at the origin
 /// when none is known).
 pub fn layoutBounds(mons: []const Monitor) Rect {
@@ -239,6 +254,12 @@ const testing = std.testing;
 test "a physical rect in logical pixels covers it" {
     try testing.expectEqual(Rect{ .x = 150, .y = 25, .w = 2, .h = 21 }, physicalToLogical(.{ .x = 301, .y = 50, .w = 3, .h = 41 }, 2.0));
     try testing.expectEqual(Rect{ .x = 1, .y = 2, .w = 1, .h = 1 }, physicalToLogical(.{ .x = 1, .y = 2, .w = 0, .h = 0 }, 0));
+}
+
+test "a rect picks the monitor holding most of it" {
+    const mons = [_]Rect{ .{ .x = 0, .y = 0, .w = 1600, .h = 900 }, .{ .x = 1600, .y = 0, .w = 1280, .h = 720 } };
+    try std.testing.expectEqual(@as(?usize, 1), bestMonitor(.{ .x = 1500, .y = 10, .w = 400, .h = 100 }, &mons));
+    try std.testing.expectEqual(@as(?usize, null), bestMonitor(.{ .x = 0, .y = 1000, .w = 10, .h = 10 }, &mons));
 }
 
 test "rect normalization" {

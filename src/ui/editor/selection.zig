@@ -1,8 +1,7 @@
 //! The selected shape: selecting one (the toolbar takes on its look),
 //! lifting it out of the layer while it changes, and the edits on it
 //! (delete, duplicate, bring to front, nudge). Arrow keys nudge the
-//! selection rectangle when no shape is selected: the edge last dragged,
-//! else the whole of it.
+//! area when no shape is selected (editor/area.zig).
 
 const std = @import("std");
 const editor = @import("../editor.zig");
@@ -10,8 +9,8 @@ const window = @import("../../platform/api.zig").window;
 const shapes_mod = @import("../shapes.zig");
 const caches = @import("caches.zig");
 const props = @import("props.zig");
-const ui = @import("../editor_ui.zig");
 const history = @import("history.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 const Shape = shapes_mod.Shape;
@@ -86,9 +85,9 @@ pub fn bringSelectedToFront(ed: *Editor) !void {
     try caches.recompose(ed, ed.doc.shapes.items[ed.selected.?].bounds());
 }
 
-/// Arrow keys: nudge the selected shape, else the selection's edge last
-/// dragged, else the whole selection (Alt: its right and bottom edges);
-/// Shift steps 10 pixels. The magnifier looks at the edge that moved.
+/// Arrow keys: nudge the selected shape (Shift: 10 pixels), else the
+/// area (editor/area.zig: its edge last dragged, else all of it; Alt:
+/// its bottom-right corner).
 pub fn arrowKey(ed: *Editor, k: window.Key) !void {
     const step: i32 = if (k.shift) 10 else 1;
     const dx: i32 = switch (k.code) {
@@ -109,12 +108,5 @@ pub fn arrowKey(ed: *Editor, k: window.Key) !void {
         }.f, [2]i32{ dx, dy });
         return;
     }
-    const s = (ed.doc.sel orelse return).normalized();
-    caches.selDirty(ed);
-    const edge: ?u3 = if (k.alt) 4 else ed.sel_edge;
-    if (edge) |h| {
-        ed.doc.sel = shapes_mod.nudgeHandle(s, h, dx, dy, ed.doc.imageRect());
-    } else ed.doc.moveSelection(dx, dy);
-    caches.selDirty(ed);
-    ui.loupeNudged(ed, edge orelse shapes_mod.nearestCorner(s, ed.imgAt(ed.mouse)));
+    area.arrow(ed, k);
 }

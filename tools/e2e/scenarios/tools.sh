@@ -90,18 +90,23 @@ tools_spotlight() {
     check "  ... everything else is dimmed" darker "$VAL" "$PIC_BG"
 }
 
-# --- crop: C, Enter crops to the selection; Esc then Enter copies all of
-# it (the copy before is as large: a pause, not a wait)
+# --- crop: C, Enter crops to the selection, which is then all of it:
+# Enter copies it (the copy before is as large: a pause, not a wait);
+# after an undo a click takes the whole picture again
 tools_crop() {
     edit_on crop
     keys c enter
     sleep 0.3
     shot 0 cropped
-    keys esc enter
+    keys enter
     sleep 1
     check "crop: the picture becomes the selection" clip_is crop 1300x700
     edit_on uncrop
-    keys c enter ctrl+z esc enter
+    keys c enter ctrl+z
+    sleep 0.3
+    click 0 50 50
+    sleep 0.3
+    keys enter
     check "  ... and undo brings the whole picture back" clip_is uncrop 1600x900
 }
 
