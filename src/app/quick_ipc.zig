@@ -1,34 +1,39 @@
 //! Quick access runs once: a later capture hands its entry to the
-//! running thumbnail process over a unix socket in the runtime directory.
+//! running thumbnail process over its socket (app/ipc.zig),
+//! $XDG_RUNTIME_DIR/shotlet-quick-<session>.sock:
+//!
+//!     add ROOT<tab>ID    ->  "ok" once its card shows
 
 const std = @import("std");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
-const sys = @import("../platform/api.zig").sys;
+const ipc = @import("ipc.zig");
 const Env = env_mod.Env;
 
 pub fn socketPath(buf: []u8, env: Env) ![]u8 {
-    return std.fmt.bufPrint(buf, "{s}/shotlet-quick-{s}.sock", .{ env.runtime_dir, env.session.tag() });
+    return ipc.sessionPath(buf, env.runtime_dir, env.session.tag(), "quick", ".sock");
+}
+
+/// Listen for hand-offs; error.AddressInUse when a running stack has
+/// the socket (a stale one is taken over).
+pub fn listen(env: Env) !ipc.Server {
+    var buf: ipc.PathBuf = undefined;
+    return ipc.Server.listen(try socketPath(&buf, env));
 }
 
 /// Hand an entry to a running quick-access process; false when none
 /// answered.
 pub fn handOff(env: Env, root: []const u8, id: []const u8) bool {
-    var pbuf: [512]u8 = undefined;
+    var pbuf: ipc.PathBuf = undefined;
     const path = socketPath(&pbuf, env) catch return false;
-    const fd = sys.socketUnixStream() catch return false;
-    defer sys.close(fd);
-    sys.connectUnix(fd, path) catch return false;
-    var lbuf: [1200]u8 = undefined;
-    const line = std.fmt.bufPrint(&lbuf, "add {s}\t{s}\n", .{ root, id }) catch return false;
-    sys.writeAll(fd, line) catch return false;
+    var lbuf: [std.fs.max_path_bytes + 64]u8 = undefined;
+    const line = std.fmt.bufPrint(&lbuf, "add {s}\t{s}", .{ root, id }) catch return false;
     var ans: [8]u8 = undefined;
-    if (!(sys.waitReadable(fd, sys.monoMs() + 2000) catch false)) return false;
-    const n = sys.read(fd, &ans) catch return false;
-    return n >= 2 and std.mem.eql(u8, ans[0..2], "ok");
+    const a = ipc.request(path, line, &ans, 2000) orelse return false;
+    return std.mem.startsWith(u8, a, "ok");
 }
 
-/// Parse "add ROOT\tID\n".
+/// Parse "add ROOT\tID".
 pub fn parseAdd(line: []const u8) ?struct { root: []const u8, id: []const u8 } {
     const l = std.mem.trimEnd(u8, line, "\r\n");
     if (!std.mem.startsWith(u8, l, "add ")) return null;

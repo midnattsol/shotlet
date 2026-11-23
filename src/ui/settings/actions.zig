@@ -6,7 +6,8 @@ const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../../app/config.zig");
 const shell = @import("../../platform/api.zig").shell;
 const history = @import("../../app/history.zig");
-const keep = @import("../../app/keep.zig");
+const relaunch = @import("../../app/relaunch.zig");
+const report = @import("../../app/report.zig");
 const settings_modes = @import("../settings_modes.zig");
 const settings_rec = @import("../recui/settings_rec.zig");
 const steps = @import("../settings_steps.zig");
@@ -32,7 +33,7 @@ pub fn activate(app: *App, hit: Hit) bool {
             st.recording = if (st.recording == action) null else action;
             st.dirty = true;
         },
-        .open_history => keep.spawnSelf(st.env, &.{"history"}),
+        .open_history => relaunch.history(st.env),
         .clear_history => clearHistory(app),
         .integration_enable => enableIntegration(app),
         .mode => |h| {
@@ -85,8 +86,10 @@ fn applyConfig(app: *App, hit: Hit) void {
 fn forgetMonitors(app: *App) void {
     // only this key changes; the next capture shows the picker
     app.cfg.setScToken("");
-    config.saveScreencastToken(app.alloc, app.env.home, "") catch |err|
+    config.saveScreencastToken(app.alloc, app.env.home, "") catch |err| {
         std.log.warn("could not save config: {t}", .{err});
+        report.failed(app.env, "Couldn\u{2019}t save the settings", err);
+    };
     app.st.dirty = true;
 }
 
@@ -96,10 +99,12 @@ fn chooseFolder(app: *App) void {
     if (app.folder_req != null) return;
     const conn = app.busPtr() orelse {
         std.log.warn("no session bus: cannot show the folder chooser", .{});
+        report.problem(app.env, "Couldn\u{2019}t open the folder chooser", "The desktop session can\u{2019}t be reached");
         return;
     };
     app.folder_req = desktop.chooseFolder(app.alloc, conn, app.cfg.saveDir()) catch |err| blk: {
         std.log.warn("folder chooser: {t}", .{err});
+        report.failed(app.env, "Couldn\u{2019}t open the folder chooser", err);
         break :blk null;
     };
 }

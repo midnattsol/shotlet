@@ -10,6 +10,7 @@ const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
 const keep = @import("../keep.zig");
 const quick_ipc = @import("../quick_ipc.zig");
+const ipc = @import("../ipc.zig");
 const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
 const window = @import("../../platform/api.zig").window;
@@ -62,9 +63,11 @@ pub const Quick = struct {
     win: Window,
     bus: ?desktop.Session = null,
     cards: std.ArrayList(Card) = .empty,
+    /// the hand-off socket (quick_ipc.zig)
+    server: ipc.Server = .{},
+    /// server.fd, which quick.zig polls
+    // TODO(wave 3b): remove once quick.zig polls q.server.fd
     listen_fd: sys.fd_t = -1,
-    sock_path_buf: [512]u8 = undefined,
-    sock_path_len: usize = 0,
     layer: bool = false,
     /// GNOME without the extension: say how to keep it above
     hint: bool = false,
@@ -88,7 +91,6 @@ pub const Quick = struct {
 
     pub const act = actions.act;
     pub const notice = actions.notice;
-    pub const imagePath = actions.imagePath;
     pub const activate = actions.activate;
     pub const startDrag = actions.startDrag;
     pub const checkDrag = actions.checkDrag;
@@ -126,54 +128,37 @@ pub const Quick = struct {
 
     // --- the hand-off socket ---
 
+    /// False when another stack listens (a stale socket is taken over).
     pub fn listen(self: *Quick) bool {
-        const path = quick_ipc.socketPath(&self.sock_path_buf, self.env) catch return false;
-        self.sock_path_len = path.len;
-        self.listen_fd = sys.listenUnix(path) catch |err| switch (err) {
-            error.AddressInUse => blk: {
-                // nobody answered the hand-off: a stale socket file
-                sys.unlink(path) catch {};
-                break :blk sys.listenUnix(path) catch return false;
-            },
-            else => return false,
+        self.server = quick_ipc.listen(self.env) catch |err| {
+            if (err != error.AddressInUse) std.log.warn("quick access: no hand-off socket: {t}", .{err});
+            return false;
         };
+        self.listen_fd = self.server.fd;
         return true;
     }
 
     pub fn stopListening(self: *Quick) void {
-        if (self.listen_fd < 0) return;
-        sys.close(self.listen_fd);
+        self.server.close();
         self.listen_fd = -1;
-        sys.unlink(self.sock_path_buf[0..self.sock_path_len]) catch {};
     }
 
     /// Show the entries newcomers hand over, answering "ok" to each.
     pub fn acceptClients(self: *Quick) void {
-        while (sys.accept(self.listen_fd) catch null) |fd| {
-            defer sys.close(fd);
-            var buf: [1300]u8 = undefined;
-            const a = quick_ipc.parseAdd(readLine(fd, &buf)) orelse continue;
+        var buf: [std.fs.max_path_bytes + 64]u8 = undefined;
+        while (self.server.next(&buf)) |req| {
+            const a = quick_ipc.parseAdd(req.line) orelse {
+                req.close();
+                continue;
+            };
             self.add(a.root, a.id) catch |err| {
                 std.log.warn("quick access: cannot show {s}: {t}", .{ a.id, err });
+                req.close();
                 continue;
             };
             std.log.info("quick access: added {s}", .{a.id});
-            sys.writeAll(fd, "ok\n") catch {};
+            req.reply("ok");
         }
-    }
-
-    /// A client's request line (up to half a second).
-    fn readLine(fd: sys.fd_t, buf: []u8) []const u8 {
-        var n: usize = 0;
-        const deadline = sys.monoMs() + 500;
-        while (n < buf.len) {
-            if (!(sys.waitReadable(fd, deadline) catch false)) break;
-            const k = sys.read(fd, buf[n..]) catch break;
-            if (k == 0) break;
-            n += k;
-            if (std.mem.indexOfScalar(u8, buf[0..n], '\n') != null) break;
-        }
-        return buf[0..n];
     }
 
     // --- the cards ---
@@ -188,7 +173,7 @@ pub const Quick = struct {
         var meta = try history.readMeta(self.gpa, root, id);
         errdefer meta.deinit(self.gpa);
         var pbuf: [1200]u8 = undefined;
-        const thumb_data = try sys.readFileAlloc(self.gpa, try history.entryPath(&pbuf, root, id, "thumb.png"), 16 * 1024 * 1024);
+        const thumb_data = try history.readFile(self.gpa, root, id, .thumb);
         defer self.gpa.free(thumb_data);
         var thumb = try png.decode(self.gpa, thumb_data);
         errdefer thumb.deinit(self.gpa);

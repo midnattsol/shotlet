@@ -12,6 +12,7 @@ const sys = @import("../platform/api.zig").sys;
 const proc = @import("../platform/api.zig").proc;
 const shapes = @import("../ui/shapes.zig");
 const doc_mod = @import("../ui/doc.zig");
+const relaunch = @import("relaunch.zig");
 const Env = env_mod.Env;
 
 /// Thumbnails fit in this box (twice the 240x150 card, for HiDPI).
@@ -76,44 +77,77 @@ pub fn finishEntry(gpa: std.mem.Allocator, cfg: *const config.Config, k: *const 
         history.replaceFile(k.root(), k.id.slice(), "source.png", src) catch |err|
             std.log.warn("could not keep the capture's source: {t}", .{err});
     }
-    if (cfg.history) {
-        _ = history.prune(gpa, k.root(), cfg.history_max, @as(u64, cfg.history_max_mb) * 1024 * 1024) catch 0;
-    }
+    prune(gpa, cfg, k.root());
+}
+
+/// Whether anything is kept at all: the history, or the thumbnail.
+pub fn wanted(cfg: *const config.Config) bool {
+    return cfg.history or cfg.thumbnails();
+}
+
+/// The history's limits, after an entry was added.
+pub fn prune(gpa: std.mem.Allocator, cfg: *const config.Config, root: []const u8) void {
+    if (!cfg.history) return;
+    _ = history.prune(gpa, root, cfg.history_max, @as(u64, cfg.history_max_mb) * 1024 * 1024) catch 0;
+}
+
+/// A new entry: its picture as a PNG and as pixels (for the thumbnail).
+pub const NewEntry = struct {
+    meta: history.Meta,
+    image_png: []const u8,
+    pixels: []const u32,
+    width: u32,
+    height: u32,
+    doc: ?[]const u8 = null,
+    extras: []const history.NewEntry.Extra = &.{},
+};
+
+/// Store a new entry where entries go (rootFor), with its thumbnail;
+/// it appears all at once, extras included.
+pub fn store(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, e: NewEntry) !Kept {
+    var k: Kept = .{ .id = undefined };
+    k.root_len = (try rootFor(cfg, env, &k.root_buf)).len;
+    const thumb = try thumbPng(gpa, e.pixels, e.width, e.height);
+    defer gpa.free(thumb);
+    k.id = try history.create(gpa, k.root(), .{ .meta = e.meta, .image_png = e.image_png, .thumb_png = thumb, .doc = e.doc, .extras = e.extras });
+    return k;
+}
+
+/// The thumbnail of a picture, as a PNG (owned).
+fn thumbPng(gpa: std.mem.Allocator, pixels: []const u32, w: u32, h: u32) ![]u8 {
+    const t = try thumbnail(gpa, pixels, w, h, thumb_w, thumb_h);
+    defer gpa.free(t.pixels);
+    return png.encodeWith(gpa, t.pixels, t.width, t.height, .{ .alpha = .auto });
 }
 
 fn keepInner(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, what: What) !?Kept {
-    if (!cfg.history and !cfg.thumbnails()) return null;
-    var k: Kept = .{ .id = undefined };
-    if (what.replace) |r| {
-        k = r;
-    } else {
-        k.root_len = (try rootFor(cfg, env, &k.root_buf)).len;
-    }
+    if (!wanted(cfg)) return null;
     var img = try png.decode(gpa, what.image_png);
     defer img.deinit(gpa);
-    const thumb_px = try thumbnail(gpa, img.pixels, img.width, img.height, thumb_w, thumb_h);
-    defer gpa.free(thumb_px.pixels);
-    const thumb_png = try png.encodeWith(gpa, thumb_px.pixels, thumb_px.width, thumb_px.height, .{ .alpha = .auto });
-    defer gpa.free(thumb_png);
     const doc_text: ?[]u8 = if (what.source != null and what.doc != null)
         try docRelativeTo(gpa, what.doc.?, sourceCrop(what.doc.?), what.beautify)
     else
         null;
     defer if (doc_text) |d| gpa.free(d);
-
     var meta: history.Meta = .{ .time_ms = sys.realtimeMs(), .width = img.width, .height = img.height, .saved = what.saved, .at = what.at };
-    if (what.replace != null) {
-        const id = k.id.slice();
-        // edited again: it still came from where it was
-        if (meta.at == null) meta.at = previousAt(gpa, k.root(), id);
-        try history.replaceFile(k.root(), id, "image.png", what.image_png);
-        try history.replaceFile(k.root(), id, "thumb.png", thumb_png);
-        if (doc_text) |d| try history.replaceFile(k.root(), id, "doc", d);
-        try history.writeMeta(gpa, k.root(), id, &meta);
-    } else {
-        k.id = try history.create(gpa, k.root(), .{ .meta = meta, .image_png = what.image_png, .thumb_png = thumb_png, .doc = doc_text });
+    if (what.replace) |r| {
+        try replaceEntry(gpa, &r, what.image_png, &img, doc_text, &meta);
+        return r;
     }
-    return k;
+    return try store(gpa, env, cfg, .{ .meta = meta, .image_png = what.image_png, .pixels = img.pixels, .width = img.width, .height = img.height, .doc = doc_text });
+}
+
+/// A capture edited again: its entry's files replaced.
+fn replaceEntry(gpa: std.mem.Allocator, k: *const Kept, image_png: []const u8, img: *const png.Image, doc_text: ?[]const u8, meta: *history.Meta) !void {
+    const id = k.id.slice();
+    // edited again: it still came from where it was
+    if (meta.at == null) meta.at = previousAt(gpa, k.root(), id);
+    const thumb = try thumbPng(gpa, img.pixels, img.width, img.height);
+    defer gpa.free(thumb);
+    try history.replaceFile(k.root(), id, "image.png", image_png);
+    try history.replaceFile(k.root(), id, "thumb.png", thumb);
+    if (doc_text) |d| try history.replaceFile(k.root(), id, "doc", d);
+    try history.writeMeta(gpa, k.root(), id, meta);
 }
 
 fn previousAt(gpa: std.mem.Allocator, root: []const u8, id: []const u8) ?[2]i32 {
@@ -180,37 +214,39 @@ pub fn thumbnail(alloc: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, m
     return .{ .pixels = out, .width = dw, .height = dh };
 }
 
-/// Run `shotlet ARGS...` detached (double fork: never a zombie, and it
-/// outlives us), with our own environment.
+// TODO(wave 3b): remove these forwarders once their callers (outside
+// package D2) use app/relaunch.zig: spawnSelf in app/quick/actions.zig,
+// app/history_ui/panel.zig, ui/recui/trimui.zig; spawnPin in
+// app/quick/actions.zig, app/history_ui/panel.zig, ui/tools/open.zig;
+// spawnQuick in app/modes/flow.zig, app/shot/handoff.zig; spawnKeeping
+// in app/pin/annotate.zig (relaunch.editForPin).
+
+/// Run `shotlet ARGS...` detached; use app/relaunch.zig.
 pub fn spawnSelf(env: Env, args: []const [*:0]const u8) void {
-    spawnKeeping(env, args, null);
+    proc.spawnSelf(env.envp, args, null);
 }
 
-/// spawnSelf, handing the child `fd` (every other descriptor of ours
-/// closes on exec).
+/// spawnSelf, handing the child `fd`; use relaunch.editForPin.
 pub fn spawnKeeping(env: Env, args: []const [*:0]const u8, fd: ?sys.fd_t) void {
     proc.spawnSelf(env.envp, args, fd);
 }
 
-/// Pin the image at `path`, centred on `at` (logical pixels) when known.
+/// relaunch.pin
 pub fn spawnPin(env: Env, path: [:0]const u8, at: ?[2]i32) void {
-    var at_buf: [32]u8 = undefined;
-    const p = at orelse return spawnSelf(env, &.{ "pin", path.ptr });
-    const arg = std.fmt.bufPrintSentinel(&at_buf, "{d},{d}", .{ p[0], p[1] }, 0) catch unreachable;
-    spawnSelf(env, &.{ "pin", path.ptr, "--at", arg.ptr });
+    relaunch.pin(env, path, at);
 }
 
-/// Show the floating thumbnail for a kept capture. With `ready`, the
-/// write end of a pipe: the thumbnail process writes to it once its
-/// first frame is committed (or closes it, giving up).
+/// relaunch.quick for a kept capture.
 pub fn spawnQuick(gpa: std.mem.Allocator, env: Env, k: *const Kept, ready: ?sys.fd_t) void {
-    const root = gpa.dupeSentinel(u8, k.root(), 0) catch return;
-    defer gpa.free(root);
-    const id = gpa.dupeSentinel(u8, k.id.slice(), 0) catch return;
-    defer gpa.free(id);
-    var fd_buf: [16]u8 = undefined;
-    const fd_arg = std.fmt.bufPrintSentinel(&fd_buf, "{d}", .{ready orelse -1}, 0) catch return;
-    spawnKeeping(env, &.{ "quick", root.ptr, id.ptr, fd_arg.ptr }, ready);
+    _ = gpa;
+    relaunch.quick(env, k.root(), k.id.slice(), ready);
+}
+
+test {
+    _ = @import("kvfile.zig");
+    _ = @import("ipc.zig");
+    _ = @import("relaunch.zig");
+    _ = @import("report.zig");
 }
 
 test "thumbnails fit the box and average colours" {
