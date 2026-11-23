@@ -23,12 +23,16 @@
 //!     shotlet gnome-integration shortcut MODE [ACCEL... | none]
 //!
 //! Facade over gnome/: extension (GNOME Shell's view of it, install,
-//! files), capture (asking it to capture, its shortcut), custom (custom
+//! files), shell1 (its bus interface: captures, recording, versions),
+//! capture (what it says about its shortcut), custom (custom
 //! shortcuts that run shotlet), screenshot_keys (GNOME's own screenshot
 //! keys), setup (install end to end) and cli.
 
+const std = @import("std");
+const dbus = @import("dbus.zig");
 const extension = @import("gnome/extension.zig");
 const capture = @import("gnome/capture.zig");
+const shell1 = @import("gnome/shell1.zig");
 const custom = @import("gnome/custom.zig");
 const setup = @import("gnome/setup.zig");
 const cli = @import("gnome/cli.zig");
@@ -39,6 +43,8 @@ pub const bus_name = extension.bus_name;
 pub const ext_schema_id = extension.ext_schema_id;
 pub const isGnome = extension.isGnome;
 pub const extensionActive = extension.extensionActive;
+/// GNOME, with the extension active: use the integration.
+pub const integrationActive = extension.integrationActive;
 pub const shellState = extension.shellState;
 pub const writeBundled = extension.writeBundled;
 pub const schemaDir = extension.schemaDir;
@@ -46,8 +52,13 @@ pub const InstallResult = extension.InstallResult;
 pub const InstallState = install_state.State;
 pub const installState = install_state.read;
 
-pub const CaptureRequest = capture.CaptureRequest;
-pub const requestCapture = capture.requestCapture;
+pub const CaptureRequest = shell1.CaptureRequest;
+/// Ask the extension to capture (it starts the editor itself).
+/// TODO(wave 2): drop the allocator once desktop/daemon.zig calls
+/// shell1.capture(bus).
+pub fn requestCapture(_: std.mem.Allocator, bus: *dbus.Connection) CaptureRequest {
+    return shell1.capture(bus);
+}
 pub const CaptureInfo = capture.CaptureInfo;
 pub const captureInfo = capture.captureInfo;
 
@@ -65,6 +76,7 @@ pub const finishPendingSetup = @import("gnome/pending_setup.zig").finish;
 comptime {
     _ = extension;
     _ = capture;
+    _ = shell1;
     _ = custom;
     _ = @import("gnome/screenshot_keys.zig");
     _ = setup;

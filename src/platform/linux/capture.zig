@@ -35,13 +35,13 @@ pub fn warmup() void {
 
 /// Every monitor, frozen, by the first path that works. Null when the
 /// person cancelled a dialog (or nobody answered it): stop quietly.
-pub fn screens(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *config.Config) !?capture.Capture {
+pub fn screens(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, cfg: *config.Config) !?capture.Capture {
     // the desktop's own capture interface: no consent dialog
     if (std.c.getenv("SHOTLET_NO_DIRECT") == null) {
-        if (tryDirect(gpa, env, conn)) |cap| return cap;
+        if (tryDirect(gpa, env, bus)) |cap| return cap;
     }
     if (pw.available()) {
-        switch (screencast(gpa, env, conn, cfg)) {
+        switch (screencast(gpa, env, bus, cfg)) {
             .granted => |cap| {
                 std.log.info("capture path: portal (ScreenCast)", .{});
                 path.remember(env.home, .portal);
@@ -53,13 +53,13 @@ pub fn screens(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, cfg: *c
             .unavailable => std.log.info("screencast unavailable; trying the screenshot portal", .{}),
         }
     }
-    return screenshotPortal(gpa, env, conn);
+    return screenshotPortal(gpa, env, bus);
 }
 
 /// The compositor's own capture interface; null (logged) when there is
 /// none or it failed, for the portal to take over.
-fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.Capture {
-    const res = direct.captureAll(gpa, env.runtime_dir, env.session.display, conn) catch |err| {
+fn tryDirect(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) ?capture.Capture {
+    const res = direct.captureAll(gpa, env.runtime_dir, env.session.display, bus) catch |err| {
         std.log.info("capture path: direct capture failed ({t}); the portal", .{err});
         return null;
     };
@@ -77,16 +77,16 @@ fn tryDirect(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) ?capture.
 }
 
 /// The Screenshot portal, the last resort; null when cancelled.
-fn screenshotPortal(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection) !?capture.Capture {
+fn screenshotPortal(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) !?capture.Capture {
     std.log.info("capture path: portal (Screenshot)", .{});
     path.remember(env.home, .portal);
-    const png_data = switch (try portal.screenshot(gpa, conn, false, portal.timeout_unfocused_screenshot_ms)) {
+    const png_data = switch (try portal.screenshot(gpa, bus, false, portal.timeout_unfocused_screenshot_ms)) {
         .granted => |d| d,
         .cancelled => return null,
         // GNOME only shows its consent dialog to the focused app, so a
         // windowless first run is denied (or, with no app focused, never
         // answered); ask again from a focused window
-        .denied, .timeout => (try @import("capture/first_run.zig").permissionFlow(gpa, env, conn)) orelse return null,
+        .denied, .timeout => (try @import("capture/first_run.zig").permissionFlow(gpa, env, bus)) orelse return null,
         .unavailable => return error.NoScreenshotPortal,
     };
     defer gpa.free(png_data);

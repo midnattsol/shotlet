@@ -9,7 +9,7 @@ const gnome = @import("gnome.zig");
 const gsettings = @import("gnome/gsettings.zig");
 const gtk_accel = @import("gnome/gtk_accel.zig");
 const mode_keys = @import("gnome/mode_keys.zig");
-const shell_bus = @import("gnome/shell_bus.zig");
+const shell1 = @import("gnome/shell1.zig");
 const shellcap = @import("gnome/shellcap.zig");
 const types = @import("../api/shell.zig");
 const Env = @import("../../app/env.zig").Env;
@@ -40,8 +40,8 @@ pub fn words() Words {
 pub const applies = gnome.isGnome;
 
 /// The integration runs.
-pub fn active(s: *dbus.Connection) bool {
-    return gnome.extensionActive(s);
+pub fn active(bus: *dbus.Connection) bool {
+    return gnome.extensionActive(bus);
 }
 
 /// applies() and active(), on a connection of its own.
@@ -49,14 +49,14 @@ pub fn activeNow(gpa: std.mem.Allocator, env: Env) bool {
     if (!gnome.isGnome()) return false;
     var bus = dbus.Connection.connectSession(gpa, env.session.bus) catch return false;
     defer bus.deinit();
-    return gnome.extensionActive(&bus);
+    return gnome.integrationActive(&bus);
 }
 
 /// Where the integration stands, for Settings.
-pub fn state(gpa: std.mem.Allocator, env: Env, s: ?*dbus.Connection) State {
+pub fn state(gpa: std.mem.Allocator, env: Env, bus_opt: ?*dbus.Connection) State {
     if (!gnome.isGnome()) return .unsupported;
-    const b = s orelse return .missing;
-    return switch (gnome.installState(gpa, env, b)) {
+    const bus = bus_opt orelse return .missing;
+    return switch (gnome.installState(gpa, env, bus)) {
         .active => .active,
         // nothing to click: it loads at the next login
         .next_login => .installed,
@@ -65,8 +65,8 @@ pub fn state(gpa: std.mem.Allocator, env: Env, s: ?*dbus.Connection) State {
 }
 
 /// Install and enable it (moving shortcuts that run shotlet to it).
-pub fn install(gpa: std.mem.Allocator, env: Env, s: ?*dbus.Connection) State {
-    return switch (gnome.install(gpa, env, s, .yes)) {
+pub fn install(gpa: std.mem.Allocator, env: Env, bus: ?*dbus.Connection) State {
+    return switch (gnome.install(gpa, env, bus, .yes)) {
         .active => .active,
         .installed_relogin => .installed,
         .failed => .failed,
@@ -79,12 +79,12 @@ pub const captureInfo = gnome.captureInfo;
 pub const note = gnome.note;
 
 /// Ask it to take a capture in `req`'s mode (it starts another shotlet).
-pub fn requestCapture(gpa: std.mem.Allocator, s: *dbus.Connection, req: mode.Request) Handoff {
-    return shell_bus.requestMode(gpa, s, req);
+pub fn requestCapture(_: std.mem.Allocator, bus: *dbus.Connection, req: mode.Request) Handoff {
+    return shell1.captureMode(bus, req);
 }
 
 /// Put our window titled `title` at x, y (logical); false when it cannot.
-pub const place = shell_bus.place;
+pub const place = shell1.place;
 
 /// The capture it handed over.
 pub fn loadHanded(gpa: std.mem.Allocator, env: Env, args: HandedCapture) !capture.Capture {
@@ -101,9 +101,9 @@ pub const runCli = gnome.runCli;
 // --- the capture modes' global shortcuts (its settings) ---
 
 /// Where its settings are (into `buf`), when it runs; null otherwise.
-pub fn shortcutStore(gpa: std.mem.Allocator, env: Env, s: *dbus.Connection, buf: []u8) ?[]const u8 {
-    if (!gnome.isGnome() or !gnome.extensionActive(s)) return null;
-    return gnome.schemaDir(gpa, env, s, buf) catch null;
+pub fn shortcutStore(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, buf: []u8) ?[]const u8 {
+    if (!gnome.integrationActive(bus)) return null;
+    return gnome.schemaDir(gpa, env, bus, buf) catch null;
 }
 
 /// The first shortcut bound to `name` ("Ctrl+Print": GTK's notation in

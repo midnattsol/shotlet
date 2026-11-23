@@ -9,6 +9,7 @@ const std = @import("std");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
+const kde = @import("../kde.zig");
 
 const iface = "dev.shotlet.WinRects";
 const obj_path = "/dev/shotlet/WinRects";
@@ -42,7 +43,7 @@ const script_fmt =
 
 /// [x, y, w, h, ...] logical, into `out`; empty when KWin does not
 /// answer in time.
-pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, conn: *dbus.Connection, out: []i32) []const i32 {
+pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, out: []i32) []const i32 {
     var tok_raw: [8]u8 = undefined;
     sys.getRandom(&tok_raw);
     var tok_buf: [16]u8 = undefined;
@@ -50,31 +51,31 @@ pub fn fetch(gpa: std.mem.Allocator, env: env_mod.Env, conn: *dbus.Connection, o
     var path_buf: [512]u8 = undefined;
     const path = std.fmt.bufPrint(&path_buf, "{s}/shotlet-windows-{s}.js", .{ env.runtime_dir, token }) catch return &.{};
     var src_buf: [2048]u8 = undefined;
-    const src = std.fmt.bufPrint(&src_buf, script_fmt, .{ conn.unique_name, obj_path, iface, token }) catch return &.{};
+    const src = std.fmt.bufPrint(&src_buf, script_fmt, .{ bus.unique_name, obj_path, iface, token }) catch return &.{};
     sys.writeFileExclusive(path, src, 0o600) catch return &.{};
     defer sys.unlink(path) catch {};
     var name_buf: [48]u8 = undefined;
     const plugin = std.fmt.bufPrint(&name_buf, "shotlet-windows-{s}", .{token}) catch return &.{};
-    const id = loadScript(gpa, conn, path, plugin) catch |err| {
+    const id = loadScript(gpa, bus, path, plugin) catch |err| {
         std.log.info("windows: KWin scripting unavailable ({t})", .{err});
         return &.{};
     };
-    defer unload(gpa, conn, plugin);
-    runScript(gpa, conn, id) catch |err| {
+    defer unload(gpa, bus, plugin);
+    runScript(bus, id) catch |err| {
         std.log.info("windows: KWin did not run the script ({t})", .{err});
         return &.{};
     };
-    return awaitRects(gpa, conn, token, out);
+    return awaitRects(bus, token, out);
 }
 
 /// Scripting.loadScript(path, plugin): the script's id.
-fn loadScript(gpa: std.mem.Allocator, conn: *dbus.Connection, path: []const u8, plugin: []const u8) !i32 {
+fn loadScript(gpa: std.mem.Allocator, bus: *dbus.Connection, path: []const u8, plugin: []const u8) !i32 {
     var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putString(path);
     try m.putString(plugin);
-    var reply = try callKwin(gpa, conn, "/Scripting", "org.kde.kwin.Scripting", "loadScript", "ss", m.buf.items);
-    defer reply.deinit(gpa);
+    var reply = try callKwin(bus, "/Scripting", "org.kde.kwin.Scripting", "loadScript", "ss", m.buf.items);
+    defer reply.deinit(bus.alloc);
     var r = reply.reader();
     const id: i32 = @bitCast(try r.readU32());
     if (id < 0) return error.NotLoaded;
@@ -82,58 +83,45 @@ fn loadScript(gpa: std.mem.Allocator, conn: *dbus.Connection, path: []const u8, 
 }
 
 /// Run script `id`: /Scripting/ScriptN on KWin 6, /N on KWin 5.
-fn runScript(gpa: std.mem.Allocator, conn: *dbus.Connection, id: i32) !void {
+fn runScript(bus: *dbus.Connection, id: i32) !void {
     var buf: [48]u8 = undefined;
     for ([_]bool{ true, false }) |kwin6| {
         const obj = if (kwin6) try std.fmt.bufPrint(&buf, "/Scripting/Script{d}", .{id}) else try std.fmt.bufPrint(&buf, "/{d}", .{id});
-        var reply = callKwin(gpa, conn, obj, "org.kde.kwin.Script", "run", "", &.{}) catch continue;
-        reply.deinit(gpa);
+        var reply = callKwin(bus, obj, "org.kde.kwin.Script", "run", "", &.{}) catch continue;
+        reply.deinit(bus.alloc);
         return;
     }
     return error.NoScriptObject;
 }
 
-fn unload(gpa: std.mem.Allocator, conn: *dbus.Connection, plugin: []const u8) void {
+fn unload(gpa: std.mem.Allocator, bus: *dbus.Connection, plugin: []const u8) void {
     var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     m.putString(plugin) catch return;
-    var reply = callKwin(gpa, conn, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", "s", m.buf.items) catch return;
-    reply.deinit(gpa);
+    var reply = callKwin(bus, "/Scripting", "org.kde.kwin.Scripting", "unloadScript", "s", m.buf.items) catch return;
+    reply.deinit(bus.alloc);
 }
 
 /// A call to KWin; an error reply is an error.
-fn callKwin(gpa: std.mem.Allocator, conn: *dbus.Connection, path: []const u8, interface: []const u8, member: []const u8, sig: []const u8, body: []const u8) !dbus.Message {
-    const serial = try conn.callMethod("org.kde.KWin", path, interface, member, sig, body);
-    var reply = try conn.waitReplyOrError(serial, 1000);
-    if (reply.type == .@"error") {
-        reply.deinit(gpa);
-        return error.Refused;
-    }
-    return reply;
+fn callKwin(bus: *dbus.Connection, path: []const u8, interface: []const u8, member: []const u8, sig: []const u8, body: []const u8) !dbus.Message {
+    return bus.call(kde.bus_name, path, interface, member, sig, body, 1000);
 }
 
-/// The script's call back, with our token; other messages are put back.
-fn awaitRects(gpa: std.mem.Allocator, conn: *dbus.Connection, token: []const u8, out: []i32) []const i32 {
+/// The script's call back, with our token; other messages stay queued.
+fn awaitRects(bus: *dbus.Connection, token: []const u8, out: []i32) []const i32 {
     const deadline = sys.monoMs() + 1000;
-    var skipped: std.ArrayList(dbus.Message) = .empty;
-    defer {
-        for (skipped.items) |msg| conn.pending.append(gpa, msg) catch {
-            var mm = msg;
-            mm.deinit(gpa);
-        };
-        skipped.deinit(gpa);
-    }
+    const isRects = struct {
+        fn f(_: void, msg: *const dbus.Message) bool {
+            return msg.isCall(iface, "Rects");
+        }
+    }.f;
     while (true) {
-        var msg = (conn.nextMessageDeadline(deadline) catch return &.{}) orelse {
+        var msg = (bus.waitFor(deadline, {}, isRects) catch return &.{}) orelse {
             std.log.info("windows: KWin's script did not answer", .{});
             return &.{};
         };
-        if (!msg.isCall(iface, "Rects")) {
-            skipped.append(gpa, msg) catch msg.deinit(gpa);
-            continue;
-        }
-        defer msg.deinit(gpa);
-        conn.replyTo(&msg, "", &.{}) catch {};
+        defer msg.deinit(bus.alloc);
+        bus.replyTo(&msg, "", &.{}) catch {};
         var r = msg.reader();
         const s = r.readString() catch return &.{};
         if (parse(s, token, out)) |flat| return flat;

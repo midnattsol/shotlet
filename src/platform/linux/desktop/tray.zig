@@ -7,11 +7,12 @@ const dbus = @import("../dbus.zig");
 const render = @import("../../../gfx/render.zig");
 
 const sni_path = "/StatusNotifierItem";
+const watcher_name = "org.kde.StatusNotifierWatcher";
 const sni_iface = "org.kde.StatusNotifierItem";
 const menu = @import("tray/menu.zig");
 const menu_path = menu.path;
 const menu_iface = menu.iface;
-const props_iface = "org.freedesktop.DBus.Properties";
+const props_iface = dbus.properties_iface;
 
 pub const MenuAction = enum {
     capture,
@@ -42,7 +43,7 @@ pub const MenuAction = enum {
 
 pub const Tray = struct {
     alloc: std.mem.Allocator,
-    conn: *dbus.Connection,
+    bus: *dbus.Connection,
     icons: []const IconPixmap,
     /// a StatusNotifierWatcher accepted the item
     registered: bool = false,
@@ -54,10 +55,10 @@ pub const Tray = struct {
         argb: []const u8,
     };
 
-    pub fn init(alloc: std.mem.Allocator, conn: *dbus.Connection, icons: []const IconPixmap) !Tray {
-        var self = Tray{ .alloc = alloc, .conn = conn, .icons = icons };
+    pub fn init(alloc: std.mem.Allocator, bus: *dbus.Connection, icons: []const IconPixmap) !Tray {
+        var self = Tray{ .alloc = alloc, .bus = bus, .icons = icons };
         // re-register if the watcher (gnome-shell / waybar) restarts
-        try conn.addMatch("type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged',arg0='org.kde.StatusNotifierWatcher'");
+        try bus.watchNameOwner(watcher_name);
         try self.register();
         return self;
     }
@@ -66,22 +67,22 @@ pub const Tray = struct {
         self.registered = false;
         // no watcher (GNOME without the AppIndicator extension): wait for
         // one to appear instead of failing a call
-        if (!(self.conn.nameHasOwner("org.kde.StatusNotifierWatcher") catch true)) {
+        if (!(self.bus.nameHasOwner(watcher_name) catch true)) {
             std.log.warn("no system tray host found (on GNOME, enable the AppIndicator extension); waiting for one", .{});
             return;
         }
         var m = dbus.Marshal.init(self.alloc);
         defer m.deinit();
         try m.putString(sni_path);
-        const serial = self.conn.callMethod(
-            "org.kde.StatusNotifierWatcher",
+        const serial = self.bus.callMethod(
+            watcher_name,
             "/StatusNotifierWatcher",
-            "org.kde.StatusNotifierWatcher",
+            watcher_name,
             "RegisterStatusNotifierItem",
             "s",
             m.buf.items,
         ) catch return error.NoTrayHost;
-        var reply = self.conn.waitReply(serial) catch {
+        var reply = self.bus.waitReply(serial) catch {
             std.log.warn("no system tray host found (on GNOME, enable the AppIndicator extension)", .{});
             return;
         };
@@ -93,84 +94,44 @@ pub const Tray = struct {
     /// Handle one incoming message if it belongs to the tray objects.
     /// Returns an action when the user asked for one.
     pub fn handleMessage(self: *Tray, msg: *const dbus.Message) !MenuAction {
-        if (msg.isSignal("org.freedesktop.DBus", "NameOwnerChanged")) {
-            self.onNameOwnerChanged(msg);
+        if (dbus.nameOwnerChange(msg)) |c| {
+            // a new StatusNotifierWatcher (the host restarted): register again
+            if (std.mem.eql(u8, c.name, watcher_name) and c.new_owner.len > 0) self.register() catch {};
             return .none;
         }
         if (msg.type != .method_call) return .none;
         if (msg.isCall("org.freedesktop.DBus.Peer", "Ping")) {
-            try self.conn.replyTo(msg, "", &.{});
+            try self.bus.replyTo(msg, "", &.{});
             return .none;
         }
         const path = msg.path orelse return .none;
         if (std.mem.eql(u8, path, sni_path)) return self.handleItemMessage(msg);
-        if (std.mem.eql(u8, path, menu_path)) return menu.handle(self.alloc, self.conn, msg);
+        if (std.mem.eql(u8, path, menu_path)) return menu.handle(self.alloc, self.bus, msg);
         // callers block until they get an answer: never leave one hanging
-        try self.conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownObject", "no such object");
+        try self.bus.replyError(msg, "org.freedesktop.DBus.Error.UnknownObject", "no such object");
         return .none;
-    }
-
-    /// A new StatusNotifierWatcher (the host restarted): register again.
-    fn onNameOwnerChanged(self: *Tray, msg: *const dbus.Message) void {
-        var r = msg.reader();
-        const name = r.readString() catch return;
-        if (!std.mem.eql(u8, name, "org.kde.StatusNotifierWatcher")) return;
-        _ = r.readString() catch return; // old owner
-        const new_owner = r.readString() catch return;
-        if (new_owner.len > 0) self.register() catch {};
     }
 
     /// A call on the StatusNotifierItem object.
     fn handleItemMessage(self: *Tray, msg: *const dbus.Message) !MenuAction {
-        const conn = self.conn;
+        const bus = self.bus;
         if (msg.isCall(sni_iface, "Activate") or msg.isCall(sni_iface, "SecondaryActivate")) {
-            try conn.replyTo(msg, "", &.{});
+            try bus.replyTo(msg, "", &.{});
             return .capture;
         }
         if (msg.isCall(sni_iface, "ContextMenu") or msg.isCall(sni_iface, "Scroll")) {
-            try conn.replyTo(msg, "", &.{});
-        } else if (msg.isCall(props_iface, "Get")) {
-            try self.getProperty(msg);
-        } else if (msg.isCall(props_iface, "GetAll")) {
-            try self.getAllProperties(msg);
+            try bus.replyTo(msg, "", &.{});
+        } else if (try dbus.Properties.reply(bus, msg, &sni_props, self, putProperty)) {
+            // answered
         } else if (msg.isCall("org.freedesktop.DBus.Introspectable", "Introspect")) {
             var m = dbus.Marshal.init(self.alloc);
             defer m.deinit();
             try m.putString(sni_introspect_xml);
-            try conn.replyTo(msg, "s", m.buf.items);
+            try bus.replyTo(msg, "s", m.buf.items);
         } else {
-            try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownMethod", "unknown method");
+            try bus.replyError(msg, "org.freedesktop.DBus.Error.UnknownMethod", "unknown method");
         }
         return .none;
-    }
-
-    fn getProperty(self: *Tray, msg: *const dbus.Message) !void {
-        var r = msg.reader();
-        _ = try r.readString(); // interface
-        const prop = try r.readString();
-        var m = dbus.Marshal.init(self.alloc);
-        defer m.deinit();
-        self.putProperty(&m, prop) catch |err| switch (err) {
-            error.UnknownProperty => {
-                try self.conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownProperty", "no such property");
-                return;
-            },
-            else => return err,
-        };
-        try self.conn.replyTo(msg, "v", m.buf.items);
-    }
-
-    fn getAllProperties(self: *Tray, msg: *const dbus.Message) !void {
-        var m = dbus.Marshal.init(self.alloc);
-        defer m.deinit();
-        const arr = try m.beginArray(8);
-        for (sni_props) |p| {
-            try m.beginStruct();
-            try m.putString(p);
-            try self.putProperty(&m, p);
-        }
-        m.endArray(arr);
-        try self.conn.replyTo(msg, "a{sv}", m.buf.items);
     }
 
     const sni_props = [_][]const u8{
@@ -180,7 +141,7 @@ pub const Tray = struct {
         "ToolTip",           "IconThemePath",     "Menu",                "ItemIsMenu",
     };
 
-    fn putProperty(self: *Tray, m: *dbus.Marshal, prop: []const u8) !void {
+    fn putProperty(self: *Tray, m: *dbus.Marshal, prop: []const u8) anyerror!void {
         const eql = std.mem.eql;
         if (eql(u8, prop, "Category")) {
             try m.putVariantString("ApplicationStatus");
@@ -331,7 +292,7 @@ test "tray answers with the declared types, and errors for unknown objects" {
     defer host.deinit();
     var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
     defer ours.deinit();
-    var tray = Tray{ .alloc = alloc, .conn = &ours, .icons = &.{} };
+    var tray = Tray{ .alloc = alloc, .bus = &ours, .icons = &.{} };
 
     const Want = struct { prop: []const u8, sig: []const u8 };
     for ([_]Want{
@@ -401,7 +362,7 @@ test "menu items map to their actions, Recent captures included" {
     defer host.deinit();
     var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
     defer ours.deinit();
-    var tray = Tray{ .alloc = alloc, .conn = &ours, .icons = &.{} };
+    var tray = Tray{ .alloc = alloc, .bus = &ours, .icons = &.{} };
     for ([_]struct { id: i32, want: MenuAction }{
         .{ .id = 1, .want = .capture },
         .{ .id = 10, .want = .capture_text },
@@ -427,4 +388,28 @@ test "menu items map to their actions, Recent captures included" {
     var found = false;
     for (Tray.menu_items) |item| found = found or std.mem.eql(u8, item.label, "Recent captures…");
     try std.testing.expect(found);
+}
+
+test "the menu answers its properties and errors for unknown ones" {
+    const alloc = std.testing.allocator;
+    const fds = try @import("../sys.zig").socketPair();
+    var host = dbus.Connection{ .fd = fds[0], .alloc = alloc };
+    defer host.deinit();
+    var ours = dbus.Connection{ .fd = fds[1], .alloc = alloc };
+    defer ours.deinit();
+    var tray = Tray{ .alloc = alloc, .bus = &ours, .icons = &.{} };
+    for ([_][]const u8{ "Version", "Nope" }) |prop| {
+        var m = dbus.Marshal.init(alloc);
+        defer m.deinit();
+        try m.putString(menu_iface);
+        try m.putString(prop);
+        var call = testCall(menu_path, props_iface, "Get", m.buf.items);
+        _ = try tray.handleMessage(&call);
+        var reply = try host.readMessage();
+        defer reply.deinit(alloc);
+        if (std.mem.eql(u8, prop, "Version")) {
+            var r = reply.reader();
+            try std.testing.expectEqual(@as(u32, 3), (try r.readVariant()).u32_);
+        } else try std.testing.expectEqualStrings("org.freedesktop.DBus.Error.UnknownProperty", reply.error_name.?);
+    }
 }

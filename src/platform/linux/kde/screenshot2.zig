@@ -5,6 +5,7 @@
 const std = @import("std");
 const dbus = @import("../dbus.zig");
 const sys = @import("../sys.zig");
+const kde = @import("../kde.zig");
 const direct = @import("../capture/direct.zig");
 const Frame = direct.Frame;
 
@@ -23,16 +24,12 @@ pub fn screen(gpa: std.mem.Allocator, bus: *dbus.Connection, output_name: []cons
     var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putString(output_name);
-    const arr = try m.beginArray(8);
-    try m.beginStruct();
-    try m.putString("native-resolution");
-    try m.putVariantBool(true);
-    try m.beginStruct();
-    try m.putString("include-cursor");
-    try m.putVariantBool(false);
-    m.endArray(arr);
+    const opts = try m.beginDict();
+    try opts.entry("native-resolution", true);
+    try opts.entry("include-cursor", false);
+    opts.end();
     try m.putU32(0); // fd index
-    const serial = bus.callMethodFds("org.kde.KWin", "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureScreen", "sa{sv}h", m.buf.items, &.{p[1]}) catch |err| {
+    const serial = bus.callMethodFds(kde.bus_name, "/org/kde/KWin/ScreenShot2", "org.kde.KWin.ScreenShot2", "CaptureScreen", "sa{sv}h", m.buf.items, &.{p[1]}) catch |err| {
         sys.close(p[1]);
         if (err == error.NoFdPassing) {
             refused = "the session bus passes no file descriptors";
@@ -48,19 +45,17 @@ pub fn screen(gpa: std.mem.Allocator, bus: *dbus.Connection, output_name: []cons
 /// when KWin refused (refused says why). `alpha`: keep see-through
 /// pixels (a window's rounded corners), else opaque.
 pub fn reply(gpa: std.mem.Allocator, bus: *dbus.Connection, serial: u32, read_fd: sys.fd_t, alpha: bool, timeout_ms: i64) !?Frame {
-    var msg = try bus.waitReplyOrError(serial, timeout_ms);
-    defer msg.deinit(gpa);
-    if (msg.type == .@"error") {
-        const e = msg.error_name orelse "";
-        refused = if (std.mem.indexOf(u8, e, "NoAuthorized") != null)
-            "KWin refused: the installed .desktop file does not list org.kde.KWin.ScreenShot2 for this executable"
-        else if (std.mem.eql(u8, e, "org.freedesktop.DBus.Error.ServiceUnknown") or std.mem.eql(u8, e, "org.freedesktop.DBus.Error.UnknownObject") or std.mem.eql(u8, e, "org.freedesktop.DBus.Error.UnknownMethod"))
-            "no direct capture interface"
-        else
-            "KWin ScreenShot2 failed";
-        std.log.info("direct capture: {s} ({s})", .{ refused, e });
+    var msg = bus.waitReplyTimeout(serial, timeout_ms) catch |err| {
+        refused = switch (err) {
+            error.Denied => "KWin refused: the installed .desktop file does not list org.kde.KWin.ScreenShot2 for this executable",
+            error.ServiceUnknown, error.UnknownMethod => "no direct capture interface",
+            error.Busy, error.NotFound, error.DBusError => "KWin ScreenShot2 failed",
+            else => return err,
+        };
+        std.log.info("direct capture: {s}", .{refused});
         return null;
-    }
+    };
+    defer msg.deinit(bus.alloc);
     var w: u32 = 0;
     var h: u32 = 0;
     var stride: u32 = 0;

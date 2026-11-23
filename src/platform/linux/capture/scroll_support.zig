@@ -34,11 +34,10 @@ pub fn decide(f: Facts) ScrollSupport {
 /// The answer now. With the extension running, only its bus name is
 /// asked; the install state (GNOME Shell, gsettings) only when it is not.
 pub fn support(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) ScrollSupport {
-    const on_gnome = gnome.isGnome();
-    if (on_gnome and gnome.extensionActive(bus)) return .available;
+    if (gnome.integrationActive(bus)) return .available;
     const why = decide(.{
         .direct = directNow(gpa, env, bus),
-        .shell = if (on_gnome) gnome.installState(gpa, env, bus) else null,
+        .shell = if (gnome.isGnome()) gnome.installState(gpa, env, bus) else null,
     });
     std.log.info("scrolling capture: {t}", .{why});
     return why;

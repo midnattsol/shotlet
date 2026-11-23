@@ -58,14 +58,11 @@ fn call(bus: *dbus.Connection, member: []const u8, sig: []const u8, args: []cons
     var m = dbus.Marshal.init(bus.alloc);
     defer m.deinit();
     for (args) |a| try m.putString(a);
-    const serial = try bus.callMethod(dest, path, iface, member, sig, m.buf.items);
-    var reply = try bus.waitReplyOrError(serial, timeout_ms);
-    if (reply.type != .@"error") return reply;
-    defer reply.deinit(bus.alloc);
-    const name = reply.error_name orelse "";
-    if (std.mem.endsWith(u8, name, ".NotFound")) return null;
-    std.log.info("permission store {s}: {s}", .{ member, name });
-    return if (std.mem.eql(u8, name, "org.freedesktop.DBus.Error.ServiceUnknown")) error.NoPermissionStore else error.DBusError;
+    return bus.call(dest, path, iface, member, sig, m.buf.items, timeout_ms) catch |err| switch (err) {
+        error.NotFound => null,
+        error.ServiceUnknown => error.NoPermissionStore,
+        else => err,
+    };
 }
 
 /// An `as` reply: the strings, copied.

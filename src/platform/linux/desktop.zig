@@ -38,42 +38,48 @@ pub fn connectBrief(gpa: std.mem.Allocator, env: Env) !Session {
     return dbus.Connection.connectSession(gpa, env.session.bus);
 }
 
-/// Tell the portals who we are, before any portal call on `s`.
-pub fn identify(gpa: std.mem.Allocator, s: *Session) void {
-    portal.registerApp(gpa, s);
+/// Tell the portals who we are, before any portal call on `bus`.
+pub fn identify(gpa: std.mem.Allocator, bus: *Session) void {
+    portal.registerApp(gpa, bus);
 }
 
 /// The appearance, waiting at most `timeout_ms` for the portal.
 pub const readAppearance = appearance.read;
 
 /// Subscribe to appearance changes (pump() folds them in).
-pub fn watchAppearance(s: *Session) !void {
-    return appearance.watch(s);
+pub fn watchAppearance(bus: *Session) !void {
+    return appearance.watch(bus);
 }
 
 /// What the desktop sent since the last call, without waiting:
 /// appearance changes fold into `look` (true when it changed), and the
 /// answer to `dialog` is kept in it (Dialog.done()).
-pub fn pump(s: *Session, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*Dialog) bool {
-    var changed = false;
-    var n: usize = 0;
-    while (n < 16) : (n += 1) {
-        var msg = (s.nextMessageDeadline(@import("sys.zig").monoMs()) catch break) orelse break;
-        if (appearance.applySignal(look, &msg)) changed = true;
-        const kept = if (dialog) |r| r.handle(gpa, &msg) catch false else false;
-        if (!kept) msg.deinit(gpa);
-    }
-    return changed;
+pub fn pump(bus: *Session, gpa: std.mem.Allocator, look: *Appearance, dialog: ?*Dialog) bool {
+    const Pump = struct {
+        gpa: std.mem.Allocator,
+        look: *Appearance,
+        dialog: ?*Dialog,
+        changed: bool = false,
+
+        fn take(self: *@This(), msg: *const dbus.Message) bool {
+            if (appearance.applySignal(self.look, msg)) self.changed = true;
+            const r = self.dialog orelse return false;
+            return r.handle(self.gpa, msg) catch false;
+        }
+    };
+    var p: Pump = .{ .gpa = gpa, .look = look, .dialog = dialog };
+    bus.drain(16, &p, Pump.take);
+    return p.changed;
 }
 
 /// Ask where to save a file (blocking); over `over` when given.
-pub fn askSavePath(gpa: std.mem.Allocator, s: *Session, opts: SaveOptions, over: ?*window.Window) !Choice {
-    return save_dialog.askSavePath(gpa, s, opts, over);
+pub fn askSavePath(gpa: std.mem.Allocator, bus: *Session, opts: SaveOptions, over: ?*window.Window) !Choice {
+    return save_dialog.askSavePath(gpa, bus, opts, over);
 }
 
 /// Start asking for a folder without blocking; pump() until done().
-pub fn chooseFolder(gpa: std.mem.Allocator, s: *Session, current: ?[]const u8) !Dialog {
-    return portal.beginChooseFolder(gpa, s, .{ .current_folder = current });
+pub fn chooseFolder(gpa: std.mem.Allocator, bus: *Session, current: ?[]const u8) !Dialog {
+    return portal.beginChooseFolder(gpa, bus, .{ .current_folder = current });
 }
 
 /// A finished dialog's answer.
@@ -90,23 +96,23 @@ pub fn dialogChoice(gpa: std.mem.Allocator, d: *const Dialog) Choice {
 pub const daemon = @import("desktop/daemon.zig").run;
 
 /// The session's descriptor, to poll with others for what it sends.
-pub fn pollFd(s: *const Session) @import("sys.zig").fd_t {
-    return s.fd;
+pub fn pollFd(bus: *const Session) @import("sys.zig").fd_t {
+    return bus.fd;
 }
 
 /// Whether the session already holds messages (poll would not wake).
-pub fn hasPending(s: *Session) bool {
-    return s.hasPending();
+pub fn hasPending(bus: *Session) bool {
+    return bus.hasPending();
 }
 
 /// A notification (best effort).
-pub fn notify(gpa: std.mem.Allocator, s: *Session, summary: []const u8, text: []const u8) void {
-    portal.notify(gpa, s, summary, text);
+pub fn notify(gpa: std.mem.Allocator, bus: *Session, summary: []const u8, text: []const u8) void {
+    portal.notify(gpa, bus, summary, text);
 }
 
 /// Show `path` selected in the file manager.
-pub fn revealFile(gpa: std.mem.Allocator, s: *Session, path: []const u8) !void {
-    return filemanager.showItem(gpa, s, path);
+pub fn revealFile(gpa: std.mem.Allocator, bus: *Session, path: []const u8) !void {
+    return filemanager.showItem(gpa, bus, path);
 }
 
 comptime {

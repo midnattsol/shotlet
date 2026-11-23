@@ -7,7 +7,6 @@ const MenuAction = @import("../tray.zig").MenuAction;
 
 pub const path = "/MenuBar";
 pub const iface = "com.canonical.dbusmenu";
-const props_iface = "org.freedesktop.DBus.Properties";
 
 pub const Item = struct { id: i32, label: []const u8, separator: bool };
 
@@ -26,22 +25,22 @@ pub const items = [_]Item{
 };
 
 /// Answers one call on the menu object; returns the clicked item's action.
-pub fn handle(alloc: std.mem.Allocator, conn: *dbus.Connection, msg: *const dbus.Message) !MenuAction {
+pub fn handle(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !MenuAction {
     if (msg.isCall(iface, "GetLayout")) {
-        try getLayout(alloc, conn, msg);
+        try getLayout(alloc, bus, msg);
     } else if (msg.isCall(iface, "GetGroupProperties")) {
-        try getGroupProperties(alloc, conn, msg);
+        try getGroupProperties(alloc, bus, msg);
     } else if (msg.isCall(iface, "AboutToShow")) {
         var m = dbus.Marshal.init(alloc);
         defer m.deinit();
         try m.putBool(false);
-        try conn.replyTo(msg, "b", m.buf.items);
+        try bus.replyTo(msg, "b", m.buf.items);
     } else if (msg.isCall(iface, "Event")) {
-        return event(conn, msg);
-    } else if (msg.isCall(props_iface, "Get") or msg.isCall(props_iface, "GetAll")) {
-        try properties(alloc, conn, msg);
+        return event(bus, msg);
+    } else if (try dbus.Properties.reply(bus, msg, &prop_names, {}, putProperty)) {
+        // answered
     } else {
-        try conn.replyError(msg, "org.freedesktop.DBus.Error.UnknownMethod", "unknown method");
+        try bus.replyError(msg, "org.freedesktop.DBus.Error.UnknownMethod", "unknown method");
     }
     return .none;
 }
@@ -61,7 +60,7 @@ fn putItemProps(m: *dbus.Marshal, item: Item) !void {
 }
 
 /// reply: (u(ia{sv}av)), the root and its items without nested children
-fn getLayout(alloc: std.mem.Allocator, conn: *dbus.Connection, msg: *const dbus.Message) !void {
+fn getLayout(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !void {
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     try m.putU32(1); // revision
@@ -82,11 +81,11 @@ fn getLayout(alloc: std.mem.Allocator, conn: *dbus.Connection, msg: *const dbus.
         m.endArray(sub); // no nested children
     }
     m.endArray(children);
-    try conn.replyTo(msg, "u(ia{sv}av)", m.buf.items);
+    try bus.replyTo(msg, "u(ia{sv}av)", m.buf.items);
 }
 
 /// reply: a(ia{sv})
-fn getGroupProperties(alloc: std.mem.Allocator, conn: *dbus.Connection, msg: *const dbus.Message) !void {
+fn getGroupProperties(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.Message) !void {
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     const arr = try m.beginArray(8);
@@ -96,14 +95,14 @@ fn getGroupProperties(alloc: std.mem.Allocator, conn: *dbus.Connection, msg: *co
         try putItemProps(&m, item);
     }
     m.endArray(arr);
-    try conn.replyTo(msg, "a(ia{sv})", m.buf.items);
+    try bus.replyTo(msg, "a(ia{sv})", m.buf.items);
 }
 
-fn event(conn: *dbus.Connection, msg: *const dbus.Message) !MenuAction {
+fn event(bus: *dbus.Connection, msg: *const dbus.Message) !MenuAction {
     var r = msg.reader();
     const id = @as(i32, @bitCast(try r.readU32()));
     const event_type = try r.readString();
-    try conn.replyTo(msg, "", &.{});
+    try bus.replyTo(msg, "", &.{});
     if (!std.mem.eql(u8, event_type, "clicked")) return .none;
     return actionFor(id);
 }
@@ -125,24 +124,8 @@ fn actionFor(id: i32) MenuAction {
 }
 
 /// dbusmenu properties: Version (u) and Status (s)
-fn properties(alloc: std.mem.Allocator, conn: *dbus.Connection, msg: *const dbus.Message) !void {
-    var m = dbus.Marshal.init(alloc);
-    defer m.deinit();
-    if (msg.isCall(props_iface, "GetAll")) {
-        const arr = try m.beginArray(8);
-        try m.beginStruct();
-        try m.putString("Version");
-        try m.putVariantU32(3);
-        try m.beginStruct();
-        try m.putString("Status");
-        try m.putVariantString("normal");
-        m.endArray(arr);
-        try conn.replyTo(msg, "a{sv}", m.buf.items);
-    } else {
-        var r = msg.reader();
-        _ = try r.readString();
-        const prop = try r.readString();
-        if (std.mem.eql(u8, prop, "Version")) try m.putVariantU32(3) else try m.putVariantString("normal");
-        try conn.replyTo(msg, "v", m.buf.items);
-    }
+const prop_names = [_][]const u8{ "Version", "Status" };
+
+fn putProperty(_: void, m: *dbus.Marshal, prop: []const u8) anyerror!void {
+    if (std.mem.eql(u8, prop, "Version")) try m.putVariantU32(3) else try m.putVariantString("normal");
 }

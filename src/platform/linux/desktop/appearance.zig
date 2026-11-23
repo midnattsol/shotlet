@@ -26,29 +26,23 @@ const keys = [_]struct { ns: []const u8, key: []const u8 }{
 /// Read the appearance settings from the Settings portal, waiting at most
 /// `timeout_ms` for all of them. Values the portal does not know (or no
 /// portal at all) keep their defaults.
-pub fn read(conn: *dbus.Connection, timeout_ms: i64) Prefs {
+pub fn read(bus: *dbus.Connection, timeout_ms: i64) Prefs {
     var prefs: Prefs = .{};
     var serials: [keys.len]?u32 = @splat(null);
     for (keys, 0..) |k, i| {
-        var m = dbus.Marshal.init(conn.alloc);
+        var m = dbus.Marshal.init(bus.alloc);
         defer m.deinit();
         m.putString(k.ns) catch return prefs;
         m.putString(k.key) catch return prefs;
-        serials[i] = conn.callMethod(portal_dest, portal_path, settings_iface, "ReadOne", "ss", m.buf.items) catch return prefs;
+        serials[i] = bus.callMethod(portal_dest, portal_path, settings_iface, "ReadOne", "ss", m.buf.items) catch return prefs;
     }
     const deadline = sys.monoMs() + timeout_ms;
     var left: usize = keys.len;
     while (left > 0) {
-        var msg = (conn.readMessageDeadline(deadline) catch return prefs) orelse return prefs;
-        const which = for (serials, 0..) |s, i| {
-            if (s != null and msg.reply_serial != null and msg.reply_serial.? == s.?) break i;
-        } else null;
-        const i = which orelse {
-            // not ours: leave it for whoever waits for it
-            conn.pending.append(conn.alloc, msg) catch msg.deinit(conn.alloc);
-            continue;
-        };
-        defer msg.deinit(conn.alloc);
+        // replies to the others stay queued for whoever waits for them
+        var msg = (bus.waitFor(deadline, &serials, isOurs) catch return prefs) orelse return prefs;
+        defer msg.deinit(bus.alloc);
+        const i = keyOf(&serials, &msg).?;
         serials[i] = null;
         left -= 1;
         if (msg.type != .method_return) continue;
@@ -58,9 +52,20 @@ pub fn read(conn: *dbus.Connection, timeout_ms: i64) Prefs {
     return prefs;
 }
 
+/// The key whose ReadOne `msg` answers.
+fn keyOf(serials: *const [keys.len]?u32, msg: *const dbus.Message) ?usize {
+    const reply_to = msg.reply_serial orelse return null;
+    for (serials, 0..) |s, i| if (s != null and s.? == reply_to) return i;
+    return null;
+}
+
+fn isOurs(serials: *[keys.len]?u32, msg: *const dbus.Message) bool {
+    return keyOf(serials, msg) != null;
+}
+
 /// Subscribe to the portal's SettingChanged signal.
-pub fn watch(conn: *dbus.Connection) !void {
-    try conn.addMatchOnce("type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'");
+pub fn watch(bus: *dbus.Connection) !void {
+    try bus.addMatchOnce("type='signal',interface='org.freedesktop.portal.Settings',member='SettingChanged'");
 }
 
 /// Fold a SettingChanged signal into `prefs`. True when it changed a value

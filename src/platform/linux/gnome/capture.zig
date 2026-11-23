@@ -1,53 +1,20 @@
-//! Prompt-free captures through the active extension (dev.shotlet.Shell1):
-//! asking it to capture, and what it reports about its shortcut.
+//! What the active extension (dev.shotlet.Shell1, shell1.zig) reports
+//! about its capture shortcut, for `status` and Settings.
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
-const extension = @import("extension.zig");
+const shell1 = @import("shell1.zig");
 const gtk_accel = @import("gtk_accel.zig");
-
-const bus_name = extension.bus_name;
-const shell1_path = "/dev/shotlet/Shell1";
-const shell1_iface = "dev.shotlet.Shell1";
-
-pub const CaptureRequest = enum {
-    /// the extension took the screenshot and started the editor
-    started,
-    /// a capture is already under way, or the screen is locked: nothing
-    /// else should capture now
-    declined,
-    /// not possible (an older extension, a failure): capture another way
-    unavailable,
-};
-
-/// Ask the extension to take a screenshot and start Shotlet's editor on
-/// it (dev.shotlet.Shell1.Capture: no pixels come back over the bus).
-pub fn requestCapture(gpa: std.mem.Allocator, bus: *dbus.Connection) CaptureRequest {
-    const serial = bus.callMethod(bus_name, shell1_path, shell1_iface, "Capture", "", "") catch return .unavailable;
-    var reply = bus.waitReplyOrError(serial, 5000) catch |err| {
-        std.log.info("GNOME integration capture: {t}", .{err});
-        return .unavailable;
-    };
-    defer reply.deinit(gpa);
-    var r = reply.reader();
-    if (reply.type == .@"error") {
-        const name = reply.error_name orelse "?";
-        std.log.info("GNOME integration capture refused: {s} ({s})", .{ name, r.readString() catch "" });
-        if (std.mem.eql(u8, name, shell1_iface ++ ".Error.Busy") or std.mem.eql(u8, name, shell1_iface ++ ".Error.Locked")) return .declined;
-        return .unavailable;
-    }
-    return if ((r.readU32() catch 0) != 0) .started else .unavailable;
-}
 
 /// How captures go, for `status` and the Settings window.
 pub const CaptureInfo = @import("../../api/shell.zig").CaptureInfo;
 
-pub fn captureInfo(gpa: std.mem.Allocator, bus: *dbus.Connection) CaptureInfo {
+pub fn captureInfo(_: std.mem.Allocator, bus: *dbus.Connection) CaptureInfo {
     var info: CaptureInfo = .{};
-    if (!extensionCaptures(gpa, bus)) return info;
+    if (!shell1.supports(bus, .capture_info)) return info;
     info.capture = true;
     for ([_][]const u8{ "Shortcuts", "BlockedShortcuts" }) |prop| {
-        if (readShortcut(gpa, bus, prop, &info)) {
+        if (readShortcut(bus, prop, &info)) {
             info.blocked = std.mem.eql(u8, prop, "BlockedShortcuts");
             break;
         }
@@ -55,23 +22,13 @@ pub fn captureInfo(gpa: std.mem.Allocator, bus: *dbus.Connection) CaptureInfo {
     return info;
 }
 
-/// The extension is active and new enough (Version 2) to capture.
-fn extensionCaptures(gpa: std.mem.Allocator, bus: *dbus.Connection) bool {
-    if (!extension.extensionActive(bus)) return false;
-    var msg = getProperty(gpa, bus, "Version") catch return false;
-    defer msg.deinit(gpa);
-    var r = msg.reader();
-    const v = r.readVariant() catch return false;
-    return v == .u32_ and v.u32_ >= 2;
-}
-
 /// The first accelerator of the `prop` list into `info`, in the neutral
 /// notation where it has one; false when there is none (or it cannot be
 /// read).
-fn readShortcut(gpa: std.mem.Allocator, bus: *dbus.Connection, prop: []const u8, info: *CaptureInfo) bool {
-    var m = getProperty(gpa, bus, prop) catch return false;
-    defer m.deinit(gpa);
-    var pr = m.reader();
+fn readShortcut(bus: *dbus.Connection, prop: []const u8, info: *CaptureInfo) bool {
+    var p = shell1.getProperty(bus, prop) catch return false;
+    defer p.deinit(bus.alloc);
+    var pr = p.reader();
     const acc = (readFirstOfStrvVariant(&pr) catch return false) orelse return false;
     var dbuf: [64]u8 = undefined;
     const shown = gtk_accel.display(&dbuf, acc);
@@ -79,15 +36,6 @@ fn readShortcut(gpa: std.mem.Allocator, bus: *dbus.Connection, prop: []const u8,
     @memcpy(info.shortcut_buf[0..n], shown[0..n]);
     info.shortcut_len = n;
     return true;
-}
-
-fn getProperty(gpa: std.mem.Allocator, bus: *dbus.Connection, prop: []const u8) !dbus.Message {
-    var m = dbus.Marshal.init(gpa);
-    defer m.deinit();
-    try m.putString(shell1_iface);
-    try m.putString(prop);
-    const serial = try bus.callMethod(bus_name, shell1_path, "org.freedesktop.DBus.Properties", "Get", "ss", m.buf.items);
-    return bus.waitReplyTimeout(serial, 2000);
 }
 
 /// A variant holding `as`: its first string, if any.

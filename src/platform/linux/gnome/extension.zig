@@ -10,7 +10,7 @@ const Env = env_mod.Env;
 
 pub const uuid = "shotlet@midnattsol.github.io";
 /// owned by the extension while it is active
-pub const bus_name = "dev.shotlet.Shell1";
+pub const bus_name = @import("shell1.zig").bus_name;
 /// the extension's own settings (schemas/ in its directory)
 pub const ext_schema_id = "org.gnome.shell.extensions.shotlet";
 
@@ -44,14 +44,18 @@ pub fn extensionActive(bus: *dbus.Connection) bool {
     return bus.nameHasOwner(bus_name) catch false;
 }
 
+/// The GNOME integration runs here: GNOME, with the extension active.
+pub fn integrationActive(bus: *dbus.Connection) bool {
+    return isGnome() and extensionActive(bus);
+}
+
 /// Call `member` of org.gnome.Shell.Extensions with our uuid and wait up
 /// to `timeout_ms` for the reply.
 fn callShell(gpa: std.mem.Allocator, bus: *dbus.Connection, member: []const u8, timeout_ms: i64) !dbus.Message {
     var m = dbus.Marshal.init(gpa);
     defer m.deinit();
     try m.putString(uuid);
-    const serial = try bus.callMethod(shell_dest, shell_path, shell_iface, member, "s", m.buf.items);
-    return bus.waitReplyTimeout(serial, timeout_ms);
+    return bus.call(shell_dest, shell_path, shell_iface, member, "s", m.buf.items, timeout_ms);
 }
 
 /// GNOME Shell's view of the extension (org.gnome.Shell.Extensions

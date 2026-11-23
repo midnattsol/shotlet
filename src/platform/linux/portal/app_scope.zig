@@ -10,9 +10,9 @@ pub const app_id = @import("../../../app_id.zig").app_id;
 /// Connect to the session bus and tell xdg-desktop-portal who we are,
 /// before anything on that connection talks to a portal.
 pub fn connectApp(alloc: std.mem.Allocator, bus_addr: []const u8) !dbus.Connection {
-    var conn = try dbus.Connection.connectSession(alloc, bus_addr);
-    registerApp(alloc, &conn);
-    return conn;
+    var bus = try dbus.Connection.connectSession(alloc, bus_addr);
+    registerApp(alloc, &bus);
+    return bus;
 }
 
 pub const Identity = enum { registry, scope, sandbox, unknown };
@@ -25,69 +25,73 @@ pub const Identity = enum { registry, scope, sandbox, unknown };
 /// portal call on it. Older portals derive the id from the systemd unit,
 /// so without Registry we move into an `app-<id>-<pid>.scope`. Inside
 /// Flatpak the sandbox already names us.
-pub fn registerApp(alloc: std.mem.Allocator, conn: *dbus.Connection) void {
-    const how = registerAppInner(alloc, conn);
+pub fn registerApp(alloc: std.mem.Allocator, bus: *dbus.Connection) void {
+    const how = registerAppInner(alloc, bus);
     std.log.info("portal identity: {s} ({t})", .{ app_id, how });
 }
 
-fn registerAppInner(alloc: std.mem.Allocator, conn: *dbus.Connection) Identity {
+fn registerAppInner(alloc: std.mem.Allocator, bus: *dbus.Connection) Identity {
     if (sys.fileSize("/.flatpak-info")) |_| return .sandbox else |_| {}
-    switch (registerWithRegistry(alloc, conn)) {
+    switch (registerWithRegistry(alloc, bus)) {
         .ok => return .registry,
         .unsupported => {},
         .failed => return .unknown,
     }
-    ensureAppScope(alloc, conn);
+    ensureAppScope(alloc, bus);
     return .scope;
 }
 
 const RegisterOutcome = enum { ok, unsupported, failed };
 
-fn registerWithRegistry(alloc: std.mem.Allocator, conn: *dbus.Connection) RegisterOutcome {
+fn registerWithRegistry(alloc: std.mem.Allocator, bus: *dbus.Connection) RegisterOutcome {
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     m.putString(app_id) catch return .failed;
-    const opts = m.beginArray(8) catch return .failed;
-    m.endArray(opts);
-    const serial = conn.callMethod(
+    const opts = m.beginDict() catch return .failed;
+    opts.end();
+    // the first call may start the portal (bus activation)
+    var reply = bus.call(
         "org.freedesktop.portal.Desktop",
         "/org/freedesktop/portal/desktop",
         "org.freedesktop.host.portal.Registry",
         "Register",
         "sa{sv}",
         m.buf.items,
-    ) catch return .failed;
-    // the first call may start the portal (bus activation)
-    var reply = conn.waitReplyOrError(serial, 15_000) catch |err| {
-        std.log.warn("portal registration: {t}", .{err});
-        return .failed;
-    };
-    defer reply.deinit(alloc);
-    if (reply.type != .@"error") return .ok;
-    const name = reply.error_name orelse "";
-    if (registryMissing(name)) return .unsupported;
-    std.log.warn("portal registration refused: {s}", .{name});
-    return .failed;
+        15_000,
+    ) catch |err| return registerFailure(err);
+    reply.deinit(bus.alloc);
+    return .ok;
 }
 
-/// Error names meaning "no Registry here" (an older portal, or none).
+/// A Registry call that failed: no Registry here (an older portal, or
+/// none) falls back to a scope; anything else is a refusal.
+fn registerFailure(err: anyerror) RegisterOutcome {
+    switch (err) {
+        error.UnknownMethod, error.ServiceUnknown => return .unsupported,
+        else => {
+            std.log.warn("portal registration: {t}", .{err});
+            return .failed;
+        },
+    }
+}
+
+/// Error names meaning "no Registry here".
+/// TODO(wave 2): remove with its re-export in portal.zig (unused).
 pub fn registryMissing(name: []const u8) bool {
-    const missing = [_][]const u8{
-        "org.freedesktop.DBus.Error.UnknownMethod",
-        "org.freedesktop.DBus.Error.UnknownInterface",
-        "org.freedesktop.DBus.Error.UnknownObject",
-        "org.freedesktop.DBus.Error.ServiceUnknown",
-        "org.freedesktop.DBus.Error.NameHasNoOwner",
+    return switch (dbus.classify(name)) {
+        .unknown_method, .service_unknown => true,
+        else => false,
     };
-    for (missing) |m| if (std.mem.eql(u8, name, m)) return true;
-    return false;
 }
 
 test "a missing Registry falls back; a refusal does not" {
-    try std.testing.expect(registryMissing("org.freedesktop.DBus.Error.UnknownMethod"));
-    try std.testing.expect(registryMissing("org.freedesktop.DBus.Error.ServiceUnknown"));
-    try std.testing.expect(!registryMissing("org.freedesktop.portal.Error.Failed"));
-    try std.testing.expect(!registryMissing(""));
+    try std.testing.expectEqual(RegisterOutcome.unsupported, registerFailure(error.UnknownMethod));
+    try std.testing.expectEqual(RegisterOutcome.unsupported, registerFailure(error.ServiceUnknown));
+    const saved_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = saved_level;
+    try std.testing.expectEqual(RegisterOutcome.failed, registerFailure(error.DBusError));
+    try std.testing.expectEqual(RegisterOutcome.failed, registerFailure(error.Timeout));
 }
 
 /// The scope a portal older than 1.19 reads our app id from.
@@ -97,17 +101,17 @@ const scope_prefix = "app-" ++ app_id ++ "-";
 /// systemd scope (as `systemd-run --user --scope` does): xdg-desktop-portal
 /// before 1.19 derives the caller's app id from the unit name. Fallback
 /// for registerApp.
-pub fn ensureAppScope(alloc: std.mem.Allocator, conn: *dbus.Connection) void {
-    ensureAppScopeInner(alloc, conn) catch |err| {
+pub fn ensureAppScope(alloc: std.mem.Allocator, bus: *dbus.Connection) void {
+    ensureAppScopeInner(alloc, bus) catch |err| {
         std.log.warn("could not move into an app scope: {t}", .{err});
     };
 }
 
-fn ensureAppScopeInner(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
+fn ensureAppScopeInner(alloc: std.mem.Allocator, bus: *dbus.Connection) !void {
     if (try inAppScope(alloc)) return; // already there
-    if (!systemdOnBus(conn)) return;
+    if (!systemdOnBus(bus)) return;
     const pid: u32 = @intCast(std.os.linux.getpid());
-    try startScopeUnit(alloc, conn, pid);
+    try startScopeUnit(alloc, bus, pid);
     try waitForScopeMove(alloc);
 }
 
@@ -119,9 +123,9 @@ fn inAppScope(alloc: std.mem.Allocator) !bool {
 }
 
 /// Whether systemd's user manager owns its bus name (logs why not).
-fn systemdOnBus(conn: *dbus.Connection) bool {
+fn systemdOnBus(bus: *dbus.Connection) bool {
     const systemd_name = "org.freedesktop.systemd1";
-    const has_systemd = conn.nameHasOwner(systemd_name) catch |err| {
+    const has_systemd = bus.nameHasOwner(systemd_name) catch |err| {
         std.log.debug("skipping app scope: could not query {s}: {t}", .{ systemd_name, err });
         return false;
     };
@@ -136,7 +140,7 @@ fn systemdOnBus(conn: *dbus.Connection) bool {
 
 /// StartTransientUnit for `app-<id>-<pid>.scope` holding `pid`, in
 /// app.slice; waits for the reply.
-fn startScopeUnit(alloc: std.mem.Allocator, conn: *dbus.Connection, pid: u32) !void {
+fn startScopeUnit(alloc: std.mem.Allocator, bus: *dbus.Connection, pid: u32) !void {
     var name_buf: [64]u8 = undefined;
     const name = try std.fmt.bufPrint(&name_buf, scope_prefix ++ "{d}.scope", .{pid});
 
@@ -153,24 +157,22 @@ fn startScopeUnit(alloc: std.mem.Allocator, conn: *dbus.Connection, pid: u32) !v
         try m.putU32(pid);
         m.endArray(pids);
 
-        try m.beginStruct();
-        try m.putString("Slice");
-        try m.putVariantString("app.slice");
+        try m.putEntry("Slice", "app.slice");
     }
     m.endArray(props);
     const aux = try m.beginArray(8); // a(sa(sv))
     m.endArray(aux);
 
-    const serial = try conn.callMethod(
+    var reply = try bus.call(
         "org.freedesktop.systemd1",
         "/org/freedesktop/systemd1",
         "org.freedesktop.systemd1.Manager",
         "StartTransientUnit",
         "ssa(sv)a(sa(sv))",
         m.buf.items,
+        dbus.default_reply_timeout_ms,
     );
-    var reply = try conn.waitReply(serial);
-    reply.deinit(alloc);
+    reply.deinit(bus.alloc);
 }
 
 /// The cgroup move is asynchronous; wait (up to ~1 s) for it to land.
