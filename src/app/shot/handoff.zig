@@ -9,6 +9,7 @@ const std = @import("std");
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
+const relaunch = @import("../relaunch.zig");
 const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/api.zig").window;
 const editor_mod = @import("../../ui/editor.zig");
@@ -61,10 +62,10 @@ const Keeping = struct {
         const k = &(self.kept orelse return);
         if (!self.thumbnail) return;
         const fds = sys.pipe() catch {
-            keep_mod.spawnQuick(self.gpa, self.env, k, null);
+            relaunch.quick(self.env, k.root(), k.id.slice(), null);
             return;
         };
-        keep_mod.spawnQuick(self.gpa, self.env, k, fds[1]);
+        relaunch.quick(self.env, k.root(), k.id.slice(), fds[1]);
         sys.close(fds[1]);
         self.ready = fds[0];
     }

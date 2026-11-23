@@ -17,6 +17,7 @@ const capture = @import("../capture.zig");
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
+const relaunch = @import("../relaunch.zig");
 const deliver_mod = @import("../deliver.zig");
 const doc_mod = @import("../../ui/doc.zig");
 const window = @import("../../platform/api.zig").window;
@@ -134,7 +135,7 @@ fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, d: settings.
     defer doc.deinit();
     doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     const kept = keep_mod.keep(c.gpa, c.env, c.cfg, .{ .image_png = data, .source = &cap.image, .doc = &doc, .saved = path orelse "" });
-    if (d.thumbnail) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k, null);
+    if (d.thumbnail) if (kept) |k| relaunch.quick(c.env, k.root(), k.id.slice(), null);
     // saved: copy_on_save already copied; a save that failed still
     // copies, so the capture lands somewhere
     if (path != null) {

@@ -9,7 +9,7 @@ const png = @import("../../gfx/png.zig");
 const imgload = @import("../../gfx/imgload.zig");
 const sys = @import("../../platform/api.zig").sys;
 const env_mod = @import("../../app/env.zig");
-const keep = @import("../../app/keep.zig");
+const relaunch = @import("../../app/relaunch.zig");
 const launch = @import("launch.zig");
 
 const Editor = editor_mod.Editor;
@@ -69,7 +69,7 @@ pub fn pinExport(ed: *Editor) !void {
     try sys.writeFileExclusive(path, data, 0o600);
     std.log.info("pin: pinning the export ({s})", .{path});
     // where the capture was, rather than wherever a new window goes
-    keep.spawnPin(env, path, selectionCentre(ed));
+    relaunch.pin(env, path, selectionCentre(ed));
     ed.finish(.cancel);
 }
 

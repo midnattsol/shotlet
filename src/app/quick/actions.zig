@@ -66,11 +66,11 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
         .save, .save_as => if (try entry(self, i).save(ctx(self), if (a == .save_as) .ask else .folder)) notice(self, i, "Saved"),
         .annotate => {
             if (!c.editable) return;
-            try entry(self, i).edit(self.gpa, self.env);
+            entry(self, i).edit(self.env);
             self.remove(i);
         },
         .pin => {
-            try entry(self, i).pin(self.gpa, self.env);
+            try entry(self, i).pin(self.env);
             self.remove(i);
         },
         .show_in_files => {

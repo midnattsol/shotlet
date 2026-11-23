@@ -20,7 +20,7 @@ const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const filename = @import("filename.zig");
 const history = @import("history.zig");
-const keep = @import("keep.zig");
+const relaunch = @import("relaunch.zig");
 const clip = @import("modes/clip.zig");
 const png = @import("../gfx/png.zig");
 const doc_mod = @import("../ui/doc.zig");
@@ -197,20 +197,14 @@ pub const Entry = struct {
     }
 
     /// Open it in the editor again (a new process).
-    pub fn edit(e: Entry, gpa: std.mem.Allocator, env: Env) !void {
-        const root = try gpa.dupeSentinel(u8, e.root, 0);
-        defer gpa.free(root);
-        const id = try gpa.dupeSentinel(u8, e.id, 0);
-        defer gpa.free(id);
-        keep.spawnSelf(env, &.{ "edit", root.ptr, id.ptr });
+    pub fn edit(e: Entry, env: Env) void {
+        relaunch.edit(env, e.root, e.id);
     }
 
     /// Pin its picture where it was taken (a new process).
-    pub fn pin(e: Entry, gpa: std.mem.Allocator, env: Env) !void {
+    pub fn pin(e: Entry, env: Env) !void {
         var buf: env_mod.PathBuf = undefined;
-        const p = try gpa.dupeSentinel(u8, try history.entryPath(&buf, e.root, e.id, history.File.image.name()), 0);
-        defer gpa.free(p);
-        keep.spawnPin(env, p, e.meta.at);
+        relaunch.pin(env, try history.entryPath(&buf, e.root, e.id, history.File.image.name()), e.meta.at);
     }
 };
 

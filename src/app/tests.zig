@@ -12,10 +12,14 @@ comptime {
     _ = @import("filename.zig");
     _ = @import("history.zig");
     _ = @import("history_ui.zig");
+    _ = @import("ipc.zig");
     _ = @import("keep.zig");
+    _ = @import("kvfile.zig");
     _ = @import("pin.zig");
     _ = @import("quick.zig");
     _ = @import("quick_ipc.zig");
+    _ = @import("relaunch.zig");
+    _ = @import("report.zig");
     _ = @import("shot.zig");
     _ = @import("shot_args.zig");
     _ = @import("statefile.zig");

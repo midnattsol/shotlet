@@ -187,8 +187,8 @@ pub const Panel = struct {
             // saving here is saving from the editor: copy_on_save, and a
             // notification (no thumbnail reports it)
             .save => if (try e.save(self.ctx(), .folder)) self.say("Saved"),
-            .annotate => if (it.entry.editable) try e.edit(self.gpa, self.env),
-            .pin => try e.pin(self.gpa, self.env),
+            .annotate => if (it.entry.editable) e.edit(self.env),
+            .pin => try e.pin(self.env),
             .delete => {
                 try history.remove(self.root(), e.id);
                 std.log.info("history: deleted {s}", .{e.id});

@@ -214,39 +214,10 @@ pub fn thumbnail(alloc: std.mem.Allocator, src: []const u32, sw: u32, sh: u32, m
     return .{ .pixels = out, .width = dw, .height = dh };
 }
 
-// TODO(wave 3b): remove these forwarders once their callers (outside
-// package D2) use app/relaunch.zig: spawnSelf in app/quick/actions.zig,
-// app/history_ui/panel.zig, ui/recui/trimui.zig; spawnPin in
-// app/quick/actions.zig, app/history_ui/panel.zig, ui/tools/open.zig;
-// spawnQuick in app/modes/flow.zig, app/shot/handoff.zig; spawnKeeping
-// in app/pin/annotate.zig (relaunch.editForPin).
-
+// TODO(wave 3b): remove once ui/recui/trimui.zig uses relaunch.quickVideo.
 /// Run `shotlet ARGS...` detached; use app/relaunch.zig.
 pub fn spawnSelf(env: Env, args: []const [*:0]const u8) void {
     proc.spawnSelf(env.envp, args, null);
-}
-
-/// spawnSelf, handing the child `fd`; use relaunch.editForPin.
-pub fn spawnKeeping(env: Env, args: []const [*:0]const u8, fd: ?sys.fd_t) void {
-    proc.spawnSelf(env.envp, args, fd);
-}
-
-/// relaunch.pin
-pub fn spawnPin(env: Env, path: [:0]const u8, at: ?[2]i32) void {
-    relaunch.pin(env, path, at);
-}
-
-/// relaunch.quick for a kept capture.
-pub fn spawnQuick(gpa: std.mem.Allocator, env: Env, k: *const Kept, ready: ?sys.fd_t) void {
-    _ = gpa;
-    relaunch.quick(env, k.root(), k.id.slice(), ready);
-}
-
-test {
-    _ = @import("kvfile.zig");
-    _ = @import("ipc.zig");
-    _ = @import("relaunch.zig");
-    _ = @import("report.zig");
 }
 
 test "thumbnails fit the box and average colours" {

@@ -9,7 +9,7 @@
 const std = @import("std");
 const png = @import("../../gfx/png.zig");
 const env_mod = @import("../env.zig");
-const keep = @import("../keep.zig");
+const relaunch = @import("../relaunch.zig");
 const sys = @import("../../platform/api.zig").sys;
 const state = @import("state.zig");
 
@@ -41,9 +41,7 @@ pub fn start(p: *Pin) !void {
     errdefer sys.unlink(path) catch {};
     const fds = try sys.pipe();
     e.fd = fds[0];
-    var fd_buf: [16]u8 = undefined;
-    const fd_arg = try std.fmt.bufPrintSentinel(&fd_buf, "{d}", .{fds[1]}, 0);
-    keep.spawnKeeping(p.env, &.{ "edit", path.ptr, "--pin-fd", fd_arg.ptr }, fds[1]);
+    relaunch.editForPin(p.env, path, fds[1]);
     sys.close(fds[1]);
     p.edit = e;
     p.hover = .none;
