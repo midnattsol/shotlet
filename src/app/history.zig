@@ -17,6 +17,7 @@
 const std = @import("std");
 const sys = @import("../platform/api.zig").sys;
 const env_mod = @import("env.zig");
+const kvfile = @import("kvfile.zig");
 
 pub const Id = struct {
     buf: [32]u8 = undefined,
@@ -70,49 +71,39 @@ pub const Meta = struct {
         self.* = .{};
     }
 
+    const header = "shotlet-history 1";
+
     pub fn format(self: *const Meta, alloc: std.mem.Allocator) ![]u8 {
-        var out: std.ArrayList(u8) = .empty;
-        errdefer out.deinit(alloc);
-        try out.print(alloc, "shotlet-history 1\ntime={d}\nsize={d}x{d}\n", .{ self.time_ms, self.width, self.height });
-        if (self.saved.len > 0) {
-            try out.appendSlice(alloc, "saved=");
-            try escape(alloc, &out, self.saved);
-            try out.append(alloc, '\n');
-        }
-        if (self.at) |a| try out.print(alloc, "at={d},{d}\n", .{ a[0], a[1] });
-        if (self.ocr) |o| {
-            try out.appendSlice(alloc, "ocr=");
-            try escape(alloc, &out, o);
-            try out.append(alloc, '\n');
-        }
-        return out.toOwnedSlice(alloc);
+        var w = try kvfile.Writer.init(alloc, header);
+        errdefer w.deinit();
+        try w.int("time", self.time_ms);
+        try w.size("size", self.width, self.height);
+        if (self.saved.len > 0) try w.str("saved", self.saved);
+        if (self.at) |a| try w.point("at", a);
+        if (self.ocr) |o| try w.str("ocr", o);
+        return w.finish();
     }
 
     pub fn parse(alloc: std.mem.Allocator, data: []const u8) !Meta {
-        var lines = std.mem.splitScalar(u8, data, '\n');
-        if (!std.mem.eql(u8, lines.next() orelse "", "shotlet-history 1")) return error.BadMeta;
+        var r = kvfile.Reader.init(data, header) catch return error.BadMeta;
         var m: Meta = .{};
         errdefer m.deinit(alloc);
         var have_time = false;
-        while (lines.next()) |line| {
-            const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
-            const k = line[0..eq];
-            const v = line[eq + 1 ..];
-            if (std.mem.eql(u8, k, "time")) {
-                m.time_ms = std.fmt.parseInt(i64, v, 10) catch return error.BadMeta;
+        while (r.next()) |f| {
+            if (f.is("time")) {
+                m.time_ms = std.fmt.parseInt(i64, f.value, 10) catch return error.BadMeta;
                 have_time = true;
-            } else if (std.mem.eql(u8, k, "size")) {
-                const x = std.mem.indexOfScalar(u8, v, 'x') orelse return error.BadMeta;
-                m.width = std.fmt.parseInt(u32, v[0..x], 10) catch return error.BadMeta;
-                m.height = std.fmt.parseInt(u32, v[x + 1 ..], 10) catch return error.BadMeta;
-            } else if (std.mem.eql(u8, k, "saved")) {
+            } else if (f.is("size")) {
+                const sz = kvfile.parseSize(f.value) orelse return error.BadMeta;
+                m.width, m.height = sz;
+            } else if (f.is("saved")) {
                 alloc.free(m.saved);
-                m.saved = try unescape(alloc, v);
-            } else if (std.mem.eql(u8, k, "at")) {
-                m.at = parsePoint(v);
-            } else if (std.mem.eql(u8, k, "ocr")) {
+                m.saved = try kvfile.text(alloc, f.value);
+            } else if (f.is("at")) {
+                m.at = parsePoint(f.value);
+            } else if (f.is("ocr")) {
                 if (m.ocr) |o| alloc.free(o);
-                m.ocr = try unescape(alloc, v);
+                m.ocr = try kvfile.text(alloc, f.value);
             }
         }
         if (!have_time) return error.BadMeta;
@@ -122,39 +113,7 @@ pub const Meta = struct {
 
 /// "X,Y": a point on the desktop, as the meta's `at=` and `shotlet pin
 /// --at` write it.
-pub fn parsePoint(s: []const u8) ?[2]i32 {
-    var it = std.mem.splitScalar(u8, s, ',');
-    const x = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
-    const y = std.fmt.parseInt(i32, it.next() orelse return null, 10) catch return null;
-    return if (it.next() == null) .{ x, y } else null;
-}
-
-/// Backslash escapes for \, newline and CR, so values stay on one line.
-fn escape(alloc: std.mem.Allocator, out: *std.ArrayList(u8), s: []const u8) !void {
-    for (s) |c| switch (c) {
-        '\\' => try out.appendSlice(alloc, "\\\\"),
-        '\n' => try out.appendSlice(alloc, "\\n"),
-        '\r' => try out.appendSlice(alloc, "\\r"),
-        else => try out.append(alloc, c),
-    };
-}
-
-fn unescape(alloc: std.mem.Allocator, s: []const u8) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(alloc);
-    var i: usize = 0;
-    while (i < s.len) : (i += 1) {
-        if (s[i] == '\\' and i + 1 < s.len) {
-            i += 1;
-            try out.append(alloc, switch (s[i]) {
-                'n' => '\n',
-                'r' => '\r',
-                else => s[i],
-            });
-        } else try out.append(alloc, s[i]);
-    }
-    return out.toOwnedSlice(alloc);
-}
+pub const parsePoint = kvfile.parsePoint;
 
 pub const Entry = struct {
     id: Id,
@@ -194,6 +153,11 @@ pub const NewEntry = struct {
     thumb_png: []const u8,
     source_png: ?[]const u8 = null,
     doc: ?[]const u8 = null,
+    /// more files of the entry (a recording's `video` and `strip.png`),
+    /// there from the moment it appears
+    extras: []const Extra = &.{},
+
+    pub const Extra = struct { name: []const u8, data: []const u8 };
 };
 
 /// Write a new entry; it becomes visible all at once. Returns its id.
@@ -210,6 +174,7 @@ pub fn create(alloc: std.mem.Allocator, root: []const u8, e: NewEntry) !Id {
     try writeIn(tmp, "thumb.png", e.thumb_png);
     if (e.source_png) |d| try writeIn(tmp, "source.png", d);
     if (e.doc) |d| try writeIn(tmp, "doc", d);
+    for (e.extras) |x| try writeIn(tmp, x.name, x.data);
     try writeIn(tmp, "meta", meta);
     var dst_buf: [1200]u8 = undefined;
     try sys.rename(tmp, try std.fmt.bufPrint(&dst_buf, "{s}/{s}", .{ root, id.slice() }));

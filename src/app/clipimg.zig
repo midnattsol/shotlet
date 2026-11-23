@@ -7,7 +7,8 @@
 
 const std = @import("std");
 const env_mod = @import("env.zig");
-const keep = @import("keep.zig");
+const relaunch = @import("relaunch.zig");
+const report = @import("report.zig");
 const sys = @import("../platform/api.zig").sys;
 const window = @import("../platform/api.zig").window;
 const imgload = @import("../gfx/imgload.zig");
@@ -43,11 +44,16 @@ pub fn readPng(gpa: std.mem.Allocator, env: Env) ![]u8 {
     return d.data;
 }
 
-/// `shotlet pin` without a file.
+/// `shotlet pin` without a file. Nothing to pin is reported (on the
+/// screen too: a shortcut has no terminal) and ends with status 1.
 pub fn pinClipboard(gpa: std.mem.Allocator, env: Env) !void {
     const data = readPng(gpa, env) catch |err| {
-        std.log.err("pin: no image on the clipboard ({t})", .{err});
-        return err;
+        std.log.warn("pin: no image from the clipboard ({t})", .{err});
+        switch (err) {
+            error.NoImageOnClipboard => report.problem(env, "No image on the clipboard", "Copy an image, then pin it"),
+            else => report.failed(env, "Couldn\u{2019}t read the clipboard", err),
+        }
+        return report.exitIfReported(report.Reported);
     };
     var img = blk: {
         defer gpa.free(data);
@@ -66,15 +72,15 @@ pub fn takeDrop(gpa: std.mem.Allocator, env: Env, win: *window.Window) void {
     if (win.drag_state != .none) return;
     var buf: env_mod.PathBuf = undefined;
     const path = if (std.mem.eql(u8, d.mime, "text/uri-list"))
-        imgload.firstFileUri(buf[0 .. buf.len - 1], d.data) orelse return
+        imgload.firstFileUri(&buf, d.data) orelse return
     else
         savedDrop(gpa, env, d.data, &buf) catch |err| {
             std.log.warn("drop: cannot keep the image: {t}", .{err});
+            report.failed(env, "Couldn\u{2019}t open the dropped image", err);
             return;
         };
-    buf[path.len] = 0;
     std.log.info("drop: opening {s}", .{path});
-    keep.spawnSelf(env, &.{ "edit", buf[0..path.len :0].ptr });
+    relaunch.editFile(env, path);
 }
 
 /// A dropped image kept as a file in the cache, for `shotlet edit`.
@@ -83,7 +89,7 @@ fn savedDrop(gpa: std.mem.Allocator, env: Env, data: []const u8, buf: []u8) ![]c
     if (imgload.sniff(data) == .unknown) return error.UnknownImageFormat;
     var dir_buf: env_mod.PathBuf = undefined;
     const dir = try env_mod.ensureCacheDir(&dir_buf, env.home, "drop");
-    const path = try std.fmt.bufPrint(buf[0 .. buf.len - 1], "{s}/dropped-{d}.png", .{ dir, sys.realtimeMs() });
+    const path = try std.fmt.bufPrint(buf, "{s}/dropped-{d}.png", .{ dir, sys.realtimeMs() });
     try sys.writeFileExclusive(path, data, 0o600);
     return path;
 }

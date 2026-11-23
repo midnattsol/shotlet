@@ -121,7 +121,7 @@ fn copyText(ed: *Editor, words: []const page_mod.Word) !void {
     ed.tools.toast.show(.done, say, 2400);
     if (ed.tools.text_capture) {
         // done: a toast of its own says so once the editor is gone
-        if (launch.env) |env| @import("../../app/keep.zig").spawnSelf(env, &.{ "toast", "Copied", firstLineZ(&msg, first) });
+        if (launch.env) |env| @import("../../app/report.zig").done(env, "Copied", first);
         ed.finish(.copied);
     }
 }
@@ -129,13 +129,6 @@ fn copyText(ed: *Editor, words: []const page_mod.Word) !void {
 fn firstLine(text: []const u8) []const u8 {
     const l = text[0 .. std.mem.indexOfScalar(u8, text, '\n') orelse text.len];
     return l[0..@min(l.len, 120)];
-}
-
-fn firstLineZ(buf: []u8, s: []const u8) [*:0]const u8 {
-    const n = @min(s.len, buf.len - 1);
-    std.mem.copyForwards(u8, buf[0..n], s[0..n]);
-    buf[n] = 0;
-    return buf[0..n :0].ptr;
 }
 
 test "first lines" {

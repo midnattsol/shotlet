@@ -9,6 +9,8 @@ const media = @import("../platform/api.zig").record;
 const env_mod = @import("../app/env.zig");
 const config = @import("../app/config.zig");
 const keep = @import("../app/keep.zig");
+const relaunch = @import("../app/relaunch.zig");
+const report = @import("../app/report.zig");
 const sys = @import("../platform/api.zig").sys;
 const window = @import("../platform/api.zig").window;
 const settings_mod = @import("settings.zig");
@@ -20,14 +22,23 @@ const cli = @import("cli.zig");
 const Env = env_mod.Env;
 
 /// Record `a.area` (or the monitor for --full); `picked` is the area the
-/// picker returned, when it ran.
+/// picker returned, when it ran. A recording that cannot start or be
+/// kept is reported (app/report.zig) and ends the process with status 1.
 pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Settings, picked: ?region.Rect) !void {
+    record(gpa, env, a, set, picked) catch |err| return report.exitIfReported(err);
+}
+
+fn record(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Settings, picked: ?region.Rect) !void {
     var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
     var cfg = config.load(gpa, env.home);
     var server = ctlsock.Server.listen(env.runtime_dir, env.session.tag()) catch |err| {
-        std.log.warn("record: another recording is under way ({t})", .{err});
-        return err;
+        std.log.warn("record: no control socket ({t})", .{err});
+        if (err == error.AddressInUse)
+            report.problem(env, "Another recording is under way", "Stop it first: shotlet record --stop")
+        else
+            report.failed(env, "Recording didn\u{2019}t start", err);
+        return report.Reported;
     };
     defer server.close();
     const area = picked orelse a.area orelse try fullArea(gpa, env);
@@ -56,11 +67,13 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
         },
         .failed => |e| {
             std.log.warn("record: could not start: {t}", .{e});
-            return e;
+            report.failed(env, "Recording didn\u{2019}t start", e);
+            return report.Reported;
         },
     };
     media.watchStop(&bus) catch {};
     const outcome = loop(&rec, &bus, &server, if (ctl) |*c| c else null, a.seconds);
+    if (rec.engine.failed()) |err| report.failed(env, "The recording stopped early", err);
     if (ctl) |*c| c.close();
     ctl = null;
     switch (outcome) {
@@ -68,7 +81,8 @@ pub fn run(gpa: std.mem.Allocator, env: Env, a: cli.Args, set: settings_mod.Sett
         .stop => {
             const kept = rec.finish(&cfg) catch |err| {
                 std.log.warn("record: could not finish: {t}", .{err});
-                return err;
+                report.failed(env, "The recording couldn\u{2019}t be saved", err);
+                return report.Reported;
             };
             if (kept) |k| if (cfg.showsThumbnail(true)) showThumbnail(env, &k);
         },
@@ -152,9 +166,5 @@ fn fullArea(gpa: std.mem.Allocator, env: Env) !region.Rect {
 
 /// The floating thumbnail of the recording (`shotlet quick-video`).
 fn showThumbnail(env: Env, k: *const keep.Kept) void {
-    var rb: [1100]u8 = undefined;
-    var ib: [40]u8 = undefined;
-    const root = std.fmt.bufPrintSentinel(&rb, "{s}", .{k.root()}, 0) catch return;
-    const id = std.fmt.bufPrintSentinel(&ib, "{s}", .{k.id.slice()}, 0) catch return;
-    keep.spawnSelf(env, &.{ "quick-video", root.ptr, id.ptr });
+    relaunch.quickVideo(env, k.root(), k.id.slice());
 }

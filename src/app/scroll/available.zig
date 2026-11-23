@@ -9,8 +9,7 @@ const std = @import("std");
 const platform = @import("../../platform/api.zig");
 const desktop = platform.desktop;
 const shell = platform.shell;
-const sys = platform.sys;
-const keep = @import("../keep.zig");
+const report = @import("../report.zig");
 const Env = @import("../env.zig").Env;
 
 pub const Support = platform.capture.ScrollSupport;
@@ -90,21 +89,9 @@ pub fn ensure(gpa: std.mem.Allocator, env: Env) bool {
     };
     defer conn.deinit();
     const n = notice(platform.capture.scrollSupport(gpa, env, &conn), shell.words()) orelse return true;
-    tell(env, &n);
+    // stderr ("shotlet scroll: ..."), the log and a card on the screen
+    report.problem(env, n.title(), n.body());
     return false;
-}
-
-/// stderr, the log and a notice on the screen (`shotlet toast --info`).
-fn tell(env: Env, n: *const Notice) void {
-    std.log.warn("scrolling capture: {s}. {s}", .{ n.title(), n.body() });
-    var buf: [256]u8 = undefined;
-    const line = std.fmt.bufPrint(&buf, "shotlet scroll: {s}. {s}.\n", .{ n.title(), n.body() }) catch "shotlet scroll: not available here\n";
-    sys.writeAll(2, line) catch {};
-    var tz: [96:0]u8 = undefined;
-    var bz: [128:0]u8 = undefined;
-    const t = std.fmt.bufPrintSentinel(&tz, "{s}", .{n.title()}, 0) catch return;
-    const b = std.fmt.bufPrintSentinel(&bz, "{s}", .{n.body()}, 0) catch return;
-    keep.spawnSelf(env, &.{ "toast", "--info", t.ptr, b.ptr });
 }
 
 const gnome_words: shell.Words = .{ .title = "GNOME integration", .command = "shotlet gnome-integration" };

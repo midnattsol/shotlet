@@ -9,7 +9,7 @@
 
 const std = @import("std");
 const capture = @import("../capture.zig");
-const keep_mod = @import("../keep.zig");
+const relaunch = @import("../relaunch.zig");
 const mode_flow = @import("../modes/flow.zig");
 const editor_mod = @import("../../ui/editor.zig");
 const record_cli = @import("../../record/cli.zig");
@@ -39,5 +39,5 @@ pub fn record(c: mode_flow.Ctx, ed: *Editor, cap: *const capture.Capture, overla
 
 pub fn restart(c: mode_flow.Ctx, ed: *Editor) void {
     leave(ed, c.win);
-    keep_mod.spawnSelf(c.env, &.{ed.next_capture.ptr});
+    relaunch.capture(c.env, ed.next_capture);
 }

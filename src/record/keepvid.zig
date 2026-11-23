@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const history = @import("../app/history.zig");
+const kvfile = @import("../app/kvfile.zig");
 const keep = @import("../app/keep.zig");
 const config = @import("../app/config.zig");
 const env_mod = @import("../app/env.zig");
@@ -29,30 +30,37 @@ pub const Info = struct {
     /// frame number of each filmstrip picture, "0,12,24"
     strip: []const u8 = "",
 
-    pub fn format_(self: *const Info, gpa: std.mem.Allocator) ![]u8 {
-        return std.fmt.allocPrint(gpa, "shotlet-video 1\npath={s}\nformat={t}\nduration_ms={d}\nframes={d}\nfps={d}\nsize={d}x{d}\nstrip={s}\n", .{ self.path, self.format, self.duration_ms, self.frames, self.fps, self.width, self.height, self.strip });
+    const header = "shotlet-video 1";
+
+    pub fn serialize(self: *const Info, gpa: std.mem.Allocator) ![]u8 {
+        var w = try kvfile.Writer.init(gpa, header);
+        errdefer w.deinit();
+        try w.str("path", self.path);
+        try w.tag("format", self.format);
+        try w.int("duration_ms", self.duration_ms);
+        try w.int("frames", self.frames);
+        try w.int("fps", self.fps);
+        try w.size("size", self.width, self.height);
+        try w.str("strip", self.strip);
+        return w.finish();
     }
 
-    /// Values point into `data`.
-    pub fn parse(data: []const u8) !Info {
-        var it = std.mem.splitScalar(u8, data, '\n');
-        if (!std.mem.eql(u8, it.next() orelse "", "shotlet-video 1")) return error.BadVideoInfo;
+    /// Values point into `data`, whose text values are unescaped where
+    /// they lie.
+    pub fn parse(data: []u8) !Info {
+        var r = kvfile.Reader.init(data, header) catch return error.BadVideoInfo;
         var i: Info = .{};
-        while (it.next()) |line| {
-            const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
-            const k = line[0..eq];
-            const v = line[eq + 1 ..];
-            if (std.mem.eql(u8, k, "path")) i.path = v;
-            if (std.mem.eql(u8, k, "format")) i.format = std.meta.stringToEnum(sink.Format, v) orelse .mp4;
-            if (std.mem.eql(u8, k, "duration_ms")) i.duration_ms = std.fmt.parseInt(i64, v, 10) catch 0;
-            if (std.mem.eql(u8, k, "frames")) i.frames = std.fmt.parseInt(u64, v, 10) catch 0;
-            if (std.mem.eql(u8, k, "fps")) i.fps = std.fmt.parseInt(u32, v, 10) catch 30;
-            if (std.mem.eql(u8, k, "strip")) i.strip = v;
-            if (std.mem.eql(u8, k, "size")) {
-                const x = std.mem.indexOfScalar(u8, v, 'x') orelse continue;
-                i.width = std.fmt.parseInt(u32, v[0..x], 10) catch 0;
-                i.height = std.fmt.parseInt(u32, v[x + 1 ..], 10) catch 0;
-            }
+        while (r.next()) |f| {
+            const v = f.value;
+            if (f.is("path")) i.path = kvfile.textIn(data, v);
+            if (f.is("format")) i.format = std.meta.stringToEnum(sink.Format, v) orelse .mp4;
+            if (f.is("duration_ms")) i.duration_ms = std.fmt.parseInt(i64, v, 10) catch 0;
+            if (f.is("frames")) i.frames = std.fmt.parseInt(u64, v, 10) catch 0;
+            if (f.is("fps")) i.fps = std.fmt.parseInt(u32, v, 10) catch 30;
+            if (f.is("strip")) i.strip = kvfile.textIn(data, v);
+            if (f.is("size")) if (kvfile.parseSize(v)) |sz| {
+                i.width, i.height = sz;
+            };
         }
         if (i.path.len == 0) return error.BadVideoInfo;
         return i;
@@ -62,9 +70,7 @@ pub const Info = struct {
 /// Read an entry's video info (null when it is not a recording). The
 /// values point into the returned buffer.
 pub fn read(gpa: std.mem.Allocator, root: []const u8, id: []const u8) ?struct { info: Info, buf: []u8 } {
-    var pbuf: [1200]u8 = undefined;
-    const p = history.entryPath(&pbuf, root, id, "video") catch return null;
-    const data = sys.readFileAlloc(gpa, p, 64 * 1024) catch return null;
+    const data = history.readFile(gpa, root, id, .video) catch return null;
     const info = Info.parse(data) catch {
         gpa.free(data);
         return null;
@@ -89,44 +95,57 @@ pub fn store(gpa: std.mem.Allocator, env: env_mod.Env, cfg: *const config.Config
 }
 
 fn storeInner(gpa: std.mem.Allocator, env: env_mod.Env, cfg: *const config.Config, what: What) !?keep.Kept {
-    if (!cfg.history and !cfg.thumbnails()) return null;
-    var k: keep.Kept = .{ .id = undefined };
-    k.root_len = (try keep.rootFor(cfg, env, &k.root_buf)).len;
+    if (!keep.wanted(cfg)) return null;
     const image = try png.encode(gpa, what.first, what.first_w, what.first_h);
     defer gpa.free(image);
-    const t = try keep.thumbnail(gpa, what.first, what.first_w, what.first_h, keep.thumb_w, keep.thumb_h);
-    defer gpa.free(t.pixels);
-    const thumb = try png.encode(gpa, t.pixels, t.width, t.height);
-    defer gpa.free(thumb);
-    k.id = try history.create(gpa, k.root(), .{
+    const info = try what.info.serialize(gpa);
+    defer gpa.free(info);
+    var extras: [2]history.NewEntry.Extra = .{ .{ .name = "video", .data = info }, undefined };
+    var n: usize = 1;
+    const strip_png: ?[]u8 = if (what.strip.n > 0) try stripPng(gpa, what.strip) else null;
+    defer if (strip_png) |sp| gpa.free(sp);
+    if (strip_png) |sp| {
+        extras[1] = .{ .name = "strip.png", .data = sp };
+        n = 2;
+    }
+    const k = try keep.store(gpa, env, cfg, .{
         .meta = .{ .time_ms = sys.realtimeMs(), .width = what.info.width, .height = what.info.height, .saved = what.info.path },
         .image_png = image,
-        .thumb_png = thumb,
+        .pixels = what.first,
+        .width = what.first_w,
+        .height = what.first_h,
+        .extras = extras[0..n],
     });
-    const info = try what.info.format_(gpa);
-    defer gpa.free(info);
-    try history.replaceFile(k.root(), k.id.slice(), "video", info);
-    if (what.strip.n > 0) {
-        const px = try what.strip.joined(gpa);
-        defer gpa.free(px);
-        const sp = try png.encode(gpa, px, what.strip.w * @as(u32, @intCast(what.strip.n)), what.strip.h);
-        defer gpa.free(sp);
-        try history.replaceFile(k.root(), k.id.slice(), "strip.png", sp);
-    }
-    if (cfg.history) _ = history.prune(gpa, k.root(), cfg.history_max, @as(u64, cfg.history_max_mb) * 1024 * 1024) catch 0;
+    keep.prune(gpa, cfg, k.root());
     return k;
+}
+
+fn stripPng(gpa: std.mem.Allocator, s: *const strip_mod.Strip) ![]u8 {
+    const px = try s.joined(gpa);
+    defer gpa.free(px);
+    return png.encode(gpa, px, s.w * @as(u32, @intCast(s.n)), s.h);
 }
 
 test "video info round-trips" {
     const gpa = std.testing.allocator;
-    const i: Info = .{ .path = "/v/a b.mp4", .format = .gif, .duration_ms = 2500, .frames = 38, .fps = 15, .width = 320, .height = 200, .strip = "0,4,8" };
-    const s = try i.format_(gpa);
+    const i: Info = .{ .path = "/v/a b\nc\\.mp4", .format = .gif, .duration_ms = 2500, .frames = 38, .fps = 15, .width = 320, .height = 200, .strip = "0,4,8" };
+    const s = try i.serialize(gpa);
     defer gpa.free(s);
+    // a newline in the path stays inside its value
+    try std.testing.expectEqual(@as(usize, 8), std.mem.count(u8, s, "\n"));
     const back = try Info.parse(s);
-    try std.testing.expectEqualStrings("/v/a b.mp4", back.path);
+    try std.testing.expectEqualStrings("/v/a b\nc\\.mp4", back.path);
     try std.testing.expectEqual(sink.Format.gif, back.format);
     try std.testing.expectEqual(@as(i64, 2500), back.duration_ms);
     try std.testing.expectEqual(@as(u32, 200), back.height);
     try std.testing.expectEqualStrings("0,4,8", back.strip);
-    try std.testing.expectError(error.BadVideoInfo, Info.parse("nope"));
+    var nope = "nope".*;
+    try std.testing.expectError(error.BadVideoInfo, Info.parse(&nope));
+}
+
+test "an older video file, its path unescaped, still reads" {
+    var old = "shotlet-video 1\npath=/v/a b.mp4\nformat=mp4\nduration_ms=10\nframes=1\nfps=30\nsize=4x2\nstrip=0\n".*;
+    const i = try Info.parse(&old);
+    try std.testing.expectEqualStrings("/v/a b.mp4", i.path);
+    try std.testing.expectEqual(@as(u32, 4), i.width);
 }

@@ -12,7 +12,7 @@ const transfer = @import("../ui/transfer.zig");
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const history = @import("../app/history.zig");
-const keep = @import("../app/keep.zig");
+const relaunch = @import("../app/relaunch.zig");
 const sys = @import("../platform/api.zig").sys;
 const png = @import("../gfx/png.zig");
 const text = @import("../gfx/text.zig");
@@ -175,11 +175,7 @@ const Quick = struct {
                 self.say("Saved");
             },
             .trim => {
-                var rb: [1100]u8 = undefined;
-                var ib: [40]u8 = undefined;
-                const r = try std.fmt.bufPrintSentinel(&rb, "{s}", .{self.root}, 0);
-                const i = try std.fmt.bufPrintSentinel(&ib, "{s}", .{self.id}, 0);
-                keep.spawnSelf(self.env, &.{ "trim", r.ptr, i.ptr });
+                relaunch.trim(self.env, self.root, self.id);
                 self.done = true;
             },
             .body => {},
@@ -189,8 +185,7 @@ const Quick = struct {
     fn startDrag(self: *Quick) !void {
         const uri = try transfer.fileUriList(self.gpa, self.info.path);
         errdefer self.gpa.free(uri);
-        var pbuf: [1200]u8 = undefined;
-        const poster = try sys.readFileAlloc(self.gpa, try history.entryPath(&pbuf, self.root, self.id, "thumb.png"), 64 * 1024 * 1024);
+        const poster = try history.readFile(self.gpa, self.root, self.id, .thumb);
         try self.drag.start(&self.win, poster, uri, null);
         self.dirty = true;
         std.log.info("quick video: dragging {s}", .{self.info.path});
@@ -226,9 +221,8 @@ const Quick = struct {
     }
 };
 
-fn loadPng(gpa: std.mem.Allocator, root: []const u8, id: []const u8, name: []const u8) !png.Image {
-    var pbuf: [1200]u8 = undefined;
-    const data = try sys.readFileAlloc(gpa, try history.entryPath(&pbuf, root, id, name), 64 * 1024 * 1024);
+fn loadPng(gpa: std.mem.Allocator, root: []const u8, id: []const u8, f: history.File) !png.Image {
+    const data = try history.readFile(gpa, root, id, f);
     defer gpa.free(data);
     return png.decode(gpa, data);
 }
@@ -237,9 +231,9 @@ pub fn run(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u8) !
     if (!history.Id.valid(id)) return error.BadId;
     const vi = keepvid.read(gpa, root, id) orelse return error.NotARecording;
     defer gpa.free(vi.buf);
-    var thumb = try loadPng(gpa, root, id, "thumb.png");
+    var thumb = try loadPng(gpa, root, id, .thumb);
     defer thumb.deinit(gpa);
-    var strip: ?png.Image = loadPng(gpa, root, id, "strip.png") catch null;
+    var strip: ?png.Image = loadPng(gpa, root, id, .strip) catch null;
     defer if (strip) |*s| s.deinit(gpa);
     var n_pics: u32 = 0;
     if (vi.info.strip.len > 0) n_pics = @intCast(std.mem.count(u8, vi.info.strip, ",") + 1);

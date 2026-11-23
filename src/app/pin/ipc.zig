@@ -4,55 +4,49 @@
 
 const std = @import("std");
 const env_mod = @import("../env.zig");
+const ipc = @import("../ipc.zig");
 const sys = @import("../../platform/api.zig").sys;
 const Env = env_mod.Env;
 
 /// This pin's socket, listening; `fd` -1 when there is none (the pin
 /// still works, Close All Pins just does not reach it).
 pub const Listener = struct {
+    server: ipc.Server = .{},
+    /// server.fd, which pin.zig polls
     fd: sys.fd_t = -1,
-    path_buf: [600]u8 = undefined,
-    path_len: usize = 0,
 
     pub fn open(env: Env) Listener {
-        var l: Listener = .{};
-        var dir_buf: [512]u8 = undefined;
-        const dir = dirPath(&dir_buf, env) catch return l;
+        var dir_buf: ipc.PathBuf = undefined;
+        const dir = dirPath(&dir_buf, env) catch return .{};
         sys.mkdirMode(dir, 0o700);
-        const path = std.fmt.bufPrint(&l.path_buf, "{s}/{d}.sock", .{ dir, sys.processId() }) catch return l;
-        l.path_len = path.len;
-        // a socket left by an earlier process with our number is stale
-        sys.unlink(path) catch {};
-        l.fd = sys.listenUnix(path) catch |err| blk: {
+        var pbuf: ipc.PathBuf = undefined;
+        const path = std.fmt.bufPrint(&pbuf, "{s}/{d}.sock", .{ dir, sys.processId() }) catch return .{};
+        const server = ipc.Server.listen(path) catch |err| {
             std.log.warn("pin: Close All Pins will not reach this pin: {t}", .{err});
-            break :blk -1;
+            return .{};
         };
-        return l;
+        return .{ .server = server, .fd = server.fd };
     }
 
     pub fn close(l: *Listener) void {
-        if (l.fd < 0) return;
-        sys.close(l.fd);
+        l.server.close();
         l.fd = -1;
-        sys.unlink(l.path_buf[0..l.path_len]) catch {};
     }
 
     /// True when another pin asked this one to close.
     pub fn closeAsked(l: *Listener) bool {
         var asked = false;
-        while (sys.accept(l.fd) catch null) |fd| {
-            defer sys.close(fd);
-            var buf: [16]u8 = undefined;
-            if (!(sys.waitReadable(fd, sys.monoMs() + 500) catch false)) continue;
-            const n = sys.read(fd, &buf) catch continue;
-            if (isClose(buf[0..n])) asked = true;
+        var buf: [16]u8 = undefined;
+        while (l.server.next(&buf)) |req| {
+            if (isClose(req.line)) asked = true;
+            req.close();
         }
         return asked;
     }
 };
 
 fn dirPath(buf: []u8, env: Env) ![]u8 {
-    return std.fmt.bufPrint(buf, "{s}/shotlet-pins-{s}", .{ env.runtime_dir, env.session.tag() });
+    return ipc.sessionPath(buf, env.runtime_dir, env.session.tag(), "pins", "");
 }
 
 fn isClose(msg: []const u8) bool {
@@ -62,27 +56,20 @@ fn isClose(msg: []const u8) bool {
 /// Ask every other pin to close; returns how many were asked. Sockets
 /// nobody answers on are stale and go.
 pub fn closeOthers(gpa: std.mem.Allocator, env: Env, own: *const Listener) usize {
-    var dir_buf: [512]u8 = undefined;
+    var dir_buf: ipc.PathBuf = undefined;
     const dir = dirPath(&dir_buf, env) catch return 0;
     const list = sys.listDir(gpa, dir) catch return 0;
     defer sys.freeNames(gpa, list);
     var n: usize = 0;
     for (list) |e| {
         if (e.is_dir or !std.mem.endsWith(u8, e.name, ".sock")) continue;
-        var pbuf: [600]u8 = undefined;
+        var pbuf: ipc.PathBuf = undefined;
         const path = std.fmt.bufPrint(&pbuf, "{s}/{s}", .{ dir, e.name }) catch continue;
-        if (std.mem.eql(u8, path, own.path_buf[0..own.path_len])) continue;
-        if (ask(path)) n += 1 else sys.unlink(path) catch {};
+        if (std.mem.eql(u8, path, own.server.path())) continue;
+        var ans: [1]u8 = undefined;
+        if (ipc.request(path, "close", &ans, null) != null) n += 1 else sys.unlink(path) catch {};
     }
     return n;
-}
-
-fn ask(path: []const u8) bool {
-    const fd = sys.socketUnixStream() catch return false;
-    defer sys.close(fd);
-    sys.connectUnix(fd, path) catch return false;
-    sys.writeAll(fd, "close\n") catch return false;
-    return true;
 }
 
 test "only a close message closes a pin" {
