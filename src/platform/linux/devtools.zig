@@ -7,7 +7,6 @@ const portal = @import("portal.zig");
 const png = @import("../../gfx/png.zig");
 const sys = @import("sys.zig");
 const Env = @import("../../app/env.zig").Env;
-const nowMs = @import("../../app/shot.zig").nowMs;
 const pw = @import("pw.zig");
 const capture = @import("../../app/capture.zig");
 const stitchStreams = @import("capture/screencast.zig").stitchStreams;
@@ -66,7 +65,7 @@ fn testGrab(gpa: std.mem.Allocator, env: Env) !void {
     var conn = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer conn.deinit();
     portal.registerApp(gpa, &conn);
-    const t0 = nowMs();
+    const t0 = sys.monoMs();
     var sc = switch (try portal.openScreenCast(gpa, &conn, cfg.scToken())) {
         .granted => |s| s,
         else => |o| {
@@ -75,7 +74,7 @@ fn testGrab(gpa: std.mem.Allocator, env: Env) !void {
         },
     };
     defer sc.deinit(gpa);
-    const t1 = nowMs();
+    const t1 = sys.monoMs();
     if (sc.start.restore_token) |t| {
         cfg.setScToken(t);
         @import("../../app/config.zig").saveScreencastToken(gpa, env.home, t) catch {};
@@ -86,7 +85,7 @@ fn testGrab(gpa: std.mem.Allocator, env: Env) !void {
     });
     var cap = try grabAndStitch(gpa, &conn, &sc, streams);
     defer cap.deinit(gpa);
-    const t2 = nowMs();
+    const t2 = sys.monoMs();
     std.debug.print("image: {d}x{d} grab+stitch={d}ms total={d}ms\n", .{ cap.image.width, cap.image.height, t2 - t1, t2 - t0 });
     const out = try png.encode(gpa, cap.image.pixels, cap.image.width, cap.image.height);
     defer gpa.free(out);
@@ -180,7 +179,6 @@ fn testDecode(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !voi
 fn writeDebug(gpa: std.mem.Allocator, env: Env, name: []const u8, data: []const u8) !void {
     const path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ env.runtime_dir, name });
     defer gpa.free(path);
-    sys.unlink(path) catch {};
-    try sys.writeFileExclusive(path, data, 0o600);
+    try @import("window/dump.zig").write(path, data);
     std.debug.print("wrote {s}\n", .{path});
 }

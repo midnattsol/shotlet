@@ -3,7 +3,7 @@
 //! ~/.config/shotlet/gnome-moved-keys) and giving it back exactly.
 
 const std = @import("std");
-const sys = @import("../sys.zig");
+const statefile = @import("../../../app/statefile.zig");
 const env_mod = @import("../../../app/env.zig");
 const gsettings = @import("gsettings.zig");
 const custom = @import("custom.zig");
@@ -42,12 +42,9 @@ fn accelInUse(arena: std.mem.Allocator, env: Env, accel: []const u8) bool {
     return false;
 }
 
-/// Where GNOME's own shortcuts that Shotlet took are remembered.
-fn keysBackupPath(buf: []u8, home: []const u8) ![]u8 {
-    var dir_buf: [1024]u8 = undefined;
-    const dir = try env_mod.configDir(&dir_buf, home);
-    return std.fmt.bufPrint(buf, "{s}/gnome-moved-keys", .{dir});
-}
+/// Where GNOME's own shortcuts that Shotlet took are remembered (beside
+/// the config).
+const backup_name = "gnome-moved-keys";
 
 /// A GNOME screenshot shortcut that holds one of ours: its value as it
 /// was, and what it keeps without our keys.
@@ -80,21 +77,17 @@ fn clashes(accel: []const u8, ours: []const []const u8) bool {
 
 /// Take our keys from GNOME's shortcuts, remembering them first.
 pub fn takeKeys(arena: std.mem.Allocator, env: Env, taken: []const Taken) !void {
-    var pbuf: [1100]u8 = undefined;
-    const bpath = try keysBackupPath(&pbuf, env.home);
     var records: std.ArrayList(u8) = .empty;
     for (taken) |t| try records.print(arena, "{s}\t{s}\t{s}\n", .{ shell_keys_schema, t.key, t.old });
     // remembered before anything changes
-    try custom.appendBackup(arena, env, bpath, records.items);
+    try statefile.append(arena, env.home, .config, backup_name, records.items, custom.backup_max);
     for (taken) |t| try gsettings.set(arena, env, null, shell_keys_schema, t.key, try gsettings.formatStrv(arena, t.new));
 }
 
 /// Give GNOME's screenshot shortcuts back exactly as they were (a key
 /// that was at its default is reset, not set to the same value).
 pub fn restoreKeys(arena: std.mem.Allocator, env: Env) !usize {
-    var pbuf: [1100]u8 = undefined;
-    const bpath = try keysBackupPath(&pbuf, env.home);
-    const data = sys.readFileAlloc(arena, bpath, 1024 * 1024) catch return 0;
+    const data = statefile.read(arena, env.home, .config, backup_name, custom.backup_max) catch return 0;
     var n: usize = 0;
     // the earliest record of a key is what it was before Shotlet
     var seen: std.ArrayList([]const u8) = .empty;
@@ -109,7 +102,7 @@ pub fn restoreKeys(arena: std.mem.Allocator, env: Env) !usize {
         try restoreKey(arena, env, schema, key, old);
         n += 1;
     }
-    sys.unlink(bpath) catch {};
+    _ = statefile.remove(env.home, .config, backup_name);
     return n;
 }
 

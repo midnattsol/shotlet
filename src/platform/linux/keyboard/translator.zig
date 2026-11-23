@@ -2,7 +2,8 @@
 //! modifier state -> keysym and UTF-8 text, via xkb or the US fallback.
 
 const std = @import("std");
-const linux = std.os.linux;
+const sys = @import("../sys.zig");
+const switches = @import("../../api/switches.zig");
 const xkb = @import("xkb.zig");
 const us = @import("us_layout.zig");
 const XK = @import("keysyms.zig").XK;
@@ -103,14 +104,11 @@ pub const Keyboard = struct {
     /// requires) and compile it. Does not close fd.
     pub fn setKeymapFd(self: *Keyboard, format: u32, fd: i32, size: u32) void {
         if (self.ctx == null or format != xkb.KEYMAP_FORMAT_TEXT_V1 or size == 0) return;
-        const rc = linux.mmap(null, size, .{ .READ = true }, .{ .TYPE = .PRIVATE }, fd, 0);
-        if (linux.errno(rc) != .SUCCESS) {
+        const mem = sys.mapFd(fd, size) catch {
             std.log.warn("keymap mmap failed; keeping the previous layout", .{});
             return;
-        }
-        const ptr: [*]align(std.heap.page_size_min) u8 = @ptrFromInt(rc);
-        defer _ = linux.munmap(ptr, size);
-        const mem = ptr[0..size];
+        };
+        defer sys.unmapFile(mem);
         // the keymap string is NUL terminated within size; refuse otherwise
         const nul = std.mem.indexOfScalar(u8, mem, 0) orelse {
             std.log.warn("keymap is not NUL terminated; ignoring it", .{});
@@ -265,18 +263,11 @@ pub const Keyboard = struct {
     }
 };
 
+/// The locale of character handling (LC_ALL, LC_CTYPE, LANG), for the
+/// compose table.
 fn localeName(buf: []u8) [*:0]const u8 {
-    for ([_][*:0]const u8{ "LC_ALL", "LC_CTYPE", "LANG" }) |name| {
-        if (std.c.getenv(name)) |v| {
-            const s = std.mem.span(v);
-            if (s.len > 0 and s.len < buf.len) {
-                @memcpy(buf[0..s.len], s);
-                buf[s.len] = 0;
-                return buf[0..s.len :0];
-            }
-        }
-    }
-    return "C";
+    const loc = switches.locale().of(.ctype) orelse return "C";
+    return (std.fmt.bufPrintSentinel(buf, "{s}", .{loc}, 0) catch return "C").ptr;
 }
 
 // --- tests ---

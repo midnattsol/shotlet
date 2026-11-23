@@ -78,40 +78,22 @@ pub fn piecePath(buf: []u8, runtime_dir: []const u8, id: []const u8, k: usize) !
 
 /// The capture directory must be ours, private and not a symlink.
 fn checkDir(runtime_dir: []const u8) !void {
-    const linux = std.os.linux;
-    var z: [1100]u8 = undefined;
-    const dir = try std.fmt.bufPrintSentinel(&z, "{s}/shotlet", .{runtime_dir}, 0);
-    var stx: linux.Statx = undefined;
-    if (linux.errno(linux.statx(linux.AT.FDCWD, dir.ptr, linux.AT.SYMLINK_NOFOLLOW, .{ .TYPE = true, .MODE = true, .UID = true }, &stx)) != .SUCCESS) return error.NotAShellCapture;
-    if (stx.mode & linux.S.IFMT != linux.S.IFDIR or stx.uid != linux.getuid() or stx.mode & 0o077 != 0) return error.NotAShellCapture;
+    var buf: [1100]u8 = undefined;
+    sys.checkPrivateDir(try dirPath(&buf, runtime_dir)) catch return error.NotAShellCapture;
 }
 
 /// Read one piece and delete it. Refuses a symlink, anything but a
 /// regular file, and a file that is not ours or that others may read.
 pub fn readAndRemove(gpa: std.mem.Allocator, path: []const u8) ![]u8 {
-    const linux = std.os.linux;
-    var z: [4096]u8 = undefined;
-    if (path.len >= z.len) return error.PathTooLong;
-    @memcpy(z[0..path.len], path);
-    z[path.len] = 0;
-    const rc = linux.openat(linux.AT.FDCWD, z[0..path.len :0].ptr, .{ .ACCMODE = .RDONLY, .CLOEXEC = true, .NOFOLLOW = true, .NONBLOCK = true }, 0);
     // whatever happens next, the capture does not stay on disk
     defer sys.unlink(path) catch {};
-    if (linux.errno(rc) != .SUCCESS) return error.NotAShellCapture;
-    const fd: sys.fd_t = @intCast(rc);
+    const fd = sys.openPrivateRegular(path) catch return error.NotAShellCapture;
     defer sys.close(fd);
-    var stx: linux.Statx = undefined;
-    if (linux.errno(linux.statx(fd, "", linux.AT.EMPTY_PATH, .{ .TYPE = true, .MODE = true, .UID = true, .SIZE = true }, &stx)) != .SUCCESS) return error.NotAShellCapture;
-    if (stx.mode & linux.S.IFMT != linux.S.IFREG or stx.uid != linux.getuid() or stx.mode & 0o077 != 0) return error.NotAShellCapture;
-    if (stx.size > 512 * 1024 * 1024) return error.FileTooBig;
-    const data = try gpa.alloc(u8, @intCast(stx.size));
+    const size = sys.fdSize(fd) catch return error.NotAShellCapture;
+    if (size > 512 * 1024 * 1024) return error.FileTooBig;
+    const data = try gpa.alloc(u8, @intCast(size));
     errdefer gpa.free(data);
-    var got: usize = 0;
-    while (got < data.len) {
-        const n = try sys.read(fd, data[got..]);
-        if (n == 0) return error.ShortRead;
-        got += n;
-    }
+    try sys.readExact(fd, data, null);
     return data;
 }
 
@@ -346,11 +328,9 @@ test "pieces are read once, deleted, and never through a symlink" {
 
     // a symlink in its place is not followed; the target stays
     var tbuf: [1200]u8 = undefined;
-    const target = try std.fmt.bufPrintSentinel(&tbuf, "{s}/keep.png", .{rt}, 0);
+    const target = try std.fmt.bufPrint(&tbuf, "{s}/keep.png", .{rt});
     try sys.writeFileExclusive(target, data, 0o600);
-    var lz: [1200]u8 = undefined;
-    const link = try std.fmt.bufPrintSentinel(&lz, "{s}", .{try piecePath(&pbuf, rt, "abc", 0)}, 0);
-    _ = std.os.linux.symlinkat(target.ptr, std.os.linux.AT.FDCWD, link.ptr);
+    try sys.symlink(target, try piecePath(&pbuf, rt, "abc", 0));
     try std.testing.expectError(error.NotAShellCapture, load(gpa, rt, .{ .id = "abc", .monitors = "0,0,2,1,1", .pieces = "0,0,2,1,1" }));
     try std.testing.expect(sys.mtimeSec(target) != null);
 
@@ -362,7 +342,9 @@ test "pieces are read once, deleted, and never through a symlink" {
     try std.testing.expect(sys.mtimeSec(try piecePath(&pbuf, rt, "abc", 1)) == null);
 
     // the directory open to others: refused
-    _ = std.os.linux.fchmodat(std.os.linux.AT.FDCWD, (try std.fmt.bufPrintSentinel(&lz, "{s}", .{dir}, 0)).ptr, 0o755);
+    const dfd = try sys.openDir(dir);
+    sys.fchmod(dfd, 0o755);
+    sys.close(dfd);
     try sys.writeFileExclusive(try piecePath(&pbuf, rt, "abc", 0), data, 0o600);
     try std.testing.expectError(error.NotAShellCapture, load(gpa, rt, .{ .id = "abc", .monitors = "0,0,2,1,1", .pieces = "0,0,2,1,1" }));
 }

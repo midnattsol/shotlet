@@ -176,16 +176,12 @@ pub fn freeList(alloc: std.mem.Allocator, entries: []Entry) void {
 
 /// $XDG_STATE_HOME/shotlet/history
 pub fn historyRoot(buf: []u8, home: []const u8) ![]u8 {
-    var tmp: [1024]u8 = undefined;
-    const state = try env_mod.stateDir(&tmp, home);
-    return std.fmt.bufPrint(buf, "{s}/history", .{state});
+    return env_mod.statePath(buf, home, "history");
 }
 
 /// $XDG_CACHE_HOME/shotlet/quick: captures shown while the history is off
 pub fn cacheRoot(buf: []u8, home: []const u8) ![]u8 {
-    var tmp: [1024]u8 = undefined;
-    const cache = try env_mod.cacheDir(&tmp, home);
-    return std.fmt.bufPrint(buf, "{s}/quick", .{cache});
+    return env_mod.cachePath(buf, home, "quick");
 }
 
 pub fn entryPath(buf: []u8, root: []const u8, id: []const u8, file: []const u8) ![]u8 {
@@ -231,21 +227,47 @@ fn writeIn(dir: []const u8, name: []const u8, data: []const u8) !void {
 /// Replace one file of an entry atomically (write aside, rename over).
 pub fn replaceFile(root: []const u8, id: []const u8, name: []const u8, data: []const u8) !void {
     if (!Id.valid(id)) return error.BadId;
-    var tmp_buf: [1200]u8 = undefined;
-    var rnd: [4]u8 = undefined;
-    sys.getRandom(&rnd);
-    const tmp = try std.fmt.bufPrint(&tmp_buf, "{s}/{s}/.{s}.{x}", .{ root, id, name, std.mem.readInt(u32, &rnd, .little) });
-    {
-        const fd = try sys.createExclusive(tmp, 0o600);
-        defer sys.close(fd);
-        errdefer sys.unlink(tmp) catch {};
-        try sys.writeAll(fd, data);
+    var dst_buf: env_mod.PathBuf = undefined;
+    try sys.writeAtomic(try entryPath(&dst_buf, root, id, name), data, 0o600);
+}
+
+/// The files of an entry, each with its name and the most it may hold.
+pub const File = enum {
+    image,
+    thumb,
+    source,
+    doc,
+    meta,
+    video,
+    strip,
+
+    pub fn name(self: File) []const u8 {
+        return switch (self) {
+            .image => "image.png",
+            .thumb => "thumb.png",
+            .source => "source.png",
+            .doc => "doc",
+            .meta => "meta",
+            .video => "video",
+            .strip => "strip.png",
+        };
     }
-    var dst_buf: [1200]u8 = undefined;
-    sys.rename(tmp, try entryPath(&dst_buf, root, id, name)) catch |err| {
-        sys.unlink(tmp) catch {};
-        return err;
-    };
+
+    pub fn maxBytes(self: File) usize {
+        return switch (self) {
+            .image => 512 << 20,
+            .source => 256 << 20,
+            .thumb, .doc, .strip => 64 << 20,
+            .meta, .video => 1 << 20,
+        };
+    }
+};
+
+/// One file of entry `id` (owned).
+pub fn readFile(alloc: std.mem.Allocator, root: []const u8, id: []const u8, f: File) ![]u8 {
+    if (!Id.valid(id)) return error.BadId;
+    var buf: env_mod.PathBuf = undefined;
+    return sys.readFileAlloc(alloc, try entryPath(&buf, root, id, f.name()), f.maxBytes());
 }
 
 /// Rewrite an entry's meta (e.g. after Save or OCR).
@@ -256,9 +278,7 @@ pub fn writeMeta(alloc: std.mem.Allocator, root: []const u8, id: []const u8, m: 
 }
 
 pub fn readMeta(alloc: std.mem.Allocator, root: []const u8, id: []const u8) !Meta {
-    if (!Id.valid(id)) return error.BadId;
-    var buf: [1200]u8 = undefined;
-    const data = try sys.readFileAlloc(alloc, try entryPath(&buf, root, id, "meta"), 1 << 20);
+    const data = try readFile(alloc, root, id, .meta);
     defer alloc.free(data);
     return Meta.parse(alloc, data);
 }

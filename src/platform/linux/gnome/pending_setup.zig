@@ -7,45 +7,31 @@
 //! answer, once.
 
 const std = @import("std");
-const sys = @import("../sys.zig");
-const env_mod = @import("../../../app/env.zig");
-const Env = env_mod.Env;
+const statefile = @import("../../../app/statefile.zig");
+const proc = @import("../proc.zig");
+const Env = @import("../../../app/env.zig").Env;
 
-fn markerPath(buf: []u8, home: []const u8) ![]u8 {
-    var dbuf: [1024]u8 = undefined;
-    const dir = try env_mod.stateDir(&dbuf, home);
-    return std.fmt.bufPrint(buf, "{s}/gnome-setup-pending", .{dir});
-}
+const file_name = "gnome-setup-pending";
 
 /// Remember to finish the install once the extension runs; `move`: the
 /// shortcuts go to it (--move-shortcut), else they stay (--keep-shortcut).
 pub fn record(home: []const u8, move: bool) void {
-    var dbuf: [1024]u8 = undefined;
-    const dir = env_mod.stateDir(&dbuf, home) catch return;
-    sys.mkdirAll(dir, 0o700);
-    var pbuf: [1100]u8 = undefined;
-    const p = markerPath(&pbuf, home) catch return;
-    sys.writeFile(p, if (move) "move\n" else "keep\n") catch |err|
+    statefile.write(home, .state, file_name, if (move) "move\n" else "keep\n") catch |err|
         std.log.warn("could not remember to finish the setup: {t}", .{err});
 }
 
 /// Nothing is pending any more (install ran by hand, or uninstall).
 pub fn clear(home: []const u8) void {
-    var pbuf: [1100]u8 = undefined;
-    sys.unlink(markerPath(&pbuf, home) catch return) catch {};
+    _ = statefile.remove(home, .state, file_name);
 }
 
 /// The recorded answer, taken: only the caller that removed the marker
 /// gets it, so the setup runs once.
 fn take(home: []const u8) ?bool {
-    var pbuf: [1100]u8 = undefined;
-    const p = markerPath(&pbuf, home) catch return null;
     var buf: [16]u8 = undefined;
-    const fd = sys.openRead(p) catch return null;
-    const n = sys.read(fd, &buf) catch 0;
-    sys.close(fd);
-    sys.unlink(p) catch return null;
-    return parseAnswer(buf[0..n]);
+    const answer = statefile.readBuf(home, .state, file_name, &buf) catch return null;
+    if (!statefile.remove(home, .state, file_name)) return null;
+    return parseAnswer(answer);
 }
 
 fn parseAnswer(s: []const u8) ?bool {
@@ -59,7 +45,7 @@ fn parseAnswer(s: []const u8) ?bool {
 pub fn finish(env: Env) void {
     const move = take(env.home) orelse return;
     std.log.info("finishing the GNOME integration setup ({s} the shortcuts)", .{if (move) "moving" else "keeping"});
-    @import("../../../app/keep.zig").spawnSelf(env, &.{ "gnome-integration", "install", if (move) "--move-shortcut" else "--keep-shortcut" });
+    proc.spawnSelf(env.envp, &.{ "gnome-integration", "install", if (move) "--move-shortcut" else "--keep-shortcut" }, null);
 }
 
 test "the recorded answer is read back, anything else is ignored" {

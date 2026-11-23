@@ -37,7 +37,6 @@ pub const poll = io.poll;
 pub const waitReadable = io.waitReadable;
 pub const memfdCreate = io.memfdCreate;
 pub const ftruncate = io.ftruncate;
-pub const ftruncateFd = io.ftruncateFd;
 pub const mmapRw = io.mmapRw;
 pub const munmap = io.munmap;
 pub const fsync = io.fsync;
@@ -50,6 +49,9 @@ pub const fdSize = io.fdSize;
 pub const isTerminal = io.isTerminal;
 pub const mapFile = io.mapFile;
 pub const unmapFile = io.unmapFile;
+pub const mapFd = io.mapFd;
+pub const readBounded = io.readBounded;
+pub const readExact = io.readExact;
 
 // files by path
 pub const openRead = fs.openRead;
@@ -59,6 +61,9 @@ pub const createWrite = fs.createWrite;
 pub const createExclusive = fs.createExclusive;
 pub const writeFileExclusive = fs.writeFileExclusive;
 pub const writeFile = fs.writeFile;
+pub const writeAtomic = fs.writeAtomic;
+pub const openPrivateRegular = fs.openPrivateRegular;
+pub const checkPrivateDir = fs.checkPrivateDir;
 pub const readFileAlloc = fs.readFileAlloc;
 pub const readFileBuf = fs.readFileBuf;
 pub const unlink = fs.unlink;
@@ -78,6 +83,8 @@ pub const removeTree = dir.removeTree;
 pub const DirEntry = dir.DirEntry;
 pub const listDir = dir.listDir;
 pub const freeNames = dir.freeNames;
+pub const EntryKind = dir.EntryKind;
+pub const eachEntry = dir.eachEntry;
 
 // unix sockets
 pub const socketUnixStream = net.socketUnixStream;
@@ -96,6 +103,7 @@ pub const setsid = proc.setsid;
 pub const chdirRoot = proc.chdirRoot;
 pub const exitProcess = proc.exitProcess;
 pub const processId = proc.processId;
+pub const selfExe = proc.selfExe;
 
 // Reach every submodule's tests (a `test {}` block would count as one).
 comptime {

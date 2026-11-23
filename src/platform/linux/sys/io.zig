@@ -71,6 +71,34 @@ pub fn waitReadable(fd: fd_t, deadline_ms: ?i64) !bool {
     return n > 0;
 }
 
+/// Read `fd` until EOF, `max` bytes or the deadline (monotonic ms; none:
+/// wait as long as it takes), whichever comes first. Caller owns the
+/// bytes. To fail on more than `max`, ask for max + 1 and check the length.
+pub fn readBounded(alloc: std.mem.Allocator, fd: fd_t, max: usize, deadline_ms: ?i64) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(alloc);
+    var buf: [64 * 1024]u8 = undefined;
+    while (out.items.len < max) {
+        if (!try waitReadable(fd, deadline_ms)) break; // timed out
+        const n = try read(fd, buf[0..@min(buf.len, max - out.items.len)]);
+        if (n == 0) break;
+        try out.appendSlice(alloc, buf[0..n]);
+    }
+    return out.toOwnedSlice(alloc);
+}
+
+/// Fill `buf` from `fd`: error.ShortRead at EOF first, error.Timeout once
+/// the deadline (monotonic ms; none: no limit) passes.
+pub fn readExact(fd: fd_t, buf: []u8, deadline_ms: ?i64) !void {
+    var got: usize = 0;
+    while (got < buf.len) {
+        if (deadline_ms != null and !try waitReadable(fd, deadline_ms)) return error.Timeout;
+        const n = try read(fd, buf[got..]);
+        if (n == 0) return error.ShortRead;
+        got += n;
+    }
+}
+
 pub fn memfdCreate(name: [*:0]const u8, flags: u32) !fd_t {
     const rc = try check(linux.memfd_create(name, flags));
     return @intCast(rc);
@@ -78,10 +106,6 @@ pub fn memfdCreate(name: [*:0]const u8, flags: u32) !fd_t {
 
 pub fn ftruncate(fd: fd_t, len: u64) !void {
     _ = try check(linux.ftruncate(fd, @intCast(len)));
-}
-
-pub fn ftruncateFd(fd: fd_t, len: u64) void {
-    _ = linux.ftruncate(fd, @intCast(len));
 }
 
 pub fn mmapRw(fd: fd_t, len: usize) ![]align(std.heap.page_size_min) u8 {
@@ -142,7 +166,12 @@ pub fn mapFile(path: []const u8, min: u64, max: u64) ![]const u8 {
     defer close(fd);
     const size = try fdSize(fd);
     if (size < min or size > max) return error.BadSize;
-    const len: usize = @intCast(size);
+    return mapFd(fd, @intCast(size));
+}
+
+/// Map `len` bytes of the open file `fd` read-only and private (the fd
+/// can be closed afterwards). Undo with unmapFile.
+pub fn mapFd(fd: fd_t, len: usize) ![]const u8 {
     const rc = linux.mmap(null, len, .{ .READ = true }, .{ .TYPE = .PRIVATE }, fd, 0);
     if (linux.errno(rc) != .SUCCESS) return error.MmapFailed;
     const ptr: [*]const u8 = @ptrFromInt(rc);
@@ -152,4 +181,24 @@ pub fn mapFile(path: []const u8, min: u64, max: u64) ![]const u8 {
 pub fn unmapFile(d: []const u8) void {
     const p: [*]align(std.heap.page_size_min) const u8 = @alignCast(d.ptr);
     _ = linux.munmap(p, d.len);
+}
+
+test "bounded and exact reads stop at EOF, the limit and the deadline" {
+    const alloc = std.testing.allocator;
+    const fds = try pipe();
+    defer close(fds[0]);
+    try writeAll(fds[1], "abcdef");
+    const head = try readBounded(alloc, fds[0], 2, time.monoMs() + 1000);
+    defer alloc.free(head);
+    try std.testing.expectEqualStrings("ab", head);
+    var three: [3]u8 = undefined;
+    try readExact(fds[0], &three, time.monoMs() + 1000);
+    try std.testing.expectEqualStrings("cde", &three);
+    // the writer stays open: only the deadline ends these
+    const rest = try readBounded(alloc, fds[0], 100, time.monoMs() + 50);
+    defer alloc.free(rest);
+    try std.testing.expectEqualStrings("f", rest);
+    try std.testing.expectError(error.Timeout, readExact(fds[0], &three, time.monoMs() + 20));
+    close(fds[1]);
+    try std.testing.expectError(error.ShortRead, readExact(fds[0], &three, null));
 }

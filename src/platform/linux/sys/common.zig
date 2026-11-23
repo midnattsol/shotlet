@@ -23,6 +23,7 @@ pub fn check(rc: usize) !usize {
         .CONNREFUSED => error.ConnectionRefused,
         .NOTDIR => error.NotDir,
         .NOTEMPTY => error.DirNotEmpty,
+        .LOOP => error.SymLinkLoop, // expected with O_NOFOLLOW on a symlink
         .TIMEDOUT => error.Timeout,
         // why a file could not be written, in words for the person
         .NOSPC => error.NoSpaceLeft,

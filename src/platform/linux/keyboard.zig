@@ -8,7 +8,7 @@
 //! LC_ALL / LC_CTYPE / LANG.
 //!
 //! Key repeat is driven by `Repeat`, a pure deadline tracker the window
-//! polls with a monotonic clock (tests feed it a fake one).
+//! polls with sys.monoMs (tests feed it a fake clock).
 //!
 //! This file re-exports keyboard/: xkb (library binding), translator
 //! (`Keyboard`), keysyms, us_layout (fallback), repeat and evdev (codes
@@ -29,7 +29,8 @@ pub const keysymChar = keysyms.keysymChar;
 pub const Translated = translator.Translated;
 pub const Keyboard = translator.Keyboard;
 pub const Repeat = repeat.Repeat;
-pub const monotonicMs = repeat.monotonicMs;
+// TODO(wave 2): remove; window/* moves to sys.monoMs
+pub const monotonicMs = @import("sys.zig").monoMs;
 
 // Reach every submodule's tests (a `test {}` block would count as one).
 comptime {

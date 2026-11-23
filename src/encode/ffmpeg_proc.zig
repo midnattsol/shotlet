@@ -5,6 +5,7 @@
 //! libraries cannot be loaded in process.
 
 const std = @import("std");
+const switches = @import("../platform/api/switches.zig");
 const proc = @import("../platform/api.zig").proc;
 const yuv = @import("yuv.zig");
 const sys = @import("../platform/api.zig").sys;
@@ -31,7 +32,7 @@ pub const Proc = struct {
 
     pub fn open(gpa: std.mem.Allocator, envp: proc.Envp, path: [:0]const u8, opts: Options) !Proc {
         var exe_buf: [512]u8 = undefined;
-        const exe = proc.which(&exe_buf, "ffmpeg") orelse return error.NoFfmpeg;
+        const exe = proc.which(&exe_buf, envp, "ffmpeg") orelse return error.NoFfmpeg;
         var arg_store: ArgStore = .{};
         const argv = try buildArgs(&arg_store, exe, path, opts);
         const frame = try gpa.alloc(u8, frameBytes(opts.width, opts.height));
@@ -154,9 +155,9 @@ fn buildArgs(s: *ArgStore, exe: [*:0]const u8, path: [*:0]const u8, o: Options) 
 /// A render node where ffmpeg can encode H.264 with VA-API: tried once
 /// with a tiny encode (about a tenth of a second). Null without one.
 pub fn probeVaapi(gpa: std.mem.Allocator, envp: proc.Envp) ?[:0]const u8 {
-    if (std.c.getenv("SHOTLET_NO_VAAPI") != null) return null;
+    if (switches.get().no_vaapi) return null;
     var exe_buf: [512]u8 = undefined;
-    const exe = proc.which(&exe_buf, "ffmpeg") orelse return null;
+    const exe = proc.which(&exe_buf, envp, "ffmpeg") orelse return null;
     var dev_buf: [2][:0]const u8 = undefined;
     for (proc.hwEncodeDevices(&dev_buf)) |dev| {
         const r = proc.output(gpa, &.{ exe.ptr, "-hide_banner", "-nostdin", "-loglevel", "error", "-vaapi_device", dev.ptr, "-f", "lavfi", "-i", "color=c=gray:s=64x64:d=0.1", "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi", "-f", "null", "-" }, envp, 4096, 5000) catch continue;
@@ -191,9 +192,9 @@ test "ffmpeg arguments for software and VA-API encodes" {
 
 test "the ffmpeg program writes H.264 and AAC that ffprobe reads back" {
     const gpa = std.testing.allocator;
-    var buf: [512]u8 = undefined;
-    const probe = proc.which(&buf, "ffprobe") orelse return error.SkipZigTest;
     const envp: proc.Envp = @ptrCast(std.c.environ);
+    var buf: [512]u8 = undefined;
+    const probe = proc.which(&buf, envp, "ffprobe") orelse return error.SkipZigTest;
     const dir = try sys.makeTempDir(gpa, "/tmp", "shotlet-ff");
     defer gpa.free(dir);
     defer sys.removeTree(dir);

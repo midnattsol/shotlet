@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
+const sys = @import("../sys.zig");
 const gsettings = @import("gsettings.zig");
 const Env = @import("../../../app/env.zig").Env;
 const extension = @import("extension.zig");
@@ -55,12 +56,6 @@ pub fn pointAt(arena: std.mem.Allocator, env: Env, schemadir: []const u8, exe: [
     try gsettings.set(arena, env, schemadir, ext_schema_id, "shotlet-path", try gsettings.formatString(arena, exe));
 }
 
-pub fn selfExe(buf: []u8) ![]const u8 {
-    const rc = std.os.linux.readlinkat(std.os.linux.AT.FDCWD, "/proc/self/exe", buf.ptr, buf.len);
-    if (std.os.linux.errno(rc) != .SUCCESS or rc >= buf.len) return error.NoExe;
-    return buf[0..rc];
-}
-
 /// The extension is active: point it at this binary and sort out the
 /// shortcut (see gnome.zig). Messages go to stderr.
 fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShortcuts) void {
@@ -70,7 +65,7 @@ fn setUp(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, move: MoveShor
     var sd_buf: [1100]u8 = undefined;
     const schemadir = extension.schemaDir(gpa, env, bus, &sd_buf) catch return;
     var exe_buf: [1024]u8 = undefined;
-    const exe = selfExe(&exe_buf) catch "";
+    const exe = sys.selfExe(&exe_buf) catch "";
     pointAt(arena, env, schemadir, exe) catch |err| {
         std.log.warn("could not configure the extension ({t}): it may be an older version", .{err});
         return;
@@ -112,8 +107,7 @@ fn waitForShortcut(gpa: std.mem.Allocator, bus: *dbus.Connection) capture.Captur
     var tries: usize = 0;
     var info = capture.captureInfo(gpa, bus);
     while (info.shortcut() == null and info.capture and tries < 10) : (tries += 1) {
-        var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 50 * std.time.ns_per_ms };
-        _ = std.os.linux.nanosleep(&ts, null);
+        sys.sleepMs(50);
         info = capture.captureInfo(gpa, bus);
     }
     return info;

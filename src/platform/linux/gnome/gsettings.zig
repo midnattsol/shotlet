@@ -4,77 +4,37 @@
 //! text is parsed and written here for strings and string arrays only.
 
 const std = @import("std");
-const sys = @import("../sys.zig");
-const Env = @import("../../../app/env.zig").Env;
+const proc = @import("../proc.zig");
+const env_mod = @import("../../../app/env.zig");
+const Env = env_mod.Env;
 
 /// Run `gsettings [--schemadir DIR] ARGS...`; its stdout (owned), or an
-/// error when it could not run or failed.
+/// error when it could not run or failed. Its stderr is discarded.
 pub fn run(gpa: std.mem.Allocator, env: Env, schemadir: ?[]const u8, args: []const []const u8) ![]u8 {
-    const linux = std.os.linux;
-    var exe_buf: [1024]u8 = undefined;
-    const exe = try findInPath(&exe_buf, env, "gsettings");
+    var exe_buf: env_mod.PathBuf = undefined;
+    const exe = proc.which(&exe_buf, env.envp, "gsettings") orelse return error.GsettingsMissing;
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     var argv: std.ArrayList(?[*:0]const u8) = .empty;
-    try argv.append(arena, "gsettings");
+    try argv.append(arena, exe.ptr);
     if (schemadir) |d| {
         try argv.append(arena, "--schemadir");
         try argv.append(arena, try arena.dupeSentinel(u8, d, 0));
     }
     for (args) |a| try argv.append(arena, try arena.dupeSentinel(u8, a, 0));
-    try argv.append(arena, null);
-    const argv_z: [*:null]const ?[*:0]const u8 = @ptrCast(argv.items.ptr);
 
-    const fds = try sys.pipe();
-    const pid = linux.fork();
-    if (linux.errno(pid) != .SUCCESS) {
-        sys.close(fds[0]);
-        sys.close(fds[1]);
-        return error.ForkFailed;
-    }
-    if (pid == 0) {
-        _ = linux.dup2(fds[1], 1);
-        _ = linux.execve(exe.ptr, argv_z, env.envp);
-        linux.exit(127);
-    }
-    sys.close(fds[1]);
-    defer sys.close(fds[0]);
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(gpa);
-    var buf: [4096]u8 = undefined;
-    while (true) {
-        const n = sys.read(fds[0], &buf) catch break;
-        if (n == 0) break;
-        if (out.items.len + n > 1024 * 1024) break;
-        try out.appendSlice(gpa, buf[0..n]);
-    }
-    var status: i32 = 0;
-    while (true) {
-        const rc = linux.wait4(@intCast(pid), &status, 0, null);
-        if (linux.errno(rc) != .INTR) break;
-    }
-    const st: u32 = @bitCast(status);
-    if (!linux.W.IFEXITED(st) or linux.W.EXITSTATUS(st) != 0) return error.GsettingsFailed;
-    return out.toOwnedSlice(gpa);
+    const r = try proc.output(gpa, argv.items, env.envp, max_output, timeout_ms);
+    errdefer gpa.free(r.out);
+    if (r.status == null or r.status.? != 0) return error.GsettingsFailed;
+    return r.out;
 }
 
-fn findInPath(buf: []u8, env: Env, name: []const u8) ![:0]const u8 {
-    var path: []const u8 = "/usr/local/bin:/usr/bin:/bin";
-    var i: usize = 0;
-    while (env.envp[i]) |e| : (i += 1) {
-        const s = std.mem.span(e);
-        if (std.mem.startsWith(u8, s, "PATH=")) path = s[5..];
-    }
-    var it = std.mem.splitScalar(u8, path, ':');
-    while (it.next()) |dir| {
-        if (dir.len == 0 or dir[0] != '/') continue;
-        const p = std.fmt.bufPrintSentinel(buf, "{s}/{s}", .{ dir, name }, 0) catch continue;
-        if (std.os.linux.errno(std.os.linux.faccessat(std.os.linux.AT.FDCWD, p.ptr, std.os.linux.X_OK, 0)) == .SUCCESS) return p;
-    }
-    return error.GsettingsMissing;
-}
+/// The most gsettings may print (list-recursively of a big schema is a
+/// few KiB), and how long it may take.
+const max_output = 1024 * 1024;
+const timeout_ms = 10_000;
 
 pub fn get(gpa: std.mem.Allocator, env: Env, schemadir: ?[]const u8, schema: []const u8, key: []const u8) ![]u8 {
     return run(gpa, env, schemadir, &.{ "get", schema, key });

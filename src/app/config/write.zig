@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
+const env = @import("../env.zig");
 const parse = @import("parse.zig");
 const location = @import("location.zig");
 const model = @import("model.zig");
@@ -22,7 +23,7 @@ pub fn updateDir(alloc: std.mem.Allocator, dir: []const u8, changes: []const Cha
     defer sys.close(dfd);
     try sys.lockExclusive(dfd);
 
-    var path_buf: [1024]u8 = undefined;
+    var path_buf: env.PathBuf = undefined;
     const path = try location.configFile(dir, &path_buf);
     const old: []u8 = sys.readFileAlloc(alloc, path, 64 * 1024) catch |err| switch (err) {
         error.NotFound => try alloc.dupe(u8, "# shotlet configuration\n"),
@@ -32,39 +33,7 @@ pub fn updateDir(alloc: std.mem.Allocator, dir: []const u8, changes: []const Cha
 
     const content = try mergeContent(alloc, old, changes);
     defer alloc.free(content);
-    try replaceFile(dir, path, content);
-}
-
-/// Write `content` to a fresh temp file in `dir` and rename it to `path`.
-fn replaceFile(dir: []const u8, path: []const u8, content: []const u8) !void {
-    var tmp_buf: [1100]u8 = undefined;
-    var tmp: []u8 = undefined;
-    const fd = try createTemp(dir, &tmp_buf, &tmp);
-    {
-        errdefer sys.unlink(tmp) catch {};
-        defer sys.close(fd);
-        try sys.writeAll(fd, content);
-        sys.fsync(fd);
-    }
-    sys.rename(tmp, path) catch |err| {
-        sys.unlink(tmp) catch {};
-        return err;
-    };
-}
-
-/// A unique temp file in `dir`, private to the user; O_EXCL so a planted
-/// file or symlink is never followed or reused. Its path goes to `tmp`.
-fn createTemp(dir: []const u8, tmp_buf: []u8, tmp: *[]u8) !sys.fd_t {
-    var attempt: usize = 0;
-    while (true) : (attempt += 1) {
-        var rnd: [6]u8 = undefined;
-        sys.getRandom(&rnd);
-        tmp.* = try std.fmt.bufPrint(tmp_buf, "{s}/.config.{d}.{x}.tmp", .{ dir, sys.processId(), std.mem.readInt(u48, &rnd, .little) });
-        return sys.createExclusive(tmp.*, 0o600) catch |err| switch (err) {
-            error.PathAlreadyExists => if (attempt < 8) continue else return err,
-            else => return err,
-        };
-    }
+    try sys.writeAtomic(path, content, 0o600);
 }
 
 /// Rewrite `old` with `changes` applied: matching lines get the new value

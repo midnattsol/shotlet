@@ -18,9 +18,9 @@ fn render(shell: ?complete.Shell) ![]u8 {
 /// Runs `sh -c script` with `input` on stdin; its exit status and what
 /// it printed (stderr folded into stdout by the script).
 fn check(script: [:0]const u8, input: []const u8) !?u8 {
-    var pbuf: [256]u8 = undefined;
-    const sh = proc.which(&pbuf, "sh") orelse return error.SkipZigTest;
     const envp: proc.Envp = @ptrCast(std.c.environ);
+    var pbuf: [256]u8 = undefined;
+    const sh = proc.which(&pbuf, envp, "sh") orelse return error.SkipZigTest;
     var c = try proc.spawn(&.{ sh.ptr, "-c", script.ptr }, envp, .{ .stdin = true });
     try sys.writeAll(c.stdin.?, input);
     return c.wait(20000);
@@ -28,7 +28,7 @@ fn check(script: [:0]const u8, input: []const u8) !?u8 {
 
 fn hasProgram(name: []const u8) bool {
     var buf: [256]u8 = undefined;
-    return proc.which(&buf, name) != null;
+    return proc.which(&buf, @ptrCast(std.c.environ), name) != null;
 }
 
 fn expectContains(s: []const u8, needles: []const []const u8) !void {

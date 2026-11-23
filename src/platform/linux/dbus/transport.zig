@@ -210,8 +210,7 @@ test "readMessage parses header fields and claims fds" {
     try m.putString("hello");
     try m.putU32(7);
 
-    var pipe: [2]sys.fd_t = undefined;
-    _ = std.os.linux.pipe2(&pipe, .{ .CLOEXEC = true });
+    const pipe = try sys.pipe();
     defer sys.close(pipe[0]);
     try sendMessageFds(&pair[0], .signal, 42, .{
         .path = "/org/x",
@@ -249,8 +248,7 @@ test "too many fds are closed and the stream stays usable" {
     defer pair[0].deinit();
     defer pair[1].deinit();
 
-    var pipe: [2]sys.fd_t = undefined;
-    _ = std.os.linux.pipe2(&pipe, .{ .CLOEXEC = true });
+    const pipe = try sys.pipe();
     defer sys.close(pipe[0]);
     const many = [_]sys.fd_t{ pipe[1], pipe[1], pipe[1], pipe[1], pipe[1], pipe[1] };
     try sendMessageFds(&pair[0], .signal, 1, .{ .path = "/a", .interface = "a.b", .member = "C" }, &.{}, null, &many);

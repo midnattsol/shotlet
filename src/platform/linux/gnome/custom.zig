@@ -3,7 +3,7 @@
 //! ~/.config/shotlet/gnome-moved-shortcuts) and putting them back.
 
 const std = @import("std");
-const sys = @import("../sys.zig");
+const statefile = @import("../../../app/statefile.zig");
 const env_mod = @import("../../../app/env.zig");
 const gsettings = @import("gsettings.zig");
 const extension = @import("extension.zig");
@@ -59,7 +59,7 @@ pub fn findShotletShortcuts(arena: std.mem.Allocator, env: Env, exe: []const u8)
             .command = command,
             .binding = getString(arena, env, schema, "binding") catch "",
         };
-        // kept one per line, tab separated (backupPath)
+        // kept one per line, tab separated (backup_name)
         if (hasTabOrNewline(c.name) or hasTabOrNewline(c.command) or
             hasTabOrNewline(c.binding) or hasTabOrNewline(c.path)) continue;
         try found.append(arena, c);
@@ -71,23 +71,11 @@ fn hasTabOrNewline(s: []const u8) bool {
     return std.mem.indexOfAny(u8, s, "\t\n") != null;
 }
 
-/// Where moved shortcuts are remembered, for uninstall.
-fn backupPath(buf: []u8, home: []const u8) ![]u8 {
-    var dir_buf: [1024]u8 = undefined;
-    const dir = try env_mod.configDir(&dir_buf, home);
-    return std.fmt.bufPrint(buf, "{s}/gnome-moved-shortcuts", .{dir});
-}
+/// Where moved shortcuts are remembered (beside the config), for uninstall.
+const backup_name = "gnome-moved-shortcuts";
 
-/// Append `extra` to the file at `bpath` (created with the config
-/// directory if needed); earlier records stay.
-pub fn appendBackup(arena: std.mem.Allocator, env: Env, bpath: []const u8, extra: []const u8) !void {
-    var backup: std.ArrayList(u8) = .empty;
-    if (sys.readFileAlloc(arena, bpath, 1024 * 1024)) |old| try backup.appendSlice(arena, old) else |_| {}
-    try backup.appendSlice(arena, extra);
-    var dir_buf: [1024]u8 = undefined;
-    sys.mkdirAll(try env_mod.configDir(&dir_buf, env.home), 0o700);
-    try sys.writeFile(bpath, backup.items);
-}
+/// The most a backup of moved shortcuts or keys holds.
+pub const backup_max = 1024 * 1024;
 
 /// `s` is one of `list`.
 pub fn contains(list: []const []const u8, s: []const u8) bool {
@@ -100,13 +88,11 @@ pub fn contains(list: []const []const u8, s: []const u8) bool {
 pub fn moveShortcuts(arena: std.mem.Allocator, env: Env, schemadir: []const u8, moved: []const Custom) !void {
     var keys: std.ArrayList([]const u8) = .empty;
     var records: std.ArrayList(u8) = .empty;
-    var pbuf: [1100]u8 = undefined;
-    const bpath = try backupPath(&pbuf, env.home);
     for (moved) |c| {
         try records.print(arena, "{s}\t{s}\t{s}\t{s}\n", .{ c.path, c.name, c.command, c.binding });
         if (c.binding.len > 0 and !contains(keys.items, c.binding)) try keys.append(arena, c.binding);
     }
-    try appendBackup(arena, env, bpath, records.items);
+    try statefile.append(arena, env.home, .config, backup_name, records.items, backup_max);
     try gsettings.set(arena, env, schemadir, extension.ext_schema_id, "capture-shortcut", try gsettings.formatStrv(arena, keys.items));
     try dropCustoms(arena, env, moved);
 }
@@ -129,9 +115,7 @@ fn dropCustoms(arena: std.mem.Allocator, env: Env, moved: []const Custom) !void 
 
 /// Put moved shortcuts back on GNOME's custom list (uninstall).
 pub fn restoreShortcuts(arena: std.mem.Allocator, env: Env) !usize {
-    var pbuf: [1100]u8 = undefined;
-    const bpath = try backupPath(&pbuf, env.home);
-    const data = sys.readFileAlloc(arena, bpath, 1024 * 1024) catch return 0;
+    const data = statefile.read(arena, env.home, .config, backup_name, backup_max) catch return 0;
     const list = try customList(arena, env);
     var paths: std.ArrayList([]const u8) = .empty;
     for (list) |p| try paths.append(arena, p);
@@ -151,7 +135,7 @@ pub fn restoreShortcuts(arena: std.mem.Allocator, env: Env) !usize {
         n += 1;
     }
     try gsettings.set(arena, env, null, media_keys, "custom-keybindings", try gsettings.formatStrv(arena, paths.items));
-    sys.unlink(bpath) catch {};
+    _ = statefile.remove(env.home, .config, backup_name);
     return n;
 }
 

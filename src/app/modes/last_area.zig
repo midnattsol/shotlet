@@ -11,6 +11,7 @@
 const std = @import("std");
 const capture = @import("../capture.zig");
 const env = @import("../env.zig");
+const statefile = @import("../statefile.zig");
 const sys = @import("../../platform/api.zig").sys;
 const Rect = @import("geom.zig").Rect;
 
@@ -58,15 +59,10 @@ pub fn merged(out: []u8, data: []const u8, key: u64, r: Rect) ![]u8 {
     return w.buffered();
 }
 
-fn filePath(buf: []u8, home: []const u8) ![]u8 {
-    var dbuf: [1024]u8 = undefined;
-    const dir = try env.stateDir(&dbuf, home);
-    return std.fmt.bufPrint(buf, "{s}/last-area", .{dir});
-}
+const file_name = "last-area";
 
 pub fn load(gpa: std.mem.Allocator, home: []const u8, key: u64) ?Rect {
-    var pbuf: [1100]u8 = undefined;
-    const data = sys.readFileAlloc(gpa, filePath(&pbuf, home) catch return null, 4096) catch return null;
+    const data = statefile.read(gpa, home, .state, file_name, 4096) catch return null;
     defer gpa.free(data);
     return lookup(data, key);
 }
@@ -76,14 +72,10 @@ pub fn save(gpa: std.mem.Allocator, home: []const u8, key: u64, r: Rect) void {
 }
 
 fn saveInner(gpa: std.mem.Allocator, home: []const u8, key: u64, r: Rect) !void {
-    var dbuf: [1024]u8 = undefined;
-    sys.mkdirAll(try env.stateDir(&dbuf, home), 0o700);
-    var pbuf: [1100]u8 = undefined;
-    const path = try filePath(&pbuf, home);
-    const old = sys.readFileAlloc(gpa, path, 4096) catch try gpa.dupe(u8, "");
+    const old = statefile.read(gpa, home, .state, file_name, 4096) catch try gpa.dupe(u8, "");
     defer gpa.free(old);
     var out: [4096]u8 = undefined;
-    try sys.writeFile(path, try merged(&out, old, key, r));
+    try statefile.write(home, .state, file_name, try merged(&out, old, key, r));
 }
 
 /// Remember the selection of a capture that was copied or saved.
