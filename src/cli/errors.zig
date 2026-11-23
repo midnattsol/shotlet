@@ -1,10 +1,8 @@
 //! The messages for a command line the parser refused (to stderr; the
-//! process then exits with status 2).
+//! process then exits with status 2, out.ExitCode.usage).
 
 const std = @import("std");
 const parse = @import("parse.zig");
-
-pub const exit_code: u8 = 2;
 
 /// "shotlet gnome-integration install"
 pub fn writeChain(w: *std.Io.Writer, chain: parse.Chain) !void {

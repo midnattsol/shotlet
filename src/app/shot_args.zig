@@ -1,76 +1,56 @@
-//! `shotlet shot|text [--FLAG VALUE]...` (src/cli/cmds_capture.zig lists
-//! the flags). Dev/testing flags: --from FILE (skip portal), --sel
-//! X,Y,W,H (preset selection), --smoke MS (auto-cancel, for leak runs),
-//! --from-monitors A.png,B.png (one image per monitor, side by side).
-//! The GNOME extension's hand-off: --from-shell ID and its companions.
+//! `shotlet shot|text [OPTION...]` (src/cli/cmds_capture.zig lists the
+//! options; the parser checked them). Development options: --from FILE
+//! (no portal), --sel X,Y,W,H (an area selected), --smoke MS (cancel by
+//! itself, for leak runs), --from-monitors A.png,B.png (one image per
+//! monitor, side by side). The GNOME extension's hand-off: --from-shell
+//! ID and its companions.
 
 const std = @import("std");
 const shot = @import("shot.zig");
 const shell = @import("../platform/api.zig").shell;
+const mode = @import("modes/mode.zig");
+const Parsed = @import("../cli/parse.zig").Parsed;
 const Env = @import("env.zig").Env;
 
-const ShotArgs = struct {
-    from: ?[]const u8 = null,
-    from_monitors: ?[]const u8 = null,
-    from_shell: ?shell.HandedCapture = null,
-    shell_monitors: []const u8 = "",
-    shell_pieces: []const u8 = "",
-    t0: ?i64 = null,
-    sel: ?[4]i32 = null,
-    smoke_ms: i64 = 0,
-    then_record: bool = false,
-    req: @import("modes/mode.zig").Request = .{},
-};
-
-/// `flags`: flag/value pairs.
-pub fn run(gpa: std.mem.Allocator, env: Env, flags: []const [:0]const u8) !void {
-    var o: ShotArgs = .{};
-    var i: usize = 0;
-    while (i + 1 < flags.len) : (i += 2) try parseFlag(&o, flags[i], flags[i + 1]);
-    if (o.from_shell) |*fs| {
-        fs.monitors = o.shell_monitors;
-        fs.pieces = o.shell_pieces;
-        fs.t0_ms = o.t0;
-    }
-    if (o.then_record and o.from_shell != null) return @import("../record/cli.zig").fromShell(gpa, env, o.from_shell.?);
-    try shot.run(gpa, env, .{ .file = o.from, .monitors = o.from_monitors, .shell = o.from_shell, .req = o.req }, o.sel, o.smoke_ms);
+pub fn run(gpa: std.mem.Allocator, env: Env, p: *const Parsed) !void {
+    const handed = handedCapture(p);
+    // the extension's record shortcut: the picker on this capture
+    if (handed != null and p.value("then") != null) return @import("../record/cli.zig").fromShell(gpa, env, handed.?);
+    const src: shot.From = .{ .file = p.value("from"), .monitors = p.value("from-monitors"), .shell = handed, .req = request(p) };
+    try shot.run(gpa, env, src, p.rect("sel"), p.int(i64, "smoke") orelse 0);
 }
 
-fn parseFlag(o: *ShotArgs, flag: []const u8, value: [:0]const u8) !void {
-    const eql = std.mem.eql;
-    if (eql(u8, flag, "--from")) {
-        o.from = value;
-    } else if (eql(u8, flag, "--from-monitors")) {
-        o.from_monitors = value;
-    } else if (eql(u8, flag, "--from-shell")) {
-        // the GNOME Shell extension's capture (api.shell.loadHanded)
-        o.from_shell = .{ .id = value };
-    } else if (eql(u8, flag, "--monitors")) {
-        o.shell_monitors = value;
-    } else if (eql(u8, flag, "--pieces")) {
-        o.shell_pieces = value;
-    } else if (eql(u8, flag, "--then")) {
-        // the extension's record shortcut: the picker on this capture
-        if (eql(u8, value, "record")) o.then_record = true;
-    } else if (eql(u8, flag, "--mode")) {
-        o.req.withModeArg(value);
-    } else if (eql(u8, flag, "--pointer")) {
-        o.req.withPointerArg(value);
-    } else if (eql(u8, flag, "--t0")) {
-        o.t0 = std.fmt.parseInt(i64, value, 10) catch null;
-    } else if (eql(u8, flag, "--smoke")) {
-        o.smoke_ms = std.fmt.parseInt(i64, value, 10) catch 0;
-    } else if (eql(u8, flag, "--sel")) {
-        o.sel = try parseSel(value);
-    }
+/// The GNOME Shell extension's capture (api.shell.loadHanded).
+fn handedCapture(p: *const Parsed) ?shell.HandedCapture {
+    return .{
+        .id = p.value("from-shell") orelse return null,
+        .monitors = p.value("monitors") orelse "",
+        .pieces = p.value("pieces") orelse "",
+        .t0_ms = p.int(i64, "t0"),
+    };
 }
 
-/// "X,Y,W,H" for --sel.
-fn parseSel(value: []const u8) ![4]i32 {
-    var it = std.mem.splitScalar(u8, value, ',');
-    var vals: [4]i32 = undefined;
-    for (&vals) |*v| {
-        v.* = std.fmt.parseInt(i32, it.next() orelse return error.BadSelArg, 10) catch return error.BadSelArg;
-    }
-    return vals;
+/// The mode the extension started (an unknown one: an area capture).
+fn request(p: *const Parsed) mode.Request {
+    return .{
+        .mode = if (p.value("mode")) |m| mode.Mode.parse(m) orelse .area else .area,
+        .pointer = p.pair(i32, "pointer"),
+    };
+}
+
+test "the extension's hand-off reads from the command line" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const parse = @import("../cli/parse.zig");
+    const p = (try parse.parse(arena.allocator(), &.{ "--from-shell", "7", "--monitors", "M", "--pieces", "P", "--t0", "123", "--mode", "window", "--pointer", "-20,300" })).run;
+    const h = handedCapture(&p).?;
+    try std.testing.expectEqualStrings("7", h.id);
+    try std.testing.expectEqualStrings("M", h.monitors);
+    try std.testing.expectEqual(@as(?i64, 123), h.t0_ms);
+    const r = request(&p);
+    try std.testing.expectEqual(mode.Mode.window, r.mode);
+    try std.testing.expectEqual([2]i32{ -20, 300 }, r.pointer.?);
+    const q = (try parse.parse(arena.allocator(), &.{ "shot", "--mode", "bogus" })).run;
+    try std.testing.expectEqual(mode.Mode.area, request(&q).mode);
+    try std.testing.expect(handedCapture(&q) == null);
 }

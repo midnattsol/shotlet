@@ -6,7 +6,9 @@ test {
     _ = @import("value.zig");
     _ = @import("text.zig");
     _ = @import("errors.zig");
+    _ = @import("out.zig");
     _ = @import("parse_test.zig");
+    _ = @import("table_test.zig");
     _ = @import("help_test.zig");
     _ = @import("complete_test.zig");
 }

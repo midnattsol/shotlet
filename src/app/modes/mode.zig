@@ -75,9 +75,8 @@ pub fn shortcutNamed(name: []const u8) ?Shortcut {
 /// The timer's choices, in seconds.
 pub const timer_choices = [_]u8{ 3, 5, 10 };
 
-pub fn validDelay(s: u32) bool {
-    return s <= 60;
-}
+/// The longest countdown `--delay` and `timer` take.
+pub const max_delay_s = 60;
 
 /// One capture to make.
 pub const Request = struct {
@@ -87,56 +86,12 @@ pub const Request = struct {
     /// the pointer, in the compositor's logical layout, when known (the
     /// GNOME extension says where it was)
     pointer: ?[2]i32 = null,
-
-    /// `--mode NAME` as the extension passes it.
-    pub fn withModeArg(self: *Request, name: []const u8) void {
-        self.mode = Mode.parse(name) orelse .area;
-    }
-
-    /// "X,Y"
-    pub fn withPointerArg(self: *Request, s: []const u8) void {
-        var it = std.mem.splitScalar(u8, s, ',');
-        const x = std.fmt.parseInt(i32, it.next() orelse return, 10) catch return;
-        const y = std.fmt.parseInt(i32, it.next() orelse return, 10) catch return;
-        self.pointer = .{ x, y };
-    }
 };
 
-/// `shotlet MODE [--delay S]`, `shotlet timer [S]`: the request, or null
-/// for a command that is no capture mode.
-pub fn parseCommand(cmd: []const u8, rest: []const []const u8, default_timer: u8) ?Request {
-    var req: Request = .{};
-    if (std.mem.eql(u8, cmd, "timer")) {
-        req.delay_s = default_timer;
-        if (rest.len > 0) if (std.fmt.parseInt(u8, rest[0], 10)) |s| {
-            if (validDelay(s)) req.delay_s = s;
-        } else |_| {};
-    } else req.mode = Mode.parse(cmd) orelse return null;
-    var i: usize = 0;
-    while (i + 1 < rest.len) : (i += 1) {
-        if (!std.mem.eql(u8, rest[i], "--delay")) continue;
-        const s = std.fmt.parseInt(u8, rest[i + 1], 10) catch continue;
-        if (validDelay(s)) req.delay_s = s;
-    }
-    return req;
-}
-
-test "commands name modes" {
-    try std.testing.expectEqual(Mode.window, parseCommand("window", &.{}, 5).?.mode);
-    try std.testing.expectEqual(@as(?Request, null), parseCommand("settings", &.{}, 5));
-    const t = parseCommand("timer", &.{}, 5).?;
-    try std.testing.expectEqual(Mode.area, t.mode);
-    try std.testing.expectEqual(@as(u8, 5), t.delay_s);
-    try std.testing.expectEqual(@as(u8, 10), parseCommand("timer", &.{"10"}, 5).?.delay_s);
-    const d = parseCommand("fullscreen", &.{ "--delay", "3" }, 5).?;
-    try std.testing.expectEqual(Mode.fullscreen, d.mode);
-    try std.testing.expectEqual(@as(u8, 3), d.delay_s);
-    try std.testing.expectEqual(@as(u8, 0), parseCommand("screens", &.{ "--delay", "999" }, 5).?.delay_s);
-    var r: Request = .{};
-    r.withPointerArg("-20,300");
-    try std.testing.expectEqual([2]i32{ -20, 300 }, r.pointer.?);
-    r.withModeArg("bogus");
-    try std.testing.expectEqual(Mode.area, r.mode);
+test "modes parse by name" {
+    try std.testing.expectEqual(Mode.window, Mode.parse("window").?);
+    try std.testing.expectEqual(@as(?Mode, null), Mode.parse("settings"));
+    try std.testing.expect(Mode.fullscreen.instant() and !Mode.area.instant());
 }
 
 test "every shortcut has its own default, in the neutral notation" {

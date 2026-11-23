@@ -1,11 +1,13 @@
-//! The table's `record` command (record/cli.zig parses its options).
+//! The table's `record` command (record/cli.zig reads its options).
 
+const std = @import("std");
 const spec = @import("spec.zig");
+const Format = @import("../encode/sink.zig").Format;
 
 const options = [_]spec.Option{
     .{ .long = "region", .value = "X,Y,W,H", .kind = .rect, .help = "Record this area (logical pixels) without the picker" },
     .{ .long = "full", .help = "Record the whole monitor under the pointer" },
-    .{ .long = "format", .value = "FORMAT", .kind = .choice, .choices = &.{ "mp4", "gif" }, .help = "mp4 or gif (default: the settings' record_format, mp4)" },
+    .{ .long = "format", .value = "FORMAT", .kind = .choice, .choices = std.meta.fieldNames(Format), .help = "mp4 or gif (default: the settings' record_format, mp4)" },
     .{ .long = "gif", .help = "Record a GIF (the same as --format gif)" },
     .{ .long = "mp4", .help = "Record an MP4 (the same as --format mp4)" },
     .{ .long = "fps", .value = "N", .kind = .int, .min = 1, .max = 60, .help = "Frames per second (MP4 15 to 60, GIF 10 to 30)" },

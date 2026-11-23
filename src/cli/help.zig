@@ -32,7 +32,8 @@ pub fn overview(w: W, s: Style) !void {
     try w.writeAll("\n");
     try s.heading(w, "Options");
     for (top_options) |o| try text.row(w, optionLabel(&buf, o), col, o.help);
-    try w.writeAll("\nRun 'shotlet help COMMAND' or 'shotlet COMMAND --help' for details.\n");
+    try w.writeAll("\nRun 'shotlet help COMMAND' or 'shotlet COMMAND --help' for details.\n" ++
+        "Exit status: 0 done, 1 failed (stderr says why), 2 a wrong command line.\n");
 }
 
 fn overviewColumn() usize {

@@ -22,6 +22,7 @@ pub const Words = types.Words;
 pub const CaptureInfo = types.CaptureInfo;
 pub const Handoff = types.Handoff;
 pub const HandedCapture = types.HandedCapture;
+pub const Cli = types.Cli;
 
 /// How Settings names the integration (GNOME's) and the desktop's
 /// shortcuts here.
@@ -95,8 +96,20 @@ pub fn loadHanded(gpa: std.mem.Allocator, env: Env, args: HandedCapture) !captur
 /// next login can finish.
 pub const finishPendingSetup = gnome.finishPendingSetup;
 
-/// `shotlet gnome-integration SUB ARGS`.
-pub const runCli = gnome.runCli;
+/// `shotlet gnome-integration ...`.
+// TODO(wave 3): remove: gnome/cli.zig takes `Cli` itself, not these words
+pub fn runCli(gpa: std.mem.Allocator, env: Env, cmd: Cli) !void {
+    switch (cmd) {
+        .status => try gnome.runCli(gpa, env, "status", &.{}),
+        .install => |how| try gnome.runCli(gpa, env, "install", switch (how) {
+            .ask => &.{},
+            .move_shortcut => &.{"--move-shortcut"},
+            .keep_shortcut => &.{"--keep-shortcut"},
+        }),
+        .uninstall => try gnome.runCli(gpa, env, "uninstall", &.{}),
+        .shortcut => |keys| try gnome.runCli(gpa, env, "shortcut", keys),
+    }
+}
 
 // --- the capture modes' global shortcuts (its settings) ---
 

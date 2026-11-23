@@ -7,7 +7,7 @@ const config = @import("config.zig");
 const env_mod = @import("env.zig");
 const history = @import("history.zig");
 const keep = @import("keep.zig");
-const sys = @import("../platform/api.zig").sys;
+const out = @import("../cli/out.zig");
 const keepvid = @import("../record/keepvid.zig");
 const Env = env_mod.Env;
 
@@ -17,10 +17,7 @@ pub fn run(gpa: std.mem.Allocator, env: Env) !void {
     const root = try keep.rootFor(&cfg, env, &root_buf);
     const entries = try history.list(gpa, root);
     defer history.freeList(gpa, entries);
-    if (entries.len == 0) {
-        sys.writeAll(2, "shotlet: no capture kept yet\n") catch {};
-        std.process.exit(1);
-    }
+    if (entries.len == 0) out.fail(.failure, "no capture kept yet", .{});
     const id = entries[0].id.slice();
     std.log.info("thumbnail: {s} again", .{id});
     if (keepvid.read(gpa, root, id)) |v| {

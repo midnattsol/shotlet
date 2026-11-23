@@ -1,17 +1,36 @@
 //! The table's capture commands: the default capture, text and the
 //! capture modes (app/modes/mode.zig).
 
+const std = @import("std");
 const spec = @import("spec.zig");
+const mode_mod = @import("../app/modes/mode.zig");
 const Command = spec.Command;
 const Option = spec.Option;
+
+/// The timer's choices as words ("3", "5", "10"), for the completions.
+const timer_words = blk: {
+    var words: [mode_mod.timer_choices.len][]const u8 = undefined;
+    for (mode_mod.timer_choices, &words) |c, *w| w.* = std.fmt.comptimePrint("{d}", .{c});
+    const final = words;
+    break :blk final;
+};
+
+/// "3, 5 or 10"
+const timer_list = blk: {
+    var s: []const u8 = timer_words[0];
+    for (timer_words[1..], 1..) |w, i| s = s ++ (if (i + 1 == timer_words.len) " or " else ", ") ++ w;
+    break :blk s;
+};
+
+const delay_range = std.fmt.comptimePrint("0 to {d}", .{mode_mod.max_delay_s});
 
 const delay: Option = .{
     .long = "delay",
     .value = "SECONDS",
     .kind = .int,
-    .max = 60,
-    .choices = &.{ "3", "5", "10" },
-    .help = "Count down SECONDS (0 to 60) first: the self-timer",
+    .max = mode_mod.max_delay_s,
+    .choices = &timer_words,
+    .help = "Count down SECONDS (" ++ delay_range ++ ") first: the self-timer",
     .default = "0",
 };
 
@@ -26,9 +45,11 @@ const shot_options = [_]Option{
     .{ .long = "monitors", .value = "LAYOUT", .vis = .hidden, .help = "The extension's monitor layout" },
     .{ .long = "pieces", .value = "LAYOUT", .vis = .hidden, .help = "The extension's captured pieces" },
     .{ .long = "t0", .value = "MS", .kind = .int, .min = -(1 << 62), .max = 1 << 62, .vis = .hidden, .help = "When the shortcut was pressed" },
+    // a mode this Shotlet does not know (a newer extension's) is an area
+    // capture, not an error
     .{ .long = "mode", .value = "MODE", .vis = .hidden, .help = "The capture mode the extension started" },
-    .{ .long = "pointer", .value = "X,Y", .vis = .hidden, .help = "Where the pointer was" },
-    .{ .long = "then", .value = "ACTION", .vis = .hidden, .help = "\"record\": the recording picker on this capture." },
+    .{ .long = "pointer", .value = "X,Y", .kind = .pair, .min = -(1 << 31), .max = (1 << 31) - 1, .vis = .hidden, .help = "Where the pointer was" },
+    .{ .long = "then", .value = "ACTION", .kind = .choice, .choices = &.{"record"}, .vis = .hidden, .help = "\"record\": the recording picker on this capture." },
 };
 
 fn mode(comptime id: spec.Id, comptime summary: []const u8, comptime description: []const u8) Command {
@@ -78,16 +99,16 @@ pub const list = [_]Command{
         .id = .timer,
         .name = "timer",
         .group = .capture,
-        .summary = "Capture an area after a countdown (3, 5 or 10)",
+        .summary = "Capture an area after a countdown (" ++ timer_list ++ ")",
         .usage = &.{"timer [SECONDS]"},
         .description = "A small countdown in the middle of the screen, then an area capture. " ++
             "Without SECONDS it counts timer_seconds from the settings.",
         .args = &.{.{
             .name = "SECONDS",
             .kind = .int,
-            .max = 60,
-            .choices = &.{ "3", "5", "10" },
-            .help = "How long to count down (0 to 60; the settings offer 3, 5 and 10)",
+            .max = mode_mod.max_delay_s,
+            .choices = &timer_words,
+            .help = "How long to count down (" ++ delay_range ++ "; the settings offer " ++ timer_list ++ ")",
         }},
         .examples = &.{
             .{ .cmd = "timer", .what = "Count down the configured seconds, then capture" },

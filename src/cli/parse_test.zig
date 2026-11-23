@@ -14,9 +14,9 @@ fn setup() void {
     arena_state = .init(t.allocator);
 }
 
-fn expectRest(out: parse.Outcome, want: []const []const u8) !void {
-    try t.expectEqual(want.len, out.run.rest.len);
-    for (want, out.run.rest) |a, b| try t.expectEqualStrings(a, b);
+fn expectPositionals(out: parse.Outcome, want: []const []const u8) !void {
+    try t.expectEqual(want.len, out.run.positionals.len);
+    for (want, out.run.positionals) |a, b| try t.expectEqualStrings(a, b);
 }
 
 test "no arguments: the default capture" {
@@ -31,9 +31,12 @@ test "long options: --opt value and --opt=value, in order" {
     defer arena_state.deinit();
     const a = try run(&.{ "record", "--gif", "--fps", "12", "--region=1,2,3,4" });
     try t.expectEqual(.record, a.run.id());
-    try expectRest(a, &.{ "--gif", "--fps", "12", "--region", "1,2,3,4" });
+    try t.expectEqual(@as(usize, 3), a.run.opts.len);
     try t.expectEqualStrings("12", a.run.value("fps").?);
+    try t.expectEqual(@as(?u32, 12), a.run.int(u32, "fps"));
+    try t.expectEqual([4]i32{ 1, 2, 3, 4 }, a.run.rect("region").?);
     try t.expect(a.run.flag("gif") and !a.run.flag("mp4"));
+    try t.expectEqualStrings("gif", a.run.last(&.{ "gif", "mp4", "format" }).?.option.long);
 }
 
 test "short options and aliases" {
@@ -66,7 +69,7 @@ test "subcommands and their options" {
     try t.expectEqual(.history_clear, (try run(&.{ "history", "clear" })).run.id());
     const s = try run(&.{ "gnome-integration", "shortcut", "window", "Super+W" });
     try t.expectEqual(.gnome_shortcut, s.run.id());
-    try expectRest(s, &.{ "window", "Super+W" });
+    try expectPositionals(s, &.{ "window", "Super+W" });
     const f = (try run(&.{ "permissions", "rest" })).fail;
     try t.expectEqual(.unknown_command, f.kind);
     try t.expectEqualStrings("reset", f.suggestion.?);
@@ -122,14 +125,23 @@ test "the invocations Shotlet, its extension and the e2e suites use" {
     const ext = try run(&.{ "--from-shell", "7", "--monitors", "0,0,1920,1080,1", "--pieces", "x", "--t0", "123", "--mode", "window", "--pointer", "-20,300", "--then", "record" });
     try t.expectEqual(.shot, ext.run.id());
     try t.expect(ext.run.shell_launch);
-    try expectRest(ext, &.{ "--from-shell", "7", "--monitors", "0,0,1920,1080,1", "--pieces", "x", "--t0", "123", "--mode", "window", "--pointer", "-20,300", "--then", "record" });
+    try t.expectEqualStrings("7", ext.run.value("from-shell").?);
+    try t.expectEqual(@as(?i64, 123), ext.run.int(i64, "t0"));
+    try t.expectEqual([2]i32{ -20, 300 }, ext.run.pair(i32, "pointer").?);
     const tm = try run(&.{ "timer", "3" });
-    try expectRest(tm, &.{"3"});
+    try t.expectEqual(@as(?u8, 3), tm.run.argInt(u8, 0));
     try t.expectEqual(.text, (try run(&.{ "text", "--from", "a.png" })).run.id());
     try t.expectEqual(.shot, (try run(&.{ "shot", "--from", "a.png", "--sel", "0,0,10,10", "--smoke", "1500" })).run.id());
     try t.expectEqual(.edit, (try run(&.{ "edit", "/root", "20250101-1" })).run.id());
     const trim = try run(&.{ "trim", "/root", "id", "--range", "1000,2500", "--export" });
-    try expectRest(trim, &.{ "/root", "id", "--range", "1000,2500", "--export" });
+    try expectPositionals(trim, &.{ "/root", "id" });
+    try t.expectEqual([2]i64{ 1000, 2500 }, trim.run.pair(i64, "range").?);
+    try t.expect(trim.run.flag("export"));
+    const quick = try run(&.{ "quick", "/root", "id", "-1" });
+    try t.expectEqual(@as(?i32, -1), quick.run.argInt(i32, 2));
+    const toast = try run(&.{ "toast", "--info", "Title", "Body" });
+    try expectPositionals(toast, &.{ "Title", "Body" });
+    try t.expect(toast.run.flag("info"));
     try t.expectEqual(.gnome_install, (try run(&.{ "gnome-integration", "install" })).run.id());
     try t.expectEqual(.gnome_shortcut, (try run(&.{ "gnome-integration", "shortcut", "screens", "none" })).run.id());
     const rec = try run(&.{ "record", "--region", "200,150,480,320", "--seconds", "4", "--no-countdown", "--no-control", "--clicks", "--keys", "--mic", "--system-audio" });
