@@ -114,17 +114,16 @@ keyboard_space() {
     check "Space moves the selection while dragging" clip_is space 200x200
 }
 
-# Esc: first drops the selection, then quits
+# Esc: with a tool and a selection (no annotation) one Esc quits, as
+# macOS's and CleanShot X's pickers do; it does not first drop the
+# selection
 keyboard_esc() {
     run_shotlet esc
     wait_editor 5
     drag 0 100 100 0 300 300
     keys r
     keys esc
-    sleep 0.3
-    check "Esc with a tool and a selection keeps the editor" alive
-    keys esc esc
-    check "  ... further Esc presses quit" wait_exit 3
+    check "Esc with a tool and a selection quits at once" wait_exit 3
     check "  ... with status 0" eq "$RC" 0
 }
 

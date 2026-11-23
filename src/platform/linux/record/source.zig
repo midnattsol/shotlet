@@ -10,7 +10,6 @@ const config = @import("../../../app/config.zig");
 const gnome = @import("../gnome.zig");
 const shell1 = @import("../gnome/shell1.zig");
 const portal = @import("../portal.zig");
-const region = @import("../../../record/region.zig");
 const geom = @import("../../../geom.zig");
 const switches = @import("../../api/switches.zig");
 const rememberToken = @import("../capture/screencast.zig").rememberToken;
@@ -106,7 +105,7 @@ fn pickStream(streams: []const portal.Stream, area: geom.Rect) ?struct { node: u
         const size = s.size orelse .{ 0, 0 };
         rects[i] = .{ .x = pos[0], .y = pos[1], .w = size[0], .h = size[1] };
     }
-    const best = region.bestMonitor(area, rects[0..n]) orelse 0;
+    const best = geom.bestMonitor(area, rects[0..n]) orelse 0;
     return .{ .node = streams[best].node_id, .rect = rects[best] };
 }
 

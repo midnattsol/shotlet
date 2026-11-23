@@ -26,7 +26,7 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
     // the picker and the control follow the desktop's appearance
     const th = theme.of(theme.readPrefs(c.bus, 800));
     log.info("pick a region", .{});
-    const region: geom.Rect = switch (try region_pick.pick(c.gpa, c.win, cap, "Start scrolling capture", th)) {
+    const region: geom.Rect = switch (try region_pick.pick(c.gpa, c.win, cap.frozen(), "Start scrolling capture", th)) {
         .region => |r| .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h },
         .cancelled => return null,
     };

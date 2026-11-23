@@ -43,10 +43,9 @@ pub const Result = struct {
 
 pub const DragMode = union(enum) {
     none,
-    /// anchor corner, image pixels
-    selecting: Point,
-    moving_sel: MovingSel,
-    resizing_sel: ResizingSel,
+    /// the area selection: drawn out, moved or resized (the gesture is
+    /// Editor.area's, editor/area.zig)
+    area,
     drawing,
     moving_shape: MovingShape,
     resizing_shape: ResizingShape,
@@ -58,8 +57,6 @@ pub const DragMode = union(enum) {
     /// dragging a text box's width handle
     text_width: TextWidth,
 
-    pub const MovingSel = struct { orig: Rect, start: Point };
-    pub const ResizingSel = struct { handle: u3, orig: Rect };
     pub const MovingShape = struct { start: Point, applied: Point };
     pub const ResizingShape = struct { handle: u3, orig: Shape };
     pub const TextWidth = struct { idx: usize, orig_w: i32, orig_x: i32, orig_box_w: i32, rtl: bool, editing: bool };

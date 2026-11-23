@@ -49,12 +49,12 @@ pub fn update(ed: *Editor, ip: Point) !void {
             spaceMove(ed, ip);
             const q = if (ed.mod_shift) shapes_mod.snapAngle(ed.drag_anchor, ip) else ip;
             const a = ed.drag_anchor;
-            s.p0 = if (ed.mod_alt) .{ .x = 2 * a.x - q.x, .y = 2 * a.y - q.y } else a;
+            s.p0 = if (ed.mod_alt or ed.mod_ctrl) .{ .x = 2 * a.x - q.x, .y = 2 * a.y - q.y } else a;
             s.p1 = q;
         },
         else => {
             spaceMove(ed, ip);
-            const cs = shapes_mod.dragCorners(ed.drag_anchor, ip, ed.mod_shift, ed.mod_alt);
+            const cs = shapes_mod.dragCorners(ed.drag_anchor, ip, ed.mod_shift, ed.mod_alt or ed.mod_ctrl);
             s.p0 = cs[0];
             s.p1 = cs[1];
         },

@@ -4,6 +4,7 @@
 const std = @import("std");
 const png = @import("../gfx/png.zig");
 const geom = @import("../geom.zig");
+const Frozen = @import("../ui/freeze_pick.zig").Frozen;
 
 /// A monitor's place in the image and in the logical layout (geom.zig).
 pub const Monitor = geom.Monitor;
@@ -19,6 +20,11 @@ pub const Capture = struct {
         const mons = try gpa.alloc(Monitor, 1);
         mons[0] = .{ .x = 0, .y = 0, .w = image.width, .h = image.height };
         return .{ .image = image, .monitors = mons };
+    }
+
+    /// The capture as a picker shows it (ui/freeze_pick.zig).
+    pub fn frozen(self: *const Capture) Frozen {
+        return .{ .pixels = self.image.pixels, .width = self.image.width, .height = self.image.height, .monitors = self.monitors };
     }
 
     pub fn deinit(self: *Capture, gpa: std.mem.Allocator) void {

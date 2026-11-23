@@ -10,6 +10,7 @@ const selection = @import("selection.zig");
 const text_edit = @import("text_edit.zig");
 const drag = @import("drag.zig");
 const drawing = @import("drawing.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 
@@ -18,7 +19,7 @@ pub fn settle(ed: *Editor) !void {
     try text_edit.endText(ed);
     switch (ed.drag) {
         .drawing => try drawing.commit(ed),
-        .moving_shape, .resizing_shape => try drag.onRelease(ed),
+        .moving_shape, .resizing_shape, .area => try drag.onRelease(ed),
         else => {},
     }
     ed.drag = .none;
@@ -101,18 +102,13 @@ fn cancelDrag(ed: *Editor) !bool {
             ed.drag = .none;
             try revertLifted(ed);
         },
-        .selecting, .moving_sel, .resizing_sel => {
-            caches.selDirty(ed);
-            ed.doc.sel = null;
-            ed.drag = .none;
-            caches.selDirty(ed);
-        },
+        .area => area.cancel(ed),
     }
     return true;
 }
 
-/// Nothing in progress: drop keyboard focus, the selected shape, or
-/// the selection, in that order.
+/// Nothing in progress: drop keyboard focus or the selected shape, in
+/// that order. The area stays: Esc then closes (keys_input.escape).
 fn clearFocusOrSelection(ed: *Editor) bool {
     if (ed.focus != null) {
         ed.focus = null;
@@ -120,11 +116,6 @@ fn clearFocusOrSelection(ed: *Editor) bool {
     }
     if (ed.selected != null) {
         selection.deselectShape(ed);
-        return true;
-    }
-    if (ed.doc.sel != null) {
-        caches.selDirty(ed);
-        ed.doc.sel = null;
         return true;
     }
     return false;

@@ -1,6 +1,7 @@
 //! The UI's test root (src/main.zig): its files and its folders' roots.
 
 comptime {
+    _ = @import("areasel.zig");
     _ = @import("badge.zig");
     _ = @import("barkit.zig");
     _ = @import("cardmenu.zig");
@@ -14,6 +15,7 @@ comptime {
     _ = @import("floatwin.zig");
     _ = @import("focus.zig");
     _ = @import("frame.zig");
+    _ = @import("freeze_pick.zig");
     _ = @import("hsv.zig");
     _ = @import("icons.zig");
     _ = @import("lens.zig");

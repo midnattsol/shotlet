@@ -9,6 +9,8 @@ const shapes_mod = @import("../shapes.zig");
 const ui = @import("../editor_ui.zig");
 const tools = @import("../tools/mod.zig");
 const selchrome = @import("../selchrome.zig");
+const areasel = @import("../areasel.zig");
+const area = @import("area.zig");
 
 const Editor = editor.Editor;
 const Point = shapes_mod.Point;
@@ -84,13 +86,13 @@ pub fn shapeHandleAt(ed: *const Editor, i: usize, m: Point) ?u3 {
 pub fn cursorFor(ed: *Editor, m: Point) window.Cursor {
     return switch (ed.drag) {
         .none => hoverCursor(ed, m),
-        .moving_sel, .moving_shape => .grabbing,
-        .resizing_sel => |rs| selchrome.handleCursor(rs.handle),
+        .area => areasel.cursorFor(ed.area.drag, .outside),
+        .moving_shape => .grabbing,
         .resizing_shape => |rs| shapeHandleCursor(rs.orig.handleKind(), rs.handle, true),
         .text_width => .resize_ew,
         .text_select => .text,
         .size_slider => .arrow,
-        .selecting, .drawing, .picking => .crosshair,
+        .drawing, .picking => .crosshair,
     };
 }
 
@@ -121,8 +123,6 @@ fn shapeHandleCursor(kind: shapes_mod.Shape.HandleKind, h: u3, held: bool) windo
 /// The select tool's cursor over a shape or the selection, if any.
 fn selectCursor(ed: *Editor, m: Point) ?window.Cursor {
     if (ed.doc.sel != null and ed.doc.hit(ed.imgAt(m), hitTol(ed)) != null) return .grab;
-    const n = ed.selBuf() orelse return null;
-    if (shapes_mod.handleAt(n, m, ed.handleRadius())) |hi| return selchrome.handleCursor(hi);
-    if (n.contains(m.x, m.y)) return .grab;
-    return null;
+    const g = area.grabAt(ed, m);
+    return if (g == .outside) null else areasel.cursorFor(.none, g);
 }

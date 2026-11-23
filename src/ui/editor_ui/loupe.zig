@@ -86,7 +86,7 @@ pub fn wanted(ed: *const Editor) bool {
     if (ed.loupe.mode == .never or ed.tools.mode != .none) return false;
     if (ed.drag == .none and hit.onChrome(ed, ed.mouse)) return false;
     return switch (ed.drag) {
-        .selecting, .resizing_sel => true,
+        .area => ed.area.drag != .moving,
         .none => ed.doc.sel == null,
         else => false,
     };
@@ -168,14 +168,15 @@ fn look(ed: *const Editor, nudge: bool) Look {
         const s = ed.doc.sel.?.normalized();
         return .{ .at = shapes_mod.handleFocus(s, ed.loupe.nudge.?, q), .edge = true };
     }
-    return switch (ed.drag) {
-        .resizing_sel => |rs| .{ .at = shapes_mod.handleFocus(ed.doc.sel.?, rs.handle, q), .edge = true },
-        .selecting => blk: {
+    if (ed.drag == .area) switch (ed.area.drag) {
+        .resizing => |rs| return .{ .at = shapes_mod.handleFocus(ed.doc.sel.?, rs.handle, q), .edge = true },
+        .drawing => {
             const s = ed.doc.sel.?;
-            break :blk .{ .at = shapes_mod.handleFocus(s, shapes_mod.nearestCorner(s, q), q), .edge = true };
+            return .{ .at = shapes_mod.handleFocus(s, shapes_mod.nearestCorner(s, q), q), .edge = true };
         },
-        else => .{ .at = ed.pn().view.toImg(ed.mouse) },
+        else => {},
     };
+    return .{ .at = ed.pn().view.toImg(ed.mouse) };
 }
 
 /// The pane showing image point `p`: the pointer's when it does.

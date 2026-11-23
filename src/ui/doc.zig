@@ -179,21 +179,6 @@ pub const Document = struct {
         }
         return n + 1;
     }
-
-    // --- selection ---
-
-    /// Move the selection by (dx, dy), kept inside the image.
-    pub fn moveSelection(self: *Document, dx: i32, dy: i32) void {
-        const s = (self.sel orelse return).normalized();
-        const iw: i32 = @intCast(self.width);
-        const ih: i32 = @intCast(self.height);
-        self.sel = .{
-            .x = std.math.clamp(s.x + dx, 0, @max(0, iw - s.w)),
-            .y = std.math.clamp(s.y + dy, 0, @max(0, ih - s.h)),
-            .w = s.w,
-            .h = s.h,
-        };
-    }
 };
 
 fn freeShapes(gpa: std.mem.Allocator, list: []Shape) void {
@@ -303,17 +288,6 @@ test "hit picks the topmost shape" {
     try testing.expectEqual(@as(?usize, 1), d.hit(.{ .x = 30, .y = 30 }, 1));
     try testing.expectEqual(@as(?usize, 0), d.hit(.{ .x = 5, .y = 5 }, 1));
     try testing.expectEqual(@as(?usize, null), d.hit(.{ .x = 90, .y = 90 }, 1));
-}
-
-test "keyboard selection moves stay inside the image" {
-    const gpa = testing.allocator;
-    var d = Document.init(gpa, 100, 80);
-    defer d.deinit();
-    d.sel = .{ .x = 10, .y = 10, .w = 20, .h = 20 };
-    d.moveSelection(-50, 0);
-    try testing.expectEqual(@as(i32, 0), d.sel.?.x);
-    d.moveSelection(500, 500);
-    try testing.expect(d.sel.?.eql(.{ .x = 80, .y = 60, .w = 20, .h = 20 }));
 }
 
 test "undo covers a text box's width" {

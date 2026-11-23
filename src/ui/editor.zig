@@ -41,6 +41,7 @@ const render = @import("editor/render.zig");
 const exporter = @import("editor/export.zig");
 const fade = @import("editor/fade.zig");
 const dim = @import("dim.zig");
+const areasel = @import("areasel.zig");
 const capmode = @import("editor/capmode.zig");
 
 const Window = window.Window;
@@ -101,12 +102,16 @@ pub const Editor = struct {
     scroll_acc: f64 = 0,
     mod_shift: bool = false,
     mod_alt: bool = false,
+    /// Ctrl held: a drag grows from its centre (Alt too)
+    mod_ctrl: bool = false,
     space: types.SpaceMove = .{},
-    /// where the current drag started (image pixels)
+    /// where the current shape drag started (image pixels)
     drag_anchor: Point = .{ .x = 0, .y = 0 },
-    /// the selection's handle last dragged: arrow keys move its edges
-    /// (none: they move the whole selection)
-    sel_edge: ?u3 = null,
+    /// the area selection's gesture (editor/area.zig): the handle last
+    /// dragged, what a drag does
+    area: areasel.Selection = .{ .area = .{ .bounds = Rect.empty } },
+    /// the monitors' image rects, for `area`
+    area_mons: [window.max_outputs]Rect = undefined,
     last_click: types.LastClick = .{},
     coalesce: types.Coalesce = .{},
 

@@ -1,252 +1,142 @@
-//! The scrolling capture's region picker, over a frozen capture on one
-//! fullscreen surface per monitor: drag out a region, then Start (or
-//! Enter) confirms it. Esc, a right click or closing the surfaces
-//! cancels. Everything is in the capture's image pixels. Light or dark
-//! with the desktop, in its accent (ui/theme.zig).
+//! The scrolling capture's region picker: an area over the frozen desktop
+//! (ui/freeze_pick.zig, the same selection as the editor's and the
+//! recording picker's), and under it a bar in the record bar's look:
+//!
+//!   [ × | ↧ Start scrolling capture ]
+//!
+//! Start or Enter confirms, × or Esc cancels. The region goes out in the
+//! capture's image pixels.
 
 const std = @import("std");
-const capture = @import("../app/capture.zig");
-const render = @import("../gfx/render.zig");
-const view_mod = @import("view.zig");
 const window = @import("../platform/api.zig").window;
-const dim = @import("dim.zig");
-const selchrome = @import("selchrome.zig");
+const render = @import("../gfx/render.zig");
+const freeze_pick = @import("freeze_pick.zig");
 const barkit = @import("barkit.zig");
+const material = @import("material.zig");
+const selchrome = @import("selchrome.zig");
+const icons = @import("icons.zig");
 const press = @import("press.zig");
 const scale = @import("scale.zig");
 const theme = @import("theme.zig");
-const Rect = @import("shapes.zig").Rect;
-const View = view_mod.View;
+const geom = @import("../geom.zig");
+const Rect = geom.Rect;
 
 pub const Result = union(enum) {
     cancelled,
     region: Rect,
 };
 
-/// the Start button, logical px
-const start_h = 34;
-const start_gap = 10;
-/// a smaller drag is no region (image px)
-const min_side = 8;
+const Item = enum { close, start };
 
-const Pane = struct {
-    view: View = .{},
-    bright: []u32 = &.{},
-    dimmed: []u32 = &.{},
-    w: u32 = 0,
-    h: u32 = 0,
+const pad: i32 = @intFromFloat(theme.bar_pad);
+const gap: i32 = @intFromFloat(theme.bar_gap);
+const btn: i32 = @intFromFloat(theme.button);
+const sep_w: i32 = 1 + 2 * @as(i32, @intFromFloat(theme.sep_margin));
+const bar_h = 2 * pad + btn;
 
-    fn deinit(self: *Pane, gpa: std.mem.Allocator) void {
-        gpa.free(self.bright);
-        gpa.free(self.dimmed);
-        self.* = .{};
-    }
-
-    fn bounds(self: *const Pane) Rect {
-        return .ofSize(self.w, self.h);
-    }
-};
-
-/// The Start button: buffer pixels of the surface it is on.
-const Start = struct { surface: u8, r: Rect };
-
-pub const Picker = struct {
-    gpa: std.mem.Allocator,
-    win: *window.Window,
-    cap: *const capture.Capture,
-    th: theme.Theme,
+/// The bar as the picker's mode (freeze_pick.run): × and Start, in
+/// logical pixels from its top-left.
+const Mode = struct {
     label: []const u8,
-    /// of 256, what the dim outside the selection keeps (ui/dim.zig)
-    keep: u32 = 256,
-    panes: [window.max_surfaces]Pane = @splat(.{}),
-    sel: ?Rect = null,
-    anchor: ?[2]i32 = null,
-    start_btn: ?Start = null,
-    /// Start activates on a press and release over it (ui/press.zig)
-    pressed: press.Press(Start) = .{},
-    dirty: bool = true,
+    hover: ?Item = null,
+    pressed: press.Press(Item) = .{},
+    shadow: material.ShadowCache = .{},
 
-    pub fn deinit(self: *Picker) void {
-        for (&self.panes) |*p| p.deinit(self.gpa);
+    fn rectOf(self: *const Mode, it: Item) Rect {
+        return switch (it) {
+            .close => .{ .x = pad, .y = pad, .w = btn, .h = btn },
+            .start => .{ .x = pad + btn + gap + sep_w + gap, .y = pad, .w = barkit.primaryWidth(1, self.label), .h = btn },
+        };
     }
 
-    /// The view of surface i: its monitor's part of the image.
-    fn viewFor(self: *const Picker, i: usize, w: u32, h: u32) View {
-        const sf = self.win.surfaceList()[i];
-        for (self.cap.monitors) |m| {
-            const l = m.logical orelse continue;
-            if (l.x == sf.x and l.y == sf.y and l.w == sf.out_w and l.h == sf.out_h)
-                return view_mod.monitorView(m.pixelRect(), w, h);
-        }
-        return View.fit(self.cap.image.width, self.cap.image.height, .ofSize(w, h), 8);
-    }
-
-    fn prepare(self: *Picker, i: usize, w: u32, h: u32) !void {
-        const p = &self.panes[i];
-        p.deinit(self.gpa);
-        if (w == 0 or h == 0) return;
-        p.w = w;
-        p.h = h;
-        p.view = self.viewFor(i, w, h);
-        p.bright = try self.gpa.alloc(u32, @as(usize, w) * h);
-        p.dimmed = try self.gpa.alloc(u32, p.bright.len);
-        const img = &self.cap.image;
-        view_mod.resample(img.pixels, img.width, img.height, p.view, p.bright, w, h, p.bounds());
-        dim.dimRow(p.bright, p.dimmed, self.keep);
-    }
-
-    fn paint(self: *Picker, i: usize) !void {
-        const p = &self.panes[i];
-        if (p.w == 0) return;
-        const px = try self.win.backBufferOf(@intCast(i));
-        @memcpy(px, p.dimmed);
-        var cv = render.Canvas.init(px, p.w, p.h);
-        const k = scale.of(self.win.surfaceList()[i].scale120);
-        if (self.sel) |s| {
-            const b = p.view.rectToBuf(s);
-            // the selection shows the screen as it is
-            if (Rect.intersect(b, p.bounds())) |c| for (@intCast(c.y)..@intCast(c.bottom())) |y| {
-                const row = y * @as(usize, p.w) + @as(usize, @intCast(c.x));
-                @memcpy(cv.px[row..][0..@intCast(c.w)], p.bright[row..][0..@intCast(c.w)]);
-            };
-            selchrome.edge(&cv, b, self.th);
-            if (self.anchor == null) self.drawStart(i, &cv, k, b);
-        } else {
-            const msg = "Drag over what to scroll \u{00b7} Esc to cancel";
-            const sz = selchrome.hintPillSize(msg, k);
-            _ = selchrome.hintPill(&cv, .{ .x = @divTrunc(cv.w - sz[0], 2), .y = scale.px(28, k) }, msg, k, self.th);
-        }
-        try self.win.presentSurface(@intCast(i));
-    }
-
-    /// Start, centred under the selection (over its bottom edge when
-    /// there is no room below); lit while held.
-    fn drawStart(self: *Picker, i: usize, cv: *render.Canvas, k: f64, b: Rect) void {
-        const w = barkit.textButtonWidth(k, self.label);
-        const h = scale.px(start_h, k);
-        const gap = scale.px(start_gap, k);
-        var y = b.bottom() + gap;
-        if (y + h > cv.h) y = b.bottom() - h - gap;
-        const x = std.math.clamp(b.x + @divTrunc(b.w - w, 2), 0, @max(0, cv.w - w));
-        const r: Rect = .{ .x = x, .y = y, .w = w, .h = h };
-        const held: f64 = if (self.pressed.held() != null) 1 else 0;
-        barkit.textButton(cv, r, k, self.th, .primary, held, self.label);
-        self.start_btn = .{ .surface = @intCast(i), .r = r };
-    }
-
-    fn imgAt(self: *const Picker, surface: u8, x: f64, y: f64) [2]i32 {
-        const v = self.panes[surface].view;
-        const pt = v.toImgEdge(.{ .x = @intFromFloat(x), .y = @intFromFloat(y) });
-        const iw: i32 = @intCast(self.cap.image.width);
-        const ih: i32 = @intCast(self.cap.image.height);
-        return .{ std.math.clamp(pt.x, 0, iw), std.math.clamp(pt.y, 0, ih) };
-    }
-
-    fn onMotion(self: *Picker, surface: u8, x: f64, y: f64) void {
-        const a = self.anchor orelse return;
-        const pt = self.imgAt(surface, x, y);
-        self.sel = .{ .x = @min(a[0], pt[0]), .y = @min(a[1], pt[1]), .w = @intCast(@abs(pt[0] - a[0])), .h = @intCast(@abs(pt[1] - a[1])) };
-        self.dirty = true;
-    }
-
-    /// The Start button under a pointer on `surface`, if it shows.
-    fn startAt(self: *const Picker, surface: u8, x: f64, y: f64) ?Start {
-        if (self.sel == null) return null;
-        const b = self.start_btn orelse return null;
-        if (b.surface != surface or !b.r.contains(@intFromFloat(x), @intFromFloat(y))) return null;
-        return b;
-    }
-
-    /// A press or release: the result once the picker is done. Start is
-    /// a press and a release over it; a press anywhere else drags anew.
-    fn onButton(self: *Picker, b: anytype) ?Result {
-        if (b.button == .right) return if (b.pressed) .cancelled else null;
-        if (b.button != .left) return null;
-        self.dirty = true;
-        const on_start = self.startAt(b.surface, b.x, b.y);
-        if (b.pressed) {
-            if (on_start != null) {
-                self.pressed.down(on_start, b.x, b.y);
-                return null;
-            }
-            self.anchor = self.imgAt(b.surface, b.x, b.y);
-            self.sel = null;
-            self.start_btn = null;
-        } else if (self.pressed.held() != null) {
-            if (self.pressed.up(on_start) != null) return .{ .region = self.sel.? };
-        } else if (self.anchor != null) {
-            self.onMotion(b.surface, b.x, b.y);
-            self.anchor = null;
-            if (self.sel) |s| if (s.w < min_side or s.h < min_side) {
-                self.sel = null;
-            };
-        }
+    fn hit(self: *const Mode, at: ?[2]i32) ?Item {
+        const a = at orelse return null;
+        for ([_]Item{ .close, .start }) |it| if (self.rectOf(it).contains(a[0], a[1])) return it;
         return null;
     }
 
-    fn onKey(self: *const Picker, k: window.Key) ?Result {
-        if (!k.pressed) return null;
-        if (k.code == .escape) return .cancelled;
-        if (k.code == .enter or k.code == .kp_enter) if (self.sel) |s| return .{ .region = s };
-        return null;
+    pub fn barSize(self: *Mode) [2]i32 {
+        return .{ self.rectOf(.start).right() + pad, bar_h };
     }
 
-    fn handle(self: *Picker, ev: window.InputEvent) !?Result {
-        switch (ev) {
-            .close => return .cancelled,
-            .resize => |r| {
-                try self.prepare(r.surface, r.w, r.h);
-                self.dirty = true;
+    pub fn onBar(self: *Mode, ev: freeze_pick.BarEvent) freeze_pick.BarReply {
+        const it = self.hit(ev.at);
+        switch (ev.kind) {
+            .hover => {
+                const changed = it != self.hover;
+                self.hover = it;
+                return .{ .over = it != null or self.pressed.held() != null, .repaint = changed };
             },
-            .frame_done => {},
-            .pointer_motion => |m| if (m.x >= 0) self.onMotion(m.surface, m.x, m.y),
-            .pointer_button => |b| return self.onButton(b),
-            .key => |k| return self.onKey(k),
-            .pointer_axis => {},
+            .press => {
+                if (it != null) self.pressed.down(it, ev.x, ev.y);
+                return .{ .over = it != null, .repaint = it != null };
+            },
+            .release => return switch (self.pressed.up(it) orelse return .{ .repaint = true }) {
+                .start => .{ .act = .confirm },
+                .close => .{ .act = .cancel },
+            },
         }
-        return null;
     }
 
-    fn paintAll(self: *Picker) !void {
-        if (!self.dirty) return;
-        const surfs = self.win.surfaceList();
-        for (surfs) |s| if (s.alive and s.frame_pending) return;
-        self.dirty = false;
-        for (surfs, 0..) |s, i| if (s.alive) try self.paint(i);
+    /// Glass over the blurred desktop, as the record bar; Start in the
+    /// accent, lit while held; the tooltip of the item under the pointer.
+    pub fn paintBar(self: *Mode, gpa: std.mem.Allocator, cv: *render.Canvas, at: geom.Point, k: f64, th: theme.Theme) void {
+        const sz = self.barSize();
+        const r: Rect = .{ .x = at.x, .y = at.y, .w = scale.px(sz[0], k), .h = scale.px(sz[1], k) };
+        const rad = theme.bar_radius * k;
+        material.shadow(gpa, cv, r, rad, th.bar_shadow, k, 1, &self.shadow);
+        material.glass(gpa, cv, r, rad, th, k);
+        const sx = pad + btn + gap + @as(i32, @intFromFloat(theme.sep_margin));
+        barkit.separator(cv, at.x + scale.px(sx, k), at.y + scale.px((scale.ff(bar_h) - theme.sep_h) / 2, k), scale.px(theme.sep_h, k), th);
+        const cr = self.place(.close, at, k);
+        barkit.fill(cv, cr, k, th, .plain, if (self.hover == .close) 1 else 0);
+        icons.drawAt(cv, .close, scale.ff(cr.x) + scale.ff(cr.w) / 2, scale.ff(cr.y) + scale.ff(cr.h) / 2, theme.icon * k, .{}, barkit.ink(th, .plain, false));
+        const lit = self.hover == .start or self.pressed.held() == .start;
+        barkit.primary(cv, self.place(.start, at, k), k, if (lit) th.accent_fill_hover else th.accent_fill, th.on_accent, .{ .icon = .capture_scroll }, self.label);
+        if (self.hover) |hv| {
+            const name, const key = switch (hv) {
+                .close => .{ "Cancel", "Esc" },
+                .start => .{ self.label, "Enter" },
+            };
+            const tz = selchrome.tooltipSize(name, key, k);
+            selchrome.tooltip(cv, .{ .x = at.x, .y = r.bottom() + scale.px(8, k), .w = tz[0], .h = tz[1] }, name, key, k, th);
+        }
     }
 
-    /// Open the surfaces and run until a region is picked or cancelled;
-    /// the surfaces are closed again before returning.
-    pub fn run(self: *Picker, title: []const u8) !Result {
-        try self.win.openOutputs(title);
-        defer self.win.closeWindow();
-        self.win.setCursor(.crosshair) catch {};
-        for (self.win.surfaceList(), 0..) |s, i| if (s.alive) try self.prepare(i, s.width, s.height);
-        while (true) {
-            try self.paintAll();
-            const ev = (try self.win.nextEventTimeout(500)) orelse continue;
-            if (try self.handle(ev)) |r| return r;
-        }
+    fn place(self: *const Mode, it: Item, at: geom.Point, k: f64) Rect {
+        const ir = scale.rect(self.rectOf(it), k);
+        return .{ .x = at.x + ir.x, .y = at.y + ir.y, .w = ir.w, .h = ir.h };
     }
 };
 
-/// Pick a region of `cap`; `label` names the Start button.
-pub fn pick(gpa: std.mem.Allocator, win: *window.Window, cap: *const capture.Capture, label: []const u8, th: theme.Theme) !Result {
-    var p: Picker = .{ .gpa = gpa, .win = win, .cap = cap, .th = th, .label = label, .keep = dim.keepFor(cap.image.pixels, cap.image.width, cap.image.height) };
+const hint = "Drag over what to scroll \u{00B7} click: the whole screen \u{00B7} Esc: cancel";
+
+/// Pick a region of `frozen` on `win`'s surfaces (closed again before
+/// returning); `label` names the Start button.
+pub fn pick(gpa: std.mem.Allocator, win: *window.Window, frozen: freeze_pick.Frozen, label: []const u8, th: theme.Theme) !Result {
+    var mode: Mode = .{ .label = label };
+    defer mode.shadow.release(gpa);
+    var p = freeze_pick.Picker.init(gpa, win, frozen, th, hint);
     defer p.deinit();
-    return p.run("Shotlet");
+    return switch (try p.run("Shotlet", &mode)) {
+        .area => |r| .{ .region = r },
+        .cancelled => .cancelled,
+    };
 }
 
-test "Start is a press and a release over it; releasing elsewhere cancels" {
-    const B = struct { button: window.Button, pressed: bool, x: f64, y: f64, surface: u8 = 0 };
-    const sel: Rect = .{ .x = 10, .y = 10, .w = 100, .h = 80 };
-    var p: Picker = .{ .gpa = std.testing.allocator, .win = undefined, .cap = undefined, .th = theme.of(.{}), .label = "Start" };
-    p.sel = sel;
-    p.start_btn = .{ .surface = 0, .r = .{ .x = 40, .y = 100, .w = 60, .h = 30 } };
-    try std.testing.expectEqual(@as(?Result, null), p.onButton(B{ .button = .left, .pressed = true, .x = 50, .y = 110 }));
-    try std.testing.expectEqual(@as(?Result, null), p.onButton(B{ .button = .left, .pressed = false, .x = 5, .y = 5 }));
-    try std.testing.expectEqual(sel, p.sel.?);
-    _ = p.onButton(B{ .button = .left, .pressed = true, .x = 50, .y = 110 });
-    try std.testing.expectEqual(@as(?Result, .{ .region = sel }), p.onButton(B{ .button = .left, .pressed = false, .x = 60, .y = 120 }));
-    try std.testing.expectEqual(@as(?Result, .cancelled), p.onButton(B{ .button = .right, .pressed = true, .x = 0, .y = 0 }));
+test "Start and × act on a press and release over them; releasing elsewhere cancels the press" {
+    var m: Mode = .{ .label = "Start" };
+    const sz = m.barSize();
+    try std.testing.expectEqual(@as(i32, 46), sz[1]);
+    const start = m.rectOf(.start);
+    const on: [2]i32 = .{ start.x + 4, start.y + 4 };
+    try std.testing.expect(m.onBar(.{ .kind = .press, .at = on, .x = 0, .y = 0 }).over);
+    try std.testing.expect(m.onBar(.{ .kind = .release, .at = .{ 2, 2 }, .x = 0, .y = 0 }).act == null);
+    _ = m.onBar(.{ .kind = .press, .at = on, .x = 0, .y = 0 });
+    try std.testing.expect(m.onBar(.{ .kind = .release, .at = on, .x = 0, .y = 0 }).act.? == .confirm);
+    const x: [2]i32 = .{ pad + 4, pad + 4 };
+    try std.testing.expect(m.onBar(.{ .kind = .hover, .at = x, .x = 0, .y = 0 }).repaint);
+    _ = m.onBar(.{ .kind = .press, .at = x, .x = 0, .y = 0 });
+    try std.testing.expect(m.onBar(.{ .kind = .release, .at = x, .x = 0, .y = 0 }).act.? == .cancel);
+    try std.testing.expect(m.hit(.{ start.right() + 2, 10 }) == null);
 }
