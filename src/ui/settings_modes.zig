@@ -12,7 +12,7 @@ const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
 const shell = @import("../platform/api.zig").shell;
 const mode = @import("../app/modes/mode.zig");
-const msettings = @import("../app/modes/settings.zig");
+const config = @import("../app/config.zig");
 const S = @import("settings.zig");
 const window = @import("../platform/api.zig").window;
 const Accel = @import("../app/accel.zig").Accel;
@@ -27,7 +27,7 @@ pub const Hit = union(enum) {
 const n = mode.shortcuts.len;
 
 pub const State = struct {
-    s: msettings.Settings = .{},
+    s: config.Modes = .{},
     /// the shell integration holds the keys: they can be changed
     held: bool = false,
     /// how the backend names the integration
@@ -49,7 +49,7 @@ pub const State = struct {
 };
 
 pub fn load(alloc: std.mem.Allocator, env: env_mod.Env, bus: ?*desktop.Session) State {
-    var st: State = .{ .s = msettings.load(alloc, env.home), .words = shell.words() };
+    var st: State = .{ .s = config.load(alloc, env.home).modes, .words = shell.words() };
     const b = bus orelse return st;
     const sd = shell.shortcutStore(alloc, env, b, &st.sd_buf) orelse return st;
     st.sd_len = sd.len;
@@ -121,17 +121,28 @@ pub fn activate(h: Hit, st: *State, alloc: std.mem.Allocator, env: env_mod.Env) 
     switch (h) {
         .after => {
             st.s.after = st.s.after.next();
-            msettings.setAfter(alloc, env.home, st.s.after) catch |err| std.log.warn("could not save: {t}", .{err});
+            save(alloc, env, .{ .after = st.s.after });
         },
         .timer => {
             const i = std.mem.indexOfScalar(u8, &mode.timer_choices, st.s.timer_s) orelse 0;
             st.s.timer_s = mode.timer_choices[(i + 1) % mode.timer_choices.len];
-            msettings.setTimer(alloc, env.home, st.s.timer_s) catch |err| std.log.warn("could not save: {t}", .{err});
+            save(alloc, env, .{ .timer_s = st.s.timer_s });
             if (st.held) shell.setTimerSeconds(alloc, env, st.store(), st.s.timer_s) catch |err|
                 std.log.warn("could not change the {s}'s self-timer: {t}", .{ st.words.title, err });
         },
         .key => |i| st.recording = if (st.recording == i) null else i,
     }
+}
+
+/// Write one capture-mode setting the window changed (after_fullscreen
+/// or timer_seconds) into the config.
+fn save(alloc: std.mem.Allocator, env: env_mod.Env, change: union(enum) { after: config.After, timer_s: u8 }) void {
+    var cfg = config.load(alloc, env.home);
+    switch (change) {
+        .after => |a| cfg.modes.after = a,
+        .timer_s => |t| cfg.modes.timer_s = t,
+    }
+    config.save(alloc, env.home, &cfg) catch |err| std.log.warn("could not save: {t}", .{err});
 }
 
 /// A key press while a mode's shortcut is being recorded. True when it

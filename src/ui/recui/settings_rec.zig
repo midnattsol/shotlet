@@ -1,12 +1,14 @@
 //! The Settings window's Recording view (settings.zig draws the frame):
 //! format, frame rates, quality, the GIF size, the countdown, and what is
 //! recorded by default (microphone, system sound, clicks, keystrokes).
-//! Each change is written at once (record/settings.zig keys).
+//! Each change is written at once (the config's record_* keys,
+//! config.Record).
 
 const std = @import("std");
 const settings = @import("../settings.zig");
 const theme_mod = @import("../theme.zig");
-const rs = @import("../../record/settings.zig");
+const config = @import("../../app/config.zig");
+const Quality = @import("../../encode/sink.zig").Quality;
 const shell = @import("../../platform/api.zig").shell;
 const env_mod = @import("../../app/env.zig");
 
@@ -50,7 +52,7 @@ pub fn step(steps: []const u32, v: u32, up: bool) u32 {
 }
 
 pub fn draw(ui: *settings.Ui, gpa: std.mem.Allocator, cx: i32, y0: i32, col_w: i32) !i32 {
-    const s = rs.load(gpa, home());
+    const s = config.load(gpa, home()).record;
     const rh = ui.sc(theme_mod.row_h);
     var y = try settings.groupTitle(ui, cx, y0, col_w, "Recording", null);
     var card = settings.beginCard(ui, cx, y, col_w, 4 * rh);
@@ -84,38 +86,37 @@ fn stepRow(ui: *settings.Ui, card: *settings.Card, title: []const u8, sub: ?[]co
     try settings.valueStepper(ui, r, value, h(minus), h(plus));
 }
 
-fn tf(v: bool) []const u8 {
-    return if (v) "true" else "false";
-}
-
-pub fn activate(gpa: std.mem.Allocator, home_dir: []const u8, raw: u8) void {
-    const s = rs.load(gpa, home_dir);
-    var buf: [16]u8 = undefined;
+/// Control `raw`'s change to the recording settings `r`: a stepper's
+/// step, a switch turned over.
+pub fn apply(r: *config.Record, raw: u8) void {
     const hit: Hit = @fromBackingInt(raw);
     const up = switch (hit) {
         .fmt_plus, .fps_plus, .q_plus, .gif_fps_plus, .gif_w_plus, .cd_plus => true,
         else => false,
     };
-    const kv: struct { []const u8, []const u8 } = switch (hit) {
-        .fmt_minus, .fmt_plus => .{ "record_format", if (s.format == .mp4) "gif" else "mp4" },
-        .fps_minus, .fps_plus => .{ "record_fps", num(&buf, step(&fps_steps, s.fps, up)) },
-        .q_minus, .q_plus => .{ "record_quality", @tagName(qualityStep(s.quality, up)) },
-        .gif_fps_minus, .gif_fps_plus => .{ "record_gif_fps", num(&buf, step(&gif_fps_steps, s.gif_fps, up)) },
-        .gif_w_minus, .gif_w_plus => .{ "record_gif_width", num(&buf, step(&gif_w_steps, s.gif_width, up)) },
-        .cd_minus, .cd_plus => .{ "record_countdown", num(&buf, step(&cd_steps, s.countdown, up)) },
-        .mic => .{ "record_mic", tf(!s.mic) },
-        .system => .{ "record_system_audio", tf(!s.system_audio) },
-        .clicks => .{ "record_clicks", tf(!s.clicks) },
-        .keys => .{ "record_keys", tf(!s.keys) },
-    };
-    rs.save(gpa, home_dir, kv[0], kv[1]);
+    switch (hit) {
+        .fmt_minus, .fmt_plus => r.format = if (r.format == .mp4) .gif else .mp4,
+        .fps_minus, .fps_plus => r.fps = step(&fps_steps, r.fps, up),
+        .q_minus, .q_plus => r.quality = qualityStep(r.quality, up),
+        .gif_fps_minus, .gif_fps_plus => r.gif_fps = step(&gif_fps_steps, r.gif_fps, up),
+        .gif_w_minus, .gif_w_plus => r.gif_width = step(&gif_w_steps, r.gif_width, up),
+        .cd_minus, .cd_plus => r.countdown = step(&cd_steps, r.countdown, up),
+        .mic => r.mic = !r.mic,
+        .system => r.system_audio = !r.system_audio,
+        .clicks => r.clicks = !r.clicks,
+        .keys => r.keys = !r.keys,
+    }
 }
 
-fn num(buf: []u8, v: u32) []const u8 {
-    return std.fmt.bufPrint(buf, "{d}", .{v}) catch "0";
+/// Apply control `raw` and save it at once.
+pub fn activate(gpa: std.mem.Allocator, home_dir: []const u8, raw: u8) void {
+    var cfg = config.load(gpa, home_dir);
+    apply(&cfg.record, raw);
+    config.save(gpa, home_dir, &cfg) catch |err|
+        std.log.warn("could not save the recording settings: {t}", .{err});
 }
 
-fn qualityStep(q: @import("../../encode/sink.zig").Quality, up: bool) @import("../../encode/sink.zig").Quality {
+fn qualityStep(q: Quality, up: bool) Quality {
     return switch (q) {
         .low => if (up) .medium else .low,
         .medium => if (up) .high else .low,
@@ -128,4 +129,11 @@ test "steppers move along their lists" {
     try std.testing.expectEqual(@as(u32, 60), step(&fps_steps, 60, true));
     try std.testing.expectEqual(@as(u32, 0), step(&gif_w_steps, 1280, true));
     try std.testing.expectEqual(@as(u32, 30), step(&fps_steps, 17, false));
+    var r: config.Record = .{};
+    apply(&r, @backingInt(Hit.fps_plus));
+    apply(&r, @backingInt(Hit.fmt_minus));
+    apply(&r, @backingInt(Hit.q_minus));
+    apply(&r, @backingInt(Hit.mic));
+    try std.testing.expectEqual(@as(u32, 60), r.fps);
+    try std.testing.expect(r.format == .gif and r.quality == .low and r.mic);
 }

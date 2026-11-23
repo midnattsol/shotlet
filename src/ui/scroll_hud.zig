@@ -26,6 +26,7 @@ const barkit = @import("barkit.zig");
 const floatui = @import("floatui.zig");
 const floatwin = @import("floatwin.zig");
 const material = @import("material.zig");
+const resample = @import("../gfx/resample.zig");
 const window = @import("../platform/api.zig").window;
 const Rect = @import("shapes.zig").Rect;
 
@@ -160,7 +161,7 @@ pub const Hud = struct {
         text.draw(cv, x0, self.sc(pad + 38), fs, lk.muted, text.ellipsize(&ebuf, fs, .regular, self.hint, inner, .end));
         const pv: Rect = .{ .x = x0, .y = self.sc(preview_y), .w = inner, .h = self.sc(preview_h) };
         cv.fillRect(pv.x, pv.y, pv.w, pv.h, lk.field);
-        if (src) |s| drawPreview(cv, pv, s);
+        if (src) |s| drawPreview(self.win.alloc, cv, pv, s);
         if (self.phase != .failed) text.drawStyled(cv, x0, pv.y + pv.h + self.sc(8), fs, lk.muted, text.Style.regular.num(), self.detail);
         self.layoutButtons(cv.w, cv.h);
         for (self.buttons) |b| {
@@ -197,20 +198,28 @@ pub const Hud = struct {
         self.buttons = b[0..3];
     }
 
-    /// The bottom of the image, as wide as the preview.
-    fn drawPreview(cv: *render.Canvas, pv: Rect, s: Source) void {
-        if (s.width == 0 or s.height == 0) return;
+    /// The bottom of the image, as wide as the preview: it grows up from
+    /// the preview's bottom edge. Area-filtered (gfx/resample.zig), so
+    /// text in it stays legible.
+    fn drawPreview(gpa: std.mem.Allocator, cv: *render.Canvas, pv: Rect, s: Source) void {
+        if (s.width == 0 or s.height == 0 or pv.w <= 0 or pv.h <= 0) return;
+        // the rows that fill the preview at its width
         const ratio = @as(f64, @floatFromInt(pv.w)) / @as(f64, @floatFromInt(s.width));
-        const shown: u32 = @min(s.height, @as(u32, @intFromFloat(@as(f64, @floatFromInt(pv.h)) / ratio)));
+        const shown: u32 = std.math.clamp(@as(u32, @intFromFloat(@as(f64, @floatFromInt(pv.h)) / ratio)), 1, s.height);
         const first = s.height - shown;
-        const dh: i32 = @intFromFloat(@as(f64, @floatFromInt(shown)) * ratio);
-        const top = pv.y + pv.h - dh;
-        var y: i32 = 0;
-        while (y < dh) : (y += 1) {
-            const sy = first + @min(shown - 1, @as(u32, @intFromFloat(@as(f64, @floatFromInt(y)) / ratio)));
-            const row = s.row(s.ctx, sy);
-            const out = cv.px[@as(usize, @intCast((top + y) * cv.w + pv.x))..][0..@intCast(pv.w)];
-            for (out, 0..) |*o, x| o.* = row[@min(s.width - 1, @as(u32, @intFromFloat(@as(f64, @floatFromInt(x)) / ratio)))] | 0xFF000000;
+        var p = resample.fit(s.width, shown, @intCast(pv.w), @intCast(pv.h), .contain);
+        p.y = pv.h - @as(i32, @intCast(p.h));
+        const rows = gpa.alloc(u32, @as(usize, s.width) * shown) catch return;
+        defer gpa.free(rows);
+        for (0..shown) |y| for (rows[y * s.width ..][0..s.width], s.row(s.ctx, first + @as(u32, @intCast(y)))[0..s.width]) |*d, q| {
+            d.* = q | 0xFF000000;
+        };
+        const out = gpa.alloc(u32, @as(usize, p.w) * p.h) catch return;
+        defer gpa.free(out);
+        resample.region(gpa, rows, s.width, shown, p.src, out, p.w, p.h) catch return;
+        for (0..p.h) |y| {
+            const at = @as(usize, @intCast(pv.y + p.y + @as(i32, @intCast(y)))) * @as(usize, @intCast(cv.w)) + @as(usize, @intCast(pv.x + p.x));
+            @memcpy(cv.px[at..][0..p.w], out[y * p.w ..][0..p.w]);
         }
     }
 
@@ -315,4 +324,31 @@ test "the labels fit their buttons" {
         try std.testing.expect(text.widthStyled(theme.font_label, .semibold, l) + 12 <= bw);
     var buf: [24]u8 = undefined;
     try std.testing.expectEqualStrings("20\u{2009}000", grouped(&buf, 20_000));
+}
+
+test "the preview shows the image's bottom, as wide as the preview, grown up from its bottom edge" {
+    const W = 40;
+    const Pic = struct {
+        px: []const u32,
+        fn row(ctx: *const anyopaque, y: u32) []const u32 {
+            const self: *const @This() = @ptrCast(@alignCast(ctx));
+            return self.px[y * W ..][0..W];
+        }
+    };
+    // red rows above, blue rows at the bottom; alpha 0 as some captures have it
+    var img: [W * 100]u32 = undefined;
+    for (&img, 0..) |*q, i| q.* = if (i / W < 80) 0x00FF0000 else 0x000000FF;
+    const pic: Pic = .{ .px = &img };
+    var px: [20 * 30]u32 = @splat(0xFF808080);
+    var cv = render.Canvas.init(&px, 20, 30);
+    // 20 wide: half size, so the last 60 rows fill the 30 px
+    Hud.drawPreview(std.testing.allocator, &cv, .{ .x = 0, .y = 0, .w = 20, .h = 30 }, .{ .ctx = &pic, .width = W, .height = 100, .row = Pic.row });
+    try std.testing.expectEqual(@as(u32, 0xFF0000FF), px[29 * 20 + 10]);
+    try std.testing.expectEqual(@as(u32, 0xFFFF0000), px[6 * 20 + 10]);
+    try std.testing.expectEqual(@as(u32, 0xFFFF0000), px[0]);
+    // a short image sits at the bottom; above it stays as it was
+    @memset(&px, 0xFF808080);
+    Hud.drawPreview(std.testing.allocator, &cv, .{ .x = 0, .y = 0, .w = 20, .h = 30 }, .{ .ctx = &pic, .width = W, .height = 20, .row = Pic.row });
+    try std.testing.expectEqual(@as(u32, 0xFF808080), px[19 * 20 + 10]);
+    try std.testing.expectEqual(@as(u32, 0xFFFF0000), px[29 * 20 + 10]);
 }

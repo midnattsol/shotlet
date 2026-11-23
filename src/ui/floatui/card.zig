@@ -1,7 +1,8 @@
 //! Cards on the see-through floating windows: an opaque card placed with
-//! rounded corners and a theme shadow, the same faded as a whole, a
-//! picture fitted into a card (and cached per size), and dragging a file
-//! out of a card. Straight alpha throughout (see ui/floatui.zig).
+//! rounded corners and a theme shadow (its mask cached across frames),
+//! the same faded as a whole, a picture fitted into a card (and cached
+//! per size), and dragging a file out of a card. Straight alpha
+//! throughout (see ui/floatui.zig).
 
 const std = @import("std");
 const effects = @import("../../gfx/effects.zig");
@@ -20,14 +21,41 @@ pub const Image = struct { px: []const u32, w: u32, h: u32 };
 /// The opaque `card` with corners rounded to `radius` and the shadow `sh`
 /// (null: none) at scale `k`, onto `dst` with its top-left corner at `at`.
 pub fn place(gpa: std.mem.Allocator, dst: Surface, card: Image, at: [2]i32, radius: f64, sh: ?theme.Shadow, k: f64) void {
+    _ = gpa; // the shadows' cache has an allocator of its own
     if (sh) |s| {
-        var cache: material.ShadowCache = .{};
-        defer cache.release(gpa);
         const r: Rect = .{ .x = at[0], .y = at[1], .w = @intCast(card.w), .h = @intCast(card.h) };
-        material.shadowStraight(gpa, dst.px, dst.w, dst.h, r, radius, s, k, 1, &cache);
+        material.shadowStraight(shadow_alloc, dst.px, dst.w, dst.h, r, radius, s, k, 1, shadowCache(.{ .w = card.w, .h = card.h, .radius = radius, .sh = s, .k = k }));
     }
-    const rad: u32 = @intFromFloat(@round(std.math.clamp(radius, 0, 1e6)));
-    effects.blitRounded(dst.px, dst.w, dst.h, card.px, card.w, card.h, at[0], at[1], rad);
+    effects.blitRounded(dst.px, dst.w, dst.h, card.px, card.w, card.h, at[0], at[1], radius);
+}
+
+/// What a shadow's mask depends on.
+const ShadowKey = struct { w: u32, h: u32, radius: f64, sh: theme.Shadow, k: f64 };
+
+/// The shadows' masks, kept from frame to frame: a floating window
+/// repaints its cards (fades, hovers, a growing picture) far more often
+/// than their size, corners or shadow change. A few at once: a stack's
+/// cards and its hint, a pin and its menu. Like the icons' masks
+/// (ui/icons.zig) they live as long as the process.
+var shadows: [4]struct { key: ?ShadowKey = null, used: u64 = 0, cache: material.ShadowCache = .{} } = @splat(.{});
+var shadow_tick: u64 = 0;
+const shadow_alloc = std.heap.page_allocator;
+
+/// The cache holding `key`'s mask, else the least recently used one
+/// (material.ShadowCache rebuilds it for the new key).
+fn shadowCache(key: ShadowKey) *material.ShadowCache {
+    shadow_tick += 1;
+    var pick: usize = 0;
+    for (&shadows, 0..) |*e, i| {
+        if (e.key) |kk| if (std.meta.eql(kk, key)) {
+            pick = i;
+            break;
+        };
+        if (e.used < shadows[pick].used) pick = i;
+    }
+    shadows[pick].key = key;
+    shadows[pick].used = shadow_tick;
+    return &shadows[pick].cache;
 }
 
 /// `place`, on a layer of its own faded to `alpha` (0..1) as a whole,
@@ -152,7 +180,7 @@ pub fn dragIcon(gpa: std.mem.Allocator, src: Image, w: u32, h: u32, k: i32) ![]u
     const pic = try gpa.alloc(u32, @as(usize, w) * h);
     defer gpa.free(pic);
     drawImage(gpa, .{ .px = pic, .w = w, .h = h }, src, .auto, letterbox);
-    effects.blitRounded(out, w, h, pic, w, h, 0, 0, @intCast(10 * @max(1, k)));
+    effects.blitRounded(out, w, h, pic, w, h, 0, 0, @floatFromInt(10 * @max(1, k)));
     pixels.fadeAlpha(out, 0.92);
     pixels.premultiply(out, w, h, .{ .x = 0, .y = 0, .w = @intCast(w), .h = @intCast(h) });
     return out;

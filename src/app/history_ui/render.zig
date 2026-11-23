@@ -144,7 +144,7 @@ fn drawItem(self: *Panel, band: *Band, idx: usize, rx: i32, ry: i32, rw: i32, kk
     // a rounded thumbnail, the picture fitted to it (cached per size)
     const pic: fui.Image = if (it.thumb) |t| .{ .px = t.pixels, .w = t.width, .h = t.height } else .{ .px = &.{}, .w = 0, .h = 0 };
     const thumb = try it.fit.ensure(self.gpa, pic, tw, tth, .auto, op.field);
-    effects.blitRounded(band.px, band.w, band.h, thumb, tw, tth, rx, ry, @intCast(s(8, kk)));
+    effects.blitRounded(band.px, band.w, band.h, thumb, tw, tth, rx, ry, s(8, kk));
     const ring: Rect = .{ .x = rx, .y = ry, .w = rw, .h = rh };
     if (self.selected == idx) {
         barkit.focusRing(gc, ring, 8 * kk, kk, op.accent);

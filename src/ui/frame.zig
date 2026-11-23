@@ -31,12 +31,10 @@ const theme = @import("theme.zig");
 const Window = window.Window;
 const Canvas = render.Canvas;
 
-pub const pad = 20;
+/// room for the window's shadow (theme.window_shadow) all round
+pub const pad = theme.window_room;
 /// as the history panel: a little rounder than the cards inside
 const radius = theme.popover_radius;
-/// the material shadow (ui/material.zig), small enough to stay inside
-/// `pad` (theme's card and popover shadows reach further)
-const shadow: theme.Shadow = .{ .color = 0x48000000, .blur = 14, .dy = 5 };
 
 pub fn outer(w: u32, h: u32) [2]u32 {
     return .{ w + 2 * pad, h + 2 * pad };
@@ -120,7 +118,7 @@ pub const Frame = struct {
         var cache: material.ShadowCache = .{};
         defer cache.release(gpa);
         const k = scale.of(win.scale120);
-        material.shadowStraight(gpa, self.shade, win.width, win.height, r, radius * k, shadow, k, 1, &cache);
+        material.shadowStraight(gpa, self.shade, win.width, win.height, r, radius * k, theme.window_shadow, k, 1, &cache);
     }
 
     /// Edge the content with `edge`, round it onto the shadow and present.

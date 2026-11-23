@@ -4,13 +4,15 @@
 
 const std = @import("std");
 const Rect = @import("../../ui/shapes.zig").Rect;
+const theme = @import("../../ui/theme.zig");
 
 // layout, logical pixels
 pub const card_w = 240;
 pub const card_h = 150;
 pub const gap = 12;
-/// room for the shadow around the cards (outside the input region)
-pub const pad = 28;
+/// room for the cards' shadow (theme.card_shadow), outside the input
+/// region
+pub const pad = theme.card_room;
 /// distance from the screen edges to the window (layer shell)
 pub const edge = 8;
 pub const hint_h = 52;

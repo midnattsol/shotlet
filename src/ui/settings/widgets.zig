@@ -12,6 +12,7 @@ const icons = @import("../icons.zig");
 const shapes = @import("../shapes.zig");
 const scale = @import("../scale.zig");
 const menukit = @import("../menukit.zig");
+const barkit = @import("../barkit.zig");
 const model = @import("model.zig");
 
 const Canvas = render.Canvas;
@@ -63,11 +64,6 @@ pub const Card = struct {
 };
 
 pub const Row = struct { x: i32, y: i32, w: i32, h: i32 };
-
-/// Fill of a chip-like button, lighter while hovered.
-pub fn chipFill(th: Theme, hov: bool) u32 {
-    return if (hov) theme_mod.mix(th.chip, th.switch_off, 0.8) else th.chip;
-}
 
 pub fn groupTitle(ui: *Ui, x: i32, y: i32, w: i32, title: []const u8, link: ?[]const u8) !i32 {
     const h = ui.sc(20);
@@ -132,40 +128,32 @@ pub fn switchRow(ui: *Ui, card: *Card, title: []const u8, subtitle: ?[]const u8,
     try ui.add(.{ .x = r.x, .y = r.y, .w = r.w, .h = r.h, .hit = hit, .radius = 0 });
 }
 
-/// A chip button on the right of row `r`.
+/// A chip button on the right of row `r`: barkit's `list` look, its
+/// content 12 px in (long labels keep their tail).
 pub fn chipButton(ui: *Ui, r: Row, hit: Hit, icon: ?icons.Icon, label_s: []const u8, bold: bool) !void {
-    const th = ui.th;
-    const style: text.Style = if (bold) .semibold else .regular;
-    const is = ui.sc(16);
+    var face: barkit.Face = .{ .mark = if (icon) |ic| .{ .glyph = .{ .icon = ic } } else null, .strong = bold, .inset = 12 };
+    const lf = barkit.labelFont(ui.f, .list, face);
     var buf: [300]u8 = undefined;
-    // long paths keep their tail
-    const shown = text.ellipsize(&buf, ui.fs(14), style, label_s, @divTrunc(r.w, 2), .start);
-    const bw = ui.sc(12) + (if (icon != null) is + ui.sc(8) else 0) + ui.width(14, style, shown) + ui.sc(if (icon != null) 12 else 14) + (if (icon == null) ui.sc(2) else 0);
+    face.label = text.ellipsize(&buf, lf.size, lf.style, label_s, @divTrunc(r.w, 2), .start);
+    // (a label alone keeps 2 px more on its right)
+    const bw = ui.sc(12) + barkit.faceWidth(ui.f, .list, face) + (if (icon != null) ui.sc(12) else ui.sc(14) + ui.sc(2));
     const bh = ui.sc(34);
-    const bx = r.x + r.w - ui.sc(16) - bw;
-    const by = r.y + @divTrunc(r.h - bh, 2);
-    const hov = ui.hovered(bx, by, bw, bh);
-    ui.c.fillRoundRectAA(bx, by, bw, bh, 8 * ui.f, chipFill(th, hov));
-    var x = bx + ui.sc(12);
-    if (icon) |ic| {
-        icons.drawStroke(&ui.c, ic, x, by + @divTrunc(bh - is, 2), is, 2, th.text);
-        x += is + ui.sc(8);
-    }
-    ui.label(x, by, bh, 14, th.text, style, shown);
-    try ui.add(.{ .x = bx, .y = by, .w = bw, .h = bh, .hit = hit, .radius = 8 });
+    try listButton(ui, .{ .x = r.x + r.w - ui.sc(16) - bw, .y = r.y + @divTrunc(r.h - bh, 2), .w = bw, .h = bh }, hit, face);
 }
 
 /// A chip button whose right edge is `right_gap` in from the row's.
 pub fn chipButtonAt(ui: *Ui, r: Row, hit: Hit, label_s: []const u8, right_gap: i32) !void {
-    const th = ui.th;
-    const bw = ui.width(14, .regular, label_s) + ui.sc(28);
+    const face: barkit.Face = .{ .label = label_s, .inset = 14 };
+    const bw = barkit.faceWidth(ui.f, .list, face) + ui.sc(28);
     const bh = ui.sc(34);
-    const bx = r.x + r.w - right_gap - bw;
-    const by = r.y + @divTrunc(r.h - bh, 2);
-    const hov = ui.hovered(bx, by, bw, bh);
-    ui.c.fillRoundRectAA(bx, by, bw, bh, 8 * ui.f, chipFill(th, hov));
-    ui.label(bx + ui.sc(14), by, bh, 14, th.text, .regular, label_s);
-    try ui.add(.{ .x = bx, .y = by, .w = bw, .h = bh, .hit = hit, .radius = 8 });
+    try listButton(ui, .{ .x = r.x + r.w - right_gap - bw, .y = r.y + @divTrunc(r.h - bh, 2), .w = bw, .h = bh }, hit, face);
+}
+
+/// A `list` button in `b`, hovered under the pointer, and its region.
+fn listButton(ui: *Ui, b: shapes.Rect, hit: Hit, face: barkit.Face) !void {
+    const hov: f64 = if (ui.hovered(b.x, b.y, b.w, b.h)) 1 else 0;
+    barkit.button(&ui.c, b, ui.f, ui.th, .list, hov, face);
+    try ui.add(.{ .x = b.x, .y = b.y, .w = b.w, .h = b.h, .hit = hit, .radius = barkit.window_radius });
 }
 
 pub fn swatchRow(ui: *Ui, r: Row, selected: u3) !void {
@@ -186,18 +174,8 @@ pub fn swatchRow(ui: *Ui, r: Row, selected: u3) !void {
 /// The square - and + buttons of a stepper `bs` wide at x, y, with
 /// `val_w` between them for the value.
 fn stepButtons(ui: *Ui, x: i32, by: i32, bs: i32, val_w: i32, minus: Hit, plus: Hit) !void {
-    const th = ui.th;
-    for ([_]Hit{ minus, plus }, 0..) |hit, i| {
-        const bx = if (i == 0) x else x + bs + val_w;
-        const hov = ui.hovered(bx, by, bs, bs);
-        ui.c.fillRoundRectAA(bx, by, bs, bs, 8 * ui.f, chipFill(th, hov));
-        const is = ui.sc(16);
-        // minus: the plus icon's horizontal stroke only
-        if (i == 0) {
-            ui.c.fillRoundRectAA(bx + @divTrunc(bs - is, 2) + ui.sc(2), by + @divTrunc(bs, 2) - ui.sc(1), is - ui.sc(4), @max(2, ui.sc(2)), 1, th.text);
-        } else icons.drawStroke(&ui.c, .plus, bx + @divTrunc(bs - is, 2), by + @divTrunc(bs - is, 2), is, 2, th.text);
-        try ui.add(.{ .x = bx, .y = by, .w = bs, .h = bs, .hit = hit, .radius = 8 });
-    }
+    try listButton(ui, .{ .x = x, .y = by, .w = bs, .h = bs }, minus, .{ .mark = .{ .glyph = .minus } });
+    try listButton(ui, .{ .x = x + bs + val_w, .y = by, .w = bs, .h = bs }, plus, .{ .mark = .{ .glyph = .{ .icon = .plus } } });
 }
 
 pub fn sizeStepper(ui: *Ui, r: Row, value: i32, color: u32) !void {

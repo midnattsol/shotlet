@@ -26,7 +26,8 @@ const Rect = @import("../ui/shapes.zig").Rect;
 const card_w = 340;
 const card_max_w = 560;
 const card_h = 64;
-const pad = 20;
+/// room for the card's shadow (outside the input region)
+const pad = theme.card_room;
 const radius = 14;
 /// the text's left edge (after the badge) and the card's right margin
 const text_x = 16 + 24 + 12;

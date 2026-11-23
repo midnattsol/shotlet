@@ -22,9 +22,9 @@ const Rect = shapes_mod.Rect;
 const Button = buttons.Button;
 const Icon = icons.Icon;
 
+/// `icon`, `size` logical px, centred in `r`.
 pub fn drawIconIn(self: *const Editor, canvas: *Canvas, icon: Icon, r: Rect, size: f64, color: u32) void {
-    const s = self.sc(size);
-    icons.draw(canvas, icon, r.x + @divTrunc(r.w - s, 2), r.y + @divTrunc(r.h - s, 2), s, color);
+    icons.drawAt(canvas, icon, ff(r.x) + ff(r.w) / 2, ff(r.y) + ff(r.h) / 2, size * self.uf(), .{}, color);
 }
 
 pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
@@ -146,6 +146,6 @@ fn drawBackgroundSwatch(self: *const Editor, canvas: *Canvas, r: Rect) void {
             px[yy * s + xx] = if ((xx / cell + yy / cell) % 2 == 0) 0xFFFFFFFF else 0xFFB8BEC6;
         };
     } else effects.gradient(&px, s, s, .{ .x = 0, .y = 0, .w = @intCast(s), .h = @intCast(s) }, bg.from, bg.to);
-    effects.blitRounded(canvas.px, @intCast(canvas.w), @intCast(canvas.h), &px, s, s, r.x, r.y, @intFromFloat(5 * self.uf()));
+    effects.blitRounded(canvas.px, @intCast(canvas.w), @intCast(canvas.h), &px, s, s, r.x, r.y, 5 * self.uf());
     shapes_mod.roundRectRing(canvas, .{ .x = r.x, .y = r.y, .w = @intCast(s), .h = @intCast(s) }, 5 * self.uf(), 1, 0x40808080);
 }
