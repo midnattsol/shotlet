@@ -48,9 +48,6 @@ pub const zoom_min = view.zoom_min;
 pub const zoom_max = view.zoom_max;
 pub const zoomStep = view.zoomStep;
 
-/// "X,Y" as `--at` takes it.
-pub const parseAt = @import("history.zig").parsePoint;
-
 /// `shotlet pin FILE [--at X,Y]`: PNG, JPEG or WebP
 /// (src/gfx/imgload.zig), centred on X,Y when given.
 pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8, at: ?[2]i32) !void {

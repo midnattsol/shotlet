@@ -61,14 +61,6 @@ pub const Toast = struct {
     body: []const u8 = "",
 };
 
-/// `[--info] TITLE [TEXT]`.
-pub fn runArgs(gpa: std.mem.Allocator, env: Env, args: []const [:0]const u8) !void {
-    const info = args.len > 0 and std.mem.eql(u8, args[0], "--info");
-    const rest = args[@intFromBool(info)..];
-    if (rest.len == 0) return error.MissingTitle;
-    return run(gpa, env, .{ .kind = if (info) .info else .done, .title = rest[0], .body = if (rest.len > 1) rest[1] else "" });
-}
-
 /// The card's logical width: fixed for done, else as wide as the words.
 fn cardWidth(t: Toast) u32 {
     if (t.kind == .done) return card_w;
