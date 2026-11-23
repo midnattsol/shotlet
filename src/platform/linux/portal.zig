@@ -58,10 +58,6 @@ pub const openScreenCast = screencast.open;
 pub const availableCursorModes = screencast.availableCursorModes;
 pub const cursor_hidden = screencast.cursor_hidden;
 pub const cursor_embedded = screencast.cursor_embedded;
-/// The stages open() runs, one by one (portal_test.zig).
-pub const scCreateSession = screencast.scCreateSession;
-pub const scSelectAndStart = screencast.scSelectAndStart;
-pub const scOpenRemote = screencast.scOpenRemote;
 
 comptime {
     _ = request;
@@ -70,5 +66,4 @@ comptime {
     _ = screencast;
     _ = app_scope;
     _ = notify_mod;
-    _ = @import("uri.zig");
 }

@@ -153,10 +153,6 @@ pub const Dropped = struct {
     data: []u8,
 };
 
-test {
-    _ = keys;
-}
-
 test "layer anchors and keyboard use wlr-layer-shell's values" {
     const std = @import("std");
     const a: Layer.Anchor = .{ .top = true, .right = true };

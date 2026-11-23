@@ -80,10 +80,6 @@ fn unite(a: geom.Rect, b: geom.Rect) geom.Rect {
     return .{ .x = x0, .y = y0, .w = @max(a.x + a.w, b.x + b.w) - x0, .h = @max(a.y + a.h, b.y + b.h) - y0 };
 }
 
-comptime {
-    _ = kwin;
-}
-
 const testing = std.testing;
 
 test "window frames land in image pixels, across monitors and scales" {

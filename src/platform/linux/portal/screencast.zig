@@ -81,7 +81,7 @@ pub const Session = struct {
 /// the compositor shows its source picker (the choice is remembered).
 pub fn open(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: SelectOptions) !Result(Session) {
     var session: Session = .{ .path = undefined, .start = undefined, .fd = -1 };
-    session.path = switch (try scCreateSession(alloc, bus)) {
+    session.path = switch (try createSession(alloc, bus)) {
         .granted => |p| p,
         else => |o| return notGranted(Session, o),
     };
@@ -100,7 +100,7 @@ pub fn open(alloc: std.mem.Allocator, bus: *dbus.Connection, opts: SelectOptions
         },
     }
     started = true;
-    session.fd = try scOpenRemote(alloc, bus, session.path);
+    session.fd = try openRemote(alloc, bus, session.path);
     return .{ .granted = session };
 }
 
@@ -115,10 +115,10 @@ pub fn availableCursorModes(bus: *dbus.Connection) u32 {
     };
 }
 
-// --- the stages (open() runs them; portal_test.zig drives them one by one)
+// --- the stages open() runs
 
 /// Stage 1: create a ScreenCast session. Returns the session path (owned).
-pub fn scCreateSession(alloc: std.mem.Allocator, bus: *dbus.Connection) !Result([]u8) {
+fn createSession(alloc: std.mem.Allocator, bus: *dbus.Connection) !Result([]u8) {
     var tok_buf: [64]u8 = undefined;
     var stok_buf: [64]u8 = undefined;
     var m = dbus.Marshal.init(alloc);
@@ -143,7 +143,7 @@ pub fn scCreateSession(alloc: std.mem.Allocator, bus: *dbus.Connection) !Result(
 }
 
 /// Stage 3: get the PipeWire socket fd for a started session.
-pub fn scOpenRemote(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !sys.fd_t {
+fn openRemote(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8) !sys.fd_t {
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
     try m.putObjectPath(session_path);
@@ -153,13 +153,8 @@ pub fn scOpenRemote(alloc: std.mem.Allocator, bus: *dbus.Connection, session_pat
     return reply.takeFd() orelse error.NoPipeWireFd;
 }
 
-/// Stage 2 as screenshots ask: select every monitor, cursor hidden, and
-/// start the cast. GNOME shows its picker here unless `prev_token` still
-/// matches.
-pub fn scSelectAndStart(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, prev_token: ?[]const u8) !Result(Started) {
-    return selectAndStart(alloc, bus, session_path, .{ .restore_token = prev_token });
-}
-
+/// Stage 2: select every monitor and start the cast. GNOME shows its
+/// picker here unless `opts.restore_token` still matches.
 fn selectAndStart(alloc: std.mem.Allocator, bus: *dbus.Connection, session_path: []const u8, opts: SelectOptions) !Result(Started) {
     const selected = try selectSources(alloc, bus, session_path, opts);
     if (selected != .granted) return notGranted(Started, selected);

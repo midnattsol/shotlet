@@ -176,13 +176,12 @@ fn testShape(alloc: std.mem.Allocator, font: *const ttf.Font, script: Script, rt
     return try buf.toOwnedSlice(alloc);
 }
 
+const testutil = @import("../../testutil.zig");
+
 test "gsub: arabic joining forms and lam-alef from the font" {
     const alloc = std.testing.allocator;
-    for ([_][]const u8{
-        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    }) |path| {
-        var font = ttf.Font.load(alloc, path) catch continue;
+    for ([_][]const u8{ testutil.fonts.noto_arabic, testutil.fonts.dejavu_sans }) |path| {
+        var font = (try testutil.optionalFont(path)) orelse continue;
         defer font.deinit();
         // بيت: three letters, all changed from their nominal glyphs
         const g = (try testShape(alloc, &font, .arab, true, "بيت")) orelse continue;
@@ -208,7 +207,7 @@ test "gsub: arabic joining forms and lam-alef from the font" {
 
 test "gpos: harakat and niqqud attach to their base" {
     const alloc = std.testing.allocator;
-    if (ttf.Font.load(alloc, "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf")) |f| {
+    if (try testutil.optionalFont(testutil.fonts.noto_arabic)) |f| {
         var font = f;
         defer font.deinit();
         // بَ: fatha over beh
@@ -220,8 +219,8 @@ test "gpos: harakat and niqqud attach to their base" {
         // the anchors moved it: drawn over the letter, not after it
         try std.testing.expect(g[1].dx != 0 or g[1].dy != 0);
         try std.testing.expect(g[1].dx > -g[0].adv and g[1].dx < g[0].adv);
-    } else |_| {}
-    if (ttf.Font.load(alloc, "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf")) |f| {
+    }
+    if (try testutil.optionalFont(testutil.fonts.noto_hebrew)) |f| {
         var font = f;
         defer font.deinit();
         // בָּ: dagesh and qamats under/in bet
@@ -233,7 +232,7 @@ test "gpos: harakat and niqqud attach to their base" {
         }
         try std.testing.expect(attached >= 1);
         try std.testing.expect(g[0].adv > 0);
-    } else |_| {}
+    }
 }
 
 test "chained context on a hand-built GSUB; mutated tables never misbehave" {
@@ -318,15 +317,15 @@ test "one optional feature, from the default script, on a hand-built GSUB" {
 
 test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
     const alloc = std.testing.allocator;
-    const sys = @import("../../platform/api.zig").sys;
     const bidi = @import("../bidi.zig");
+    const fonts = testutil.fonts;
     const seeds = [_]struct { path: []const u8, iters: usize }{
-        .{ .path = "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf", .iters = 300 },
-        .{ .path = "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf", .iters = 200 },
-        .{ .path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", .iters = 100 },
-        .{ .path = "/usr/share/fonts/truetype/noto/NotoNastaliqUrdu-Regular.ttf", .iters = 120 },
-        .{ .path = "/usr/share/fonts/truetype/noto/NotoSansSyriac-Regular.ttf", .iters = 120 },
-        .{ .path = "/usr/share/fonts/truetype/noto/NotoSansCoptic-Regular.ttf", .iters = 100 },
+        .{ .path = fonts.noto_arabic, .iters = 300 },
+        .{ .path = fonts.noto_hebrew, .iters = 200 },
+        .{ .path = fonts.dejavu_sans, .iters = 100 },
+        .{ .path = fonts.noto_nastaliq, .iters = 120 },
+        .{ .path = fonts.noto_syriac, .iters = 120 },
+        .{ .path = fonts.noto_coptic, .iters = 100 },
     };
     const sample = [_]u21{ 0x633, 0x644, 0x627, 0x645, 0x20, 0x628, 0x64E, 0x64A, 0x652, 0x62A, 0x64C, 0x688, 0x6D2, 0x5E9, 0x5C1, 0x5B8, 0x5DC, 0x5D5, 0x5B9, 0x5DD, 0x644, 0x623, 0x651 };
     var masks: [sample.len]u8 = undefined;
@@ -334,7 +333,7 @@ test "shaping survives mutated GSUB/GPOS/GDEF of real fonts" {
     var prng = std.Random.DefaultPrng.init(99);
     const r = prng.random();
     for (seeds) |sd| {
-        const orig = sys.readFileAlloc(alloc, sd.path, 4 * 1024 * 1024) catch continue;
+        const orig = (try testutil.optionalFile(sd.path, 4 * 1024 * 1024)) orelse continue;
         defer alloc.free(orig);
         const buf = try alloc.dupe(u8, orig);
         defer alloc.free(buf);
@@ -446,7 +445,7 @@ test "reverse chaining runs last glyph first; ligatures label their marks" {
 
 test "cursive attachment: Nastaliq words step down to the baseline" {
     const alloc = std.testing.allocator;
-    var font = ttf.Font.load(alloc, "/usr/share/fonts/truetype/noto/NotoNastaliqUrdu-Regular.ttf") catch return;
+    var font = try testutil.systemFont(testutil.fonts.noto_nastaliq);
     defer font.deinit();
     // نستعلیق: a cascade, every letter joined to the next by its anchors
     const g = (try testShape(alloc, &font, .arab, true, "نستعلیق")).?;

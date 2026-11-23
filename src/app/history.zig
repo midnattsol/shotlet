@@ -383,9 +383,7 @@ pub fn prune(alloc: std.mem.Allocator, root: []const u8, max_count: usize, max_b
 
 // --- tests ---
 
-fn testRoot(alloc: std.mem.Allocator) ![]u8 {
-    return sys.makeTempDir(alloc, "/tmp", "shotlet-history-test");
-}
+const testutil = @import("../testutil.zig");
 
 fn addTest(alloc: std.mem.Allocator, root: []const u8, time: i64, size: usize) !Id {
     const img = try alloc.alloc(u8, size);
@@ -425,9 +423,9 @@ test "ids are validated before they become paths" {
 
 test "entries list newest first and survive a reload" {
     const alloc = std.testing.allocator;
-    const root = try testRoot(alloc);
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-history");
+    defer tmp.deinit();
+    const root = tmp.path;
     _ = try addTest(alloc, root, 1000, 10);
     const newest = try addTest(alloc, root, 3000, 10);
     _ = try addTest(alloc, root, 2000, 10);
@@ -450,9 +448,9 @@ test "entries list newest first and survive a reload" {
 
 test "caps by count and size keep the newest" {
     const alloc = std.testing.allocator;
-    const root = try testRoot(alloc);
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-history");
+    defer tmp.deinit();
+    const root = tmp.path;
     for (0..6) |i| _ = try addTest(alloc, root, @intCast(1000 + i), 1000);
     try std.testing.expectEqual(@as(usize, 2), try prune(alloc, root, 4, 1 << 30));
     {
@@ -480,9 +478,9 @@ test "caps by count and size keep the newest" {
 
 test "damaged entries are skipped, then cleaned up" {
     const alloc = std.testing.allocator;
-    const root = try testRoot(alloc);
-    defer alloc.free(root);
-    defer sys.removeTree(root);
+    var tmp = try testutil.TmpDir.init("shotlet-history");
+    defer tmp.deinit();
+    const root = tmp.path;
     const good = try addTest(alloc, root, 5000, 10);
     // no image
     const a = Id.make(6000);

@@ -17,7 +17,8 @@ pub const fonts = @import("fonts.zig");
 /// another engine)
 pub const ocr = @import("../../ocr/tesseract.zig");
 
-// Reach every module's tests.
+// The backend's test root (src/main.zig): every module of the folder,
+// each reaching its own.
 comptime {
     _ = sys;
     _ = libs;
@@ -28,28 +29,16 @@ comptime {
     _ = capture;
     _ = record;
     _ = fonts;
-    _ = ocr;
-}
-
-// The tests of modules the seam does not reach.
-test {
     _ = @import("dbus.zig");
     _ = @import("permstore.zig");
     _ = @import("portal.zig");
-    _ = @import("pw.zig");
     _ = @import("portal_test.zig");
+    _ = @import("uri.zig");
+    _ = @import("pw.zig");
     _ = @import("gnome.zig");
-    _ = @import("gnome/shellcap.zig");
-    _ = @import("capture/winrects.zig");
-    _ = @import("gnome/gsettings.zig");
-    _ = @import("capture/permissions.zig");
-    _ = @import("capture/direct.zig");
-    _ = @import("kde/screenshot2.zig");
-    _ = @import("desktop/tray.zig");
-    _ = @import("desktop/daemon.zig");
+    _ = @import("kde.zig");
     _ = @import("wayland.zig");
     _ = @import("keyboard.zig");
-    _ = @import("desktop/session_env.zig");
 }
 
 /// The Linux plumbing itself, for Linux-only tooling outside the core:

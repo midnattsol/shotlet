@@ -316,9 +316,3 @@ test "the labels fit their buttons" {
     var buf: [24]u8 = undefined;
     try std.testing.expectEqualStrings("20\u{2009}000", grouped(&buf, 20_000));
 }
-
-// the scrolling capture's region picker is tested from here (main.zig
-// does not list it; wave 3 registers the tests there)
-test {
-    _ = @import("region_pick.zig");
-}

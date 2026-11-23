@@ -335,6 +335,6 @@ fn tokenB64(c: u8) bool {
     return tokenChar(c) or c == '+' or c == '/';
 }
 
-test {
+comptime {
     _ = @import("detect_test.zig");
 }

@@ -20,9 +20,7 @@ pub const max_size_px = font.max_size_px;
 pub const faceCount = @import("ttf/sfnt.zig").faceCount;
 pub const Path = @import("ttf/path.zig").Path;
 
-test {
-    _ = @import("cff.zig");
-    _ = @import("otl.zig");
+comptime {
     _ = @import("ttf/bytes.zig");
     _ = @import("ttf/mmap.zig");
     _ = @import("ttf/sfnt.zig");
@@ -31,5 +29,5 @@ test {
     _ = @import("ttf/path.zig");
     _ = @import("ttf/raster.zig");
     _ = @import("ttf/font.zig");
-    _ = @import("ttf/test_font.zig");
+    _ = @import("ttf/font_test.zig");
 }

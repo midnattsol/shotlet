@@ -8,20 +8,29 @@ const dbus = @import("dbus.zig");
 const portal = @import("portal.zig");
 const sys = @import("sys.zig");
 const proc = @import("proc.zig");
+const TmpDir = @import("../../testutil.zig").TmpDir;
 
-const Mode = enum(u8) { normal, cancel, silent, vanish, mute };
+/// How the mock answers: normal grants; cancel answers "cancelled";
+/// silent accepts but never answers; vanish drops the bus name; mute
+/// does not even reply to the method; no_pipewire refuses
+/// OpenPipeWireRemote.
+const Mode = enum(u8) { normal, cancel, silent, vanish, mute, no_pipewire };
 
 const Mock = struct {
     conn: dbus.Connection,
     mode: std.atomic.Value(u8) = .init(@backingInt(Mode.normal)),
     stop: std.atomic.Value(bool) = .init(false),
     closed_requests: std.atomic.Value(u32) = .init(0),
+    closed_sessions: std.atomic.Value(u32) = .init(0),
     /// what the last SaveFile asked for (written by the mock thread,
     /// read by the test after the call returned)
     save_name: [128]u8 = undefined,
     save_name_len: usize = 0,
     save_folder: [256]u8 = undefined,
     save_folder_len: usize = 0,
+    /// the restore_token SelectSources was given
+    restore_token: [64]u8 = undefined,
+    restore_token_len: usize = 0,
 
     fn loop(self: *Mock) void {
         while (!self.stop.load(.acquire)) {
@@ -61,14 +70,30 @@ const Mock = struct {
             return true;
         }
         if (msg.isCall("org.freedesktop.portal.Session", "Close")) {
+            _ = self.closed_sessions.fetchAdd(1, .release);
             try self.conn.replyTo(msg, "", &.{});
             return true;
         }
         if (msg.isCall("org.freedesktop.portal.ScreenCast", "OpenPipeWireRemote")) {
-            try self.conn.replyError(msg, "org.freedesktop.portal.Error.Failed", "no pipewire here");
+            if (self.mode.load(.acquire) == @backingInt(Mode.no_pipewire)) {
+                try self.conn.replyError(msg, "org.freedesktop.portal.Error.Failed", "no pipewire here");
+            } else {
+                try self.replyRemote(msg);
+            }
             return true;
         }
         return false;
+    }
+
+    /// OpenPipeWireRemote's answer: one end of a socket pair, as the
+    /// PipeWire remote ('h' is an index into the fds sent along).
+    fn replyRemote(self: *Mock, msg: *const dbus.Message) !void {
+        const pair = try sys.socketPair();
+        defer for (pair) |fd| sys.close(fd);
+        var m = dbus.Marshal.init(self.conn.alloc);
+        defer m.deinit();
+        try m.putU32(0);
+        try self.conn.replyToWithFds(msg, "h", m.buf.items, &.{pair[0]});
     }
 
     /// Walk the trailing a{sv} options: return the handle_token and
@@ -85,20 +110,26 @@ const Mock = struct {
             if (std.mem.eql(u8, e.key, "handle_token") and std.mem.eql(u8, e.sig, "s")) {
                 token = try r.readString();
             } else if (std.mem.eql(u8, e.key, "current_name") and std.mem.eql(u8, e.sig, "s")) {
-                const v = try r.readString();
-                self.save_name_len = @min(v.len, self.save_name.len);
-                @memcpy(self.save_name[0..self.save_name_len], v[0..self.save_name_len]);
+                self.save_name_len = keep(&self.save_name, try r.readString());
+            } else if (std.mem.eql(u8, e.key, "restore_token") and std.mem.eql(u8, e.sig, "s")) {
+                self.restore_token_len = keep(&self.restore_token, try r.readString());
             } else if (std.mem.eql(u8, e.key, "current_folder") and std.mem.eql(u8, e.sig, "ay")) {
                 const len = try r.readU32();
                 const bytes = r.data[r.pos..][0..len];
                 r.pos += len;
-                self.save_folder_len = @min(bytes.len, self.save_folder.len);
-                @memcpy(self.save_folder[0..self.save_folder_len], bytes[0..self.save_folder_len]);
+                self.save_folder_len = keep(&self.save_folder, bytes);
             } else {
                 try r.skipValue(e.sig);
             }
         }
         return token;
+    }
+
+    /// Copy `v` into `buf` (cut to fit); its length there.
+    fn keep(buf: []u8, v: []const u8) usize {
+        const n = @min(v.len, buf.len);
+        @memcpy(buf[0..n], v[0..n]);
+        return n;
     }
 
     /// The Request object path the portal spec predicts for sender + token.
@@ -205,17 +236,15 @@ fn findDbusDaemon() ?[:0]const u8 {
 }
 
 const Bus = struct {
-    dir: []u8,
+    dir: TmpDir,
     daemon: proc.Child,
     addr: []u8,
 
     fn start(alloc: std.mem.Allocator) !Bus {
         const daemon = findDbusDaemon() orelse return error.SkipZigTest;
-        const dir = try sys.makeTempDir(alloc, "/tmp", "shotlet-bus");
-        errdefer {
-            sys.removeTree(dir);
-            alloc.free(dir);
-        }
+        var tmp = try TmpDir.init("shotlet-bus");
+        errdefer tmp.deinit();
+        const dir = tmp.path;
         const conf_path = try writeConfig(alloc, dir);
         defer alloc.free(conf_path);
         const arg = try std.fmt.allocPrintSentinel(alloc, "--config-file={s}", .{conf_path}, 0);
@@ -226,7 +255,7 @@ const Bus = struct {
         var child = proc.spawn(&.{ daemon.ptr, arg.ptr, "--nofork", "--nopidfile" }, &empty, .{}) catch return error.SkipZigTest;
         errdefer child.kill();
         try waitForSocket(alloc, dir);
-        return .{ .dir = dir, .daemon = child, .addr = try std.fmt.allocPrint(alloc, "unix:path={s}/bus", .{dir}) };
+        return .{ .dir = tmp, .daemon = child, .addr = try std.fmt.allocPrint(alloc, "unix:path={s}/bus", .{dir}) };
     }
 
     /// Write a permissive session bus config listening in `dir`; returns
@@ -268,8 +297,7 @@ const Bus = struct {
 
     fn stop(self: *Bus, alloc: std.mem.Allocator) void {
         self.daemon.kill();
-        sys.removeTree(self.dir);
-        alloc.free(self.dir);
+        self.dir.deinit();
         alloc.free(self.addr);
     }
 };
@@ -295,7 +323,7 @@ test "portal round trips against a private bus and a mock portal" {
     var conn = try dbus.Connection.connectSession(alloc, bus.addr);
     defer conn.deinit();
 
-    try checkScreenCast(alloc, &conn);
+    try checkScreenCast(alloc, &conn, &mock);
     try checkSaveFile(alloc, &conn, &mock);
     try checkChooseFolder(alloc, &conn);
 
@@ -311,28 +339,43 @@ test "portal round trips against a private bus and a mock portal" {
     try checkVanishingPortal(alloc, &conn, &mock);
 }
 
-/// ScreenCast: create, select + start with two monitors and a token.
-fn checkScreenCast(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
-    const session = switch (try portal.scCreateSession(alloc, conn)) {
+/// ScreenCast: create, select + start with two monitors and a token,
+/// open the PipeWire remote; close it once. A remote the portal refuses
+/// is an error, and the session is closed anyway.
+fn checkScreenCast(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *Mock) !void {
+    var session = switch (try portal.openScreenCast(alloc, conn, .{ .restore_token = "old-token" })) {
         .granted => |s| s,
         else => |o| {
-            std.debug.print("CreateSession: {t}\n", .{o});
+            std.debug.print("openScreenCast: {t}\n", .{o});
             return error.TestUnexpectedResult;
         },
     };
-    defer alloc.free(session);
-    try std.testing.expectEqualStrings("/org/freedesktop/portal/desktop/session/1/s", session);
-    var started = switch (try portal.scSelectAndStart(alloc, conn, session, "old-token")) {
-        .granted => |s| s,
-        else => return error.TestUnexpectedResult,
-    };
-    defer started.deinit(alloc);
-    try std.testing.expectEqual(@as(usize, 2), started.streams.len);
-    try std.testing.expectEqual(@as(u32, 51), started.streams[1].node_id);
-    try std.testing.expectEqual([2]i32{ 1280, 0 }, started.streams[1].position.?);
-    try std.testing.expectEqualStrings("mock-token", started.restore_token.?);
-    // a method error is reported as an error, not a hang
-    try std.testing.expectError(error.DBusError, portal.scOpenRemote(alloc, conn, session));
+    try std.testing.expectEqualStrings("/org/freedesktop/portal/desktop/session/1/s", session.path);
+    try std.testing.expectEqualStrings("old-token", mock.restore_token[0..mock.restore_token_len]);
+    const st = session.start;
+    try std.testing.expectEqual(@as(usize, 2), st.streams.len);
+    try std.testing.expectEqual(@as(u32, 51), st.streams[1].node_id);
+    try std.testing.expectEqual([2]i32{ 1280, 0 }, st.streams[1].position.?);
+    try std.testing.expectEqual([2]i32{ 1280, 720 }, st.streams[1].size.?);
+    try std.testing.expectEqualStrings("mock-token", st.restore_token.?);
+    // the fd belongs to whoever streams from it
+    try std.testing.expect(session.fd >= 0);
+    sys.close(session.fd);
+    session.close(alloc, conn);
+    try expectSessionsClosed(mock, 1);
+
+    mock.mode.store(@backingInt(Mode.no_pipewire), .release);
+    defer mock.mode.store(@backingInt(Mode.normal), .release);
+    try std.testing.expectError(error.DBusError, portal.openScreenCast(alloc, conn, .{}));
+    try expectSessionsClosed(mock, 2);
+}
+
+/// The mock has seen `n` Session.Close calls (they are fire-and-forget:
+/// wait a little for them).
+fn expectSessionsClosed(mock: *const Mock, n: u32) !void {
+    const deadline = sys.monoMs() + 2000;
+    while (mock.closed_sessions.load(.acquire) < n and sys.monoMs() < deadline) sys.sleepMs(10);
+    try std.testing.expectEqual(n, mock.closed_sessions.load(.acquire));
 }
 
 /// FileChooser: the chosen URI comes back as a decoded path.
@@ -364,14 +407,14 @@ fn checkChooseFolder(alloc: std.mem.Allocator, conn: *dbus.Connection) !void {
     try std.testing.expectEqualStrings("/home/u/Imágenes/Shots", p);
 }
 
-/// A Screenshot call body: no parent window, just the handle_token.
-fn screenshotBody(m: *dbus.Marshal, token: []const u8) !void {
+/// A Screenshot call body: no parent window, just a handle_token (made
+/// in `buf`, returned).
+fn screenshotBody(m: *dbus.Marshal, buf: []u8) ![]const u8 {
     try m.putString("");
-    const arr = try m.beginArray(8);
-    try m.beginStruct();
-    try m.putString("handle_token");
-    try m.putVariantString(token);
-    m.endArray(arr);
+    const d = try m.beginDict();
+    const token = try d.token("handle_token", buf, "shotlet_t");
+    d.end();
+    return token;
 }
 
 /// Nobody answers: the deadline ends the wait and closes the request.
@@ -379,9 +422,10 @@ fn checkSilentPortal(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *Mo
     mock.mode.store(@backingInt(Mode.silent), .release);
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
-    try screenshotBody(&m, "silent1");
+    var tok_buf: [64]u8 = undefined;
+    const token = try screenshotBody(&m, &tok_buf);
     const t0 = sys.monoMs();
-    var req = try portal.call(alloc, conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, "silent1", 300);
+    var req = try portal.call(alloc, conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, token, 300);
     defer req.deinit(alloc);
     try std.testing.expectEqual(portal.Outcome.timeout, req.outcome.?);
     try std.testing.expect(sys.monoMs() - t0 < 3000);
@@ -398,8 +442,9 @@ fn checkMutePortal(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *Mock
     mock.mode.store(@backingInt(Mode.mute), .release);
     var m = dbus.Marshal.init(alloc);
     defer m.deinit();
-    try screenshotBody(&m, "mute1");
-    var req = try portal.call(alloc, conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, "mute1", 300);
+    var tok_buf: [64]u8 = undefined;
+    const token = try screenshotBody(&m, &tok_buf);
+    var req = try portal.call(alloc, conn, "org.freedesktop.portal.Screenshot", "Screenshot", "sa{sv}", m.buf.items, token, 300);
     defer req.deinit(alloc);
     try std.testing.expectEqual(portal.Outcome.unavailable, req.outcome.?);
 }

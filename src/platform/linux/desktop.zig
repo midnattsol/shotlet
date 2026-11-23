@@ -118,4 +118,7 @@ pub fn revealFile(gpa: std.mem.Allocator, bus: *Session, path: []const u8) !void
 comptime {
     _ = appearance;
     _ = save_dialog;
+    _ = @import("desktop/tray.zig");
+    _ = @import("desktop/daemon.zig");
+    _ = @import("desktop/session_env.zig");
 }

@@ -124,15 +124,7 @@ test "premultiply and fades keep opaque pixels and clear transparent ones" {
     try std.testing.expectEqual(@as(u32, 0x40), f[1] >> 24);
 }
 
-test {
+comptime {
     _ = card;
     _ = overlay;
-    // the shared UI modules (no other test root reaches them yet)
-    _ = @import("scale.zig");
-    _ = @import("press.zig");
-    _ = @import("focus.zig");
-    _ = @import("floatwin.zig");
-    _ = @import("badge.zig");
-    _ = @import("menukit.zig");
-    _ = @import("material.zig");
 }

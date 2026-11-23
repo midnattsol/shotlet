@@ -122,19 +122,16 @@ pub fn exportImage(alloc: std.mem.Allocator, layer: []const u32, w: u32, h: u32,
 
 const testing = std.testing;
 
-fn testImage(alloc: std.mem.Allocator, w: u32, h: u32) ![]u32 {
-    const px = try alloc.alloc(u32, @as(usize, w) * h);
-    for (px, 0..) |*p, i| p.* = 0xFF000000 | @as(u32, @intCast(i & 0xFFFFFF));
-    return px;
-}
+const testutil = @import("../../testutil.zig");
 
 test "export geometry is native, independent of the view scale" {
     const alloc = testing.allocator;
     const view_mod = @import("../view.zig");
     const iw = 1920;
     const ih = 1080;
-    const img = try testImage(alloc, iw, ih);
+    const img = try alloc.alloc(u32, @as(usize, iw) * ih);
     defer alloc.free(img);
+    testutil.distinct(img);
     // the same buffer-space drag at several fits selects the same image area
     const cases = [_]struct { area: Rect, max: f64 }{
         .{ .area = .{ .x = 0, .y = 0, .w = 1600, .h = 900 }, .max = 1 }, // fit < 1 (0.8333)
@@ -194,8 +191,9 @@ test "beautify sizes and framing" {
     try testing.expectEqual(@as(u32, 0), (Beautify{ .enabled = true, .padding = 0 }).geometry(1000, 500).shadow_blur);
     try testing.expectEqual(@as(u32, 0), (Beautify{ .enabled = true, .rounded = false }).geometry(1000, 500).radius);
 
-    const img = try testImage(alloc, 200, 100);
+    const img = try alloc.alloc(u32, @as(usize, 200) * 100);
     defer alloc.free(img);
+    testutil.distinct(img);
     const out = try exportImage(alloc, img, 200, 100, .{ .x = 10, .y = 10, .w = 100, .h = 50 }, b);
     defer alloc.free(out.pixels);
     const gg = b.geometry(100, 50);
@@ -212,8 +210,9 @@ test "region recompose matches a full redraw" {
     const alloc = testing.allocator;
     const w = 120;
     const h = 90;
-    const img = try testImage(alloc, w, h);
+    const img = try alloc.alloc(u32, @as(usize, w) * h);
     defer alloc.free(img);
+    testutil.distinct(img);
     var d = Document.init(alloc, w, h);
     defer d.deinit();
     _ = try d.add(.{ .tool = .pixelate, .color = 0, .thickness = 2, .p0 = .{ .x = 5, .y = 5 }, .p1 = .{ .x = 100, .y = 70 } });

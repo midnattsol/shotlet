@@ -366,9 +366,10 @@ pub fn onButton(ed: *Editor, e: Ext) !void {
     }
 }
 
-test {
+comptime {
     _ = color;
     _ = crop;
+    _ = crop_mode;
     _ = launch;
     _ = ocr_job;
     _ = @import("redact.zig");

@@ -26,6 +26,7 @@ const boxBlur = blur_.boxBlur;
 // keep the moved tests reachable from the test root
 comptime {
     _ = @import("effects/reference_test.zig");
+    _ = @import("effects/composite.zig");
 }
 
 test "effects clip to the buffer and leave the outside alone" {

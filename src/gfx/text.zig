@@ -52,7 +52,7 @@ pub const rangeSpansLine = caret.rangeSpansLine;
 pub const Line = wrap_lines.Line;
 pub const wrapLines = wrap_lines.wrapLines;
 
-test {
+comptime {
     _ = state;
     _ = layout;
     _ = @import("text/shape.zig");
@@ -61,9 +61,4 @@ test {
     _ = measure;
     _ = caret;
     _ = wrap_lines;
-    _ = @import("wrap.zig");
-    _ = @import("bidi.zig");
-    _ = @import("otl.zig");
-    _ = @import("ttf.zig");
-    _ = @import("utf8.zig");
 }

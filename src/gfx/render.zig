@@ -74,7 +74,6 @@ pub const Canvas = struct {
 comptime {
     _ = @import("render/aa_test.zig");
     _ = @import("render/sdf.zig");
-    _ = @import("color.zig");
 }
 
 test "a coverage mask blends its colour by coverage, clipped" {

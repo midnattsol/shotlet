@@ -116,8 +116,3 @@ fn readyFd(fd: ?i32) ?i32 {
 fn smoke(p: *const Parsed) i64 {
     return p.int(i64, "smoke") orelse 0;
 }
-
-test {
-    _ = @import("shot_args.zig");
-    _ = @import("../record/cli.zig");
-}

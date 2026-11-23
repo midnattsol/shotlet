@@ -10,9 +10,7 @@
 
 const std = @import("std");
 const capture = @import("../capture.zig");
-const env = @import("../env.zig");
 const statefile = @import("../statefile.zig");
-const sys = @import("../../platform/api.zig").sys;
 const Rect = @import("geom.zig").Rect;
 
 const max_layouts = 8;
@@ -115,12 +113,9 @@ test "at most a few layouts are remembered" {
 
 test "previous area persists on disk" {
     const gpa = std.testing.allocator;
-    const home = try sys.makeTempDir(gpa, "/tmp", "shotlet-home");
-    defer gpa.free(home);
-    defer sys.removeTree(home);
-    const saved = env.xdg;
-    defer env.xdg = saved;
-    env.xdg = .{};
+    var tmp = try @import("../../testutil.zig").TmpDir.home();
+    defer tmp.deinit();
+    const home = tmp.path;
     save(gpa, home, 42, .{ .x = 5, .y = 6, .w = 7, .h = 8 });
     try std.testing.expectEqual(Rect{ .x = 5, .y = 6, .w = 7, .h = 8 }, load(gpa, home, 42).?);
     try std.testing.expectEqual(@as(?Rect, null), load(gpa, home, 43));

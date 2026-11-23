@@ -136,4 +136,5 @@ comptime {
     _ = direct;
     _ = winrects;
     _ = @import("capture/scroll_support.zig");
+    _ = @import("capture/permissions.zig");
 }
