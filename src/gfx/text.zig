@@ -6,7 +6,8 @@
 //! invalid UTF-8 shows as U+FFFD, never crashes.
 //!
 //! Facade over text/: state (fonts, fallback), shape and layout (a
-//! paragraph into positioned glyphs), draw, measure, caret, wrap_lines.
+//! paragraph into positioned glyphs), draw, measure (also ellipsize: text
+//! cut with "…" to a width, in the style drawn), caret, wrap_lines.
 
 const state = @import("text/state.zig");
 const layout = @import("text/layout.zig");
@@ -36,6 +37,8 @@ pub const widthRange = measure.widthRange;
 pub const height = measure.height;
 pub const heightStyled = measure.heightStyled;
 pub const ascent = measure.ascent;
+pub const Elide = measure.Elide;
+pub const ellipsize = measure.ellipsize;
 
 pub const offsetForX = caret.offsetForX;
 pub const offsetForXDir = caret.offsetForXDir;

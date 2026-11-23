@@ -10,6 +10,10 @@
 //!   Region                       a part of the source, in source pixels
 //!   scale(gpa, src, sw, sh, dst, dw, dh)            all of src into dst
 //!   region(gpa, src, sw, sh, r, dst, dw, dh)        part of src into dst
+//!   Fit, Placement, fit(sw, sh, dw, dh, mode)       where a picture goes in a
+//!                                box: all of it (contain) or filling it (cover)
+//!   box(src, ss, sw, sh, dst, dw, dh)   integer area average, no allocation
+//!                                (video frames, strips; opaque pixels)
 
 const std = @import("std");
 
@@ -135,6 +139,62 @@ inline fn channel(v: f32) u32 {
     return @intFromFloat(std.math.clamp(@round(v), 0, 255));
 }
 
+/// How a picture goes into a box of another shape.
+pub const Fit = enum {
+    /// all of it, as large as fits, centred (letterboxed)
+    contain,
+    /// the box filled, the source's centred part with the box's shape
+    cover,
+};
+
+/// The part of the source shown and the target rectangle it fills.
+pub const Placement = struct { src: Region, x: i32, y: i32, w: u32, h: u32 };
+
+/// Where `fit` puts a sw x sh picture in a dw x dh box (all sizes > 0).
+pub fn fit(sw: u32, sh: u32, dw: u32, dh: u32, mode: Fit) Placement {
+    const fsw: f64 = @floatFromInt(@max(sw, 1));
+    const fsh: f64 = @floatFromInt(@max(sh, 1));
+    const fdw: f64 = @floatFromInt(@max(dw, 1));
+    const fdh: f64 = @floatFromInt(@max(dh, 1));
+    switch (mode) {
+        .cover => {
+            const s = @max(fdw / fsw, fdh / fsh);
+            const cw = fdw / s;
+            const ch = fdh / s;
+            return .{ .src = .{ .x = (fsw - cw) / 2, .y = (fsh - ch) / 2, .w = cw, .h = ch }, .x = 0, .y = 0, .w = dw, .h = dh };
+        },
+        .contain => {
+            const s = @min(fdw / fsw, fdh / fsh);
+            const w: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(fsw * s))), 1, @max(dw, 1));
+            const h: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(fsh * s))), 1, @max(dh, 1));
+            return .{ .src = .{ .x = 0, .y = 0, .w = fsw, .h = fsh }, .x = @intCast((@max(dw, 1) - w) / 2), .y = @intCast((@max(dh, 1) - h) / 2), .w = w, .h = h };
+        },
+    }
+}
+
+/// Area-average downscale of sw x sh (`ss` pixels per source row) into
+/// dw x dh, in integer arithmetic and without allocating; alpha is
+/// dropped (opaque output). For video frames and strips; pictures shown
+/// in the UI use scale/region.
+pub fn box(src: []const u32, ss: usize, sw: usize, sh: usize, dst: []u32, dw: usize, dh: usize) void {
+    for (0..dh) |dy| {
+        const y0 = dy * sh / dh;
+        const y1 = @max(y0 + 1, (dy + 1) * sh / dh);
+        for (0..dw) |dx| {
+            const x0 = dx * sw / dw;
+            const x1 = @max(x0 + 1, (dx + 1) * sw / dw);
+            var acc: [3]u32 = @splat(0);
+            for (y0..y1) |yy| for (src[yy * ss + x0 .. yy * ss + x1]) |c| {
+                acc[0] += (c >> 16) & 0xFF;
+                acc[1] += (c >> 8) & 0xFF;
+                acc[2] += c & 0xFF;
+            };
+            const n: u32 = @intCast((y1 - y0) * (x1 - x0));
+            dst[dy * dw + dx] = 0xFF000000 | ((acc[0] + n / 2) / n) << 16 | ((acc[1] + n / 2) / n) << 8 | ((acc[2] + n / 2) / n);
+        }
+    }
+}
+
 const testing = std.testing;
 
 fn checkerboard(px: []u32, w: u32) void {
@@ -198,4 +258,38 @@ test "transparent pixels do not darken their neighbours" {
     try testing.expectEqual(@as(u32, 0xFF0000), dst[0] & 0xFFFFFF);
     const a = dst[0] >> 24;
     try testing.expect(a == 127 or a == 128);
+}
+
+test "fit: contain letterboxes, cover crops the middle" {
+    // same shape: either way all of it, edge to edge
+    const a = fit(1600, 1000, 240, 150, .cover);
+    try testing.expectApproxEqAbs(@as(f64, 1600), a.src.w, 1e-6);
+    try testing.expectEqual(@as(u32, 240), a.w);
+    // 1600x1200 into 240x150, covered: cropped top and bottom, centred
+    const b = fit(1600, 1200, 240, 150, .cover);
+    try testing.expectApproxEqAbs(@as(f64, 1000), b.src.h, 1e-6);
+    try testing.expectApproxEqAbs(@as(f64, 100), b.src.y, 1e-6);
+    try testing.expectEqual(@as(u32, 150), b.h);
+    // a tall strip contained in a wide box: whole, in the middle
+    const c = fit(100, 1000, 240, 150, .contain);
+    try testing.expectEqual(@as(u32, 15), c.w);
+    try testing.expectEqual(@as(u32, 150), c.h);
+    try testing.expectEqual(@as(i32, 112), c.x);
+    try testing.expectEqual(@as(i32, 0), c.y);
+    // never zero-sized, never larger than the box
+    const d = fit(10000, 1, 50, 50, .contain);
+    try testing.expectEqual(@as(u32, 1), d.h);
+    try testing.expectEqual(@as(u32, 50), d.w);
+}
+
+test "box averages blocks" {
+    const src = [_]u32{ 0xFF000000, 0xFFFFFFFF, 0xFF000000, 0xFFFFFFFF, 0xFF000000, 0xFFFFFFFF, 0xFF000000, 0xFFFFFFFF };
+    var dst: [2]u32 = undefined;
+    box(&src, 4, 4, 2, &dst, 2, 1);
+    try testing.expectEqual(@as(u32, 0xFF808080), dst[0]);
+    // a stride wider than the width: only the first sw columns count
+    const wide = [_]u32{ 0xFF0000FF, 0xFFFFFFFF, 0xFF0000FF, 0xFFFFFFFF };
+    var one: [2]u32 = undefined;
+    box(&wide, 2, 1, 2, &one, 1, 2);
+    try testing.expectEqual(@as(u32, 0xFF0000FF), one[0]);
 }

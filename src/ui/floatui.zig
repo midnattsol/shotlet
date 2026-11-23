@@ -7,16 +7,55 @@
 //! before presenting, as wl_shm's argb8888 wants. Canvas drawing assumes
 //! an opaque destination, so content goes into opaque card buffers first
 //! and the card is then placed with its rounded corners.
+//!
+//! Stable API:
+//!   premultiply(px, w, h, r), fadeAlpha(px, f), blitOver(...), clipRect
+//!   textCentered(canvas, r, size, color, style, s)
+//!   Surface, Image                      a straight-alpha buffer; pixels to read
+//!   place(gpa, dst, card, at, radius, shadow, k)   an opaque card with
+//!                                       rounded corners and a theme.Shadow
+//!   compositeFaded(gpa, dst, card, at, radius, shadow, alpha, k)   the same,
+//!                                       faded as a whole
+//!   FitMode, fitPlan, drawImage(gpa, dst, src, mode, bg), FitCache
+//!                                       a picture fitted to a card, cached
+//!   DragOut, dragIcon(gpa, src, w, h, k)   dragging a file out of a card
+//!   State, notice, roundButton, PillLook, pillButton, scrimPill,
+//!   scrimPillWidth, scrim_pill_h        controls over a picture (overlay.zig)
 
 const std = @import("std");
 const render = @import("../gfx/render.zig");
 const effects = @import("../gfx/effects.zig");
 const text = @import("../gfx/text.zig");
-const resample = @import("../gfx/resample.zig");
 const icons = @import("icons.zig");
+const theme = @import("theme.zig");
+const card = @import("floatui/card.zig");
+const overlay = @import("floatui/overlay.zig");
 
 pub const Canvas = render.Canvas;
 pub const Rect = effects.Rect;
+
+pub const Surface = card.Surface;
+pub const Image = card.Image;
+pub const place = card.place;
+pub const compositeFaded = card.compositeFaded;
+pub const FitMode = card.FitMode;
+pub const fitPlan = card.fitPlan;
+pub const drawImage = card.drawImage;
+pub const FitCache = card.FitCache;
+pub const DragOut = card.DragOut;
+pub const dragIcon = card.dragIcon;
+
+pub const State = overlay.State;
+pub const notice = overlay.notice;
+pub const roundButton = overlay.roundButton;
+pub const PillLook = overlay.PillLook;
+pub const pillButton = overlay.pillButton;
+pub const scrimPill = overlay.scrimPill;
+pub const scrimPillWidth = overlay.scrimPillWidth;
+pub const scrim_pill_h = overlay.scrim_pill_h;
+
+// TODO(wave 2): remove the palette below; use the theme's overlay tokens
+// (scrim, round_btn, light_pill, on_scrim) and Theme.accent_fill.
 
 /// Palette of the floating UI (dark glass, as on macOS)
 pub const veil: u32 = 0x6B000000;
@@ -33,6 +72,7 @@ pub const card_bg: u32 = 0xFF2A2E37;
 pub const shadow: u32 = 0x48000000;
 
 /// Panel colours for light and dark (history panel, pin frame)
+/// TODO(wave 2): remove; use theme.Opaque.of(theme.Theme).
 pub const Theme = struct {
     panel: u32,
     fg: u32,
@@ -45,18 +85,9 @@ pub const Theme = struct {
 
     /// From the desktop's preferences (ui/theme.zig): the Glass panel
     /// made opaque (there is no backdrop blur for a client to use).
-    pub fn fromPrefs(p: @import("theme.zig").Prefs) Theme {
-        const t = @import("theme.zig").of(p);
-        const panel = effects.over(t.window_bg, t.panel);
-        return .{
-            .panel = panel,
-            .fg = t.fg,
-            .muted = effects.over(panel, t.muted),
-            .field = effects.over(panel, t.field),
-            .line = effects.over(panel, t.hairline),
-            .hover = effects.over(panel, t.hover),
-            .accent = t.accent,
-        };
+    pub fn fromPrefs(p: theme.Prefs) Theme {
+        const o = theme.Opaque.of(theme.of(p));
+        return .{ .panel = o.panel, .fg = o.fg, .muted = o.muted, .field = o.field, .line = o.line, .hover = o.hover, .accent = o.accent };
     }
 
     pub const dark: Theme = .{ .panel = 0xFF242426, .fg = 0xFFF5F5F7, .muted = 0xFF9E9EA6, .field = 0xFF323235, .line = 0xFF3A3A3D, .hover = 0xFF2F2F33 };
@@ -114,50 +145,22 @@ pub fn blitOver(dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32
 
 /// An opaque card (content in `card`) with rounded corners and a soft
 /// shadow, onto a straight-alpha buffer.
-pub fn placeCard(dst: []u32, dw: u32, dh: u32, card: []const u32, cw: u32, ch: u32, x: i32, y: i32, radius: u32, shadow_px: u32) void {
+/// TODO(wave 2): remove; use place (theme shadows).
+pub fn placeCard(dst: []u32, dw: u32, dh: u32, card_px: []const u32, cw: u32, ch: u32, x: i32, y: i32, radius: u32, shadow_px: u32) void {
     if (shadow_px > 0) {
         effects.dropShadow(dst, dw, dh, .{ .x = x, .y = y, .w = @intCast(cw), .h = @intCast(ch) }, shadow_px, @intCast(shadow_px / 3), shadow);
     }
-    effects.blitRounded(dst, dw, dh, card, cw, ch, x, y, radius);
+    effects.blitRounded(dst, dw, dh, card_px, cw, ch, x, y, radius);
 }
 
 /// Draw `src` scaled to cover (or, for very different shapes, to fit in)
-/// the whole of `dst`, over a dark backdrop, area-filtered (see
-/// gfx/resample.zig). Callers keep the result: it is worth caching.
+/// the whole of `dst`, over a dark backdrop.
+/// TODO(wave 2): remove; use drawImage or FitCache with .auto.
 pub fn drawImageFill(gpa: std.mem.Allocator, dst: []u32, dw: u32, dh: u32, src: []const u32, sw: u32, sh: u32) void {
-    @memset(dst, card_bg);
-    if (sw == 0 or sh == 0 or dw == 0 or dh == 0) return;
-    const f = fillPlan(sw, sh, dw, dh);
-    const tmp = gpa.alloc(u32, @as(usize, f.w) * f.h) catch return;
-    defer gpa.free(tmp);
-    resample.region(gpa, src, sw, sh, f.src, tmp, f.w, f.h) catch return;
-    blitOver(dst, dw, dh, tmp, f.w, f.h, f.x, f.y);
+    drawImage(gpa, .{ .px = dst, .w = dw, .h = dh }, .{ .px = src, .w = sw, .h = sh }, .auto, card_bg);
 }
 
-/// Where drawImageFill puts the picture: the part of the source shown
-/// and the target rectangle it fills.
-const FillPlan = struct { src: resample.Region, x: i32, y: i32, w: u32, h: u32 };
-
-fn fillPlan(sw: u32, sh: u32, dw: u32, dh: u32) FillPlan {
-    const fsw: f64 = @floatFromInt(sw);
-    const fsh: f64 = @floatFromInt(sh);
-    const fdw: f64 = @floatFromInt(dw);
-    const fdh: f64 = @floatFromInt(dh);
-    const ratio = (fsw / fsh) / (fdw / fdh);
-    if (ratio > 0.7 and ratio < 1.4) {
-        // cover: the centred part of the source with the target's shape
-        const s = @max(fdw / fsw, fdh / fsh);
-        const cw = fdw / s;
-        const ch = fdh / s;
-        return .{ .src = .{ .x = (fsw - cw) / 2, .y = (fsh - ch) / 2, .w = cw, .h = ch }, .x = 0, .y = 0, .w = dw, .h = dh };
-    }
-    // contain: all of the source, centred
-    const s = @min(fdw / fsw, fdh / fsh);
-    const w: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(fsw * s))), 1, dw);
-    const h: u32 = std.math.clamp(@as(u32, @intFromFloat(@round(fsh * s))), 1, dh);
-    return .{ .src = .{ .x = 0, .y = 0, .w = fsw, .h = fsh }, .x = @intCast((dw - w) / 2), .y = @intCast((dh - h) / 2), .w = w, .h = h };
-}
-
+/// TODO(wave 2): remove; use icons.Icon with icons.drawAt (or roundButton).
 pub const Icon = enum { close, pencil, pin, search, trash, copy, save, check };
 
 /// A line icon (the editor's set, ui/icons.zig, a little heavier) in a
@@ -174,10 +177,7 @@ pub fn icon(c: *Canvas, kind: Icon, cx: f64, cy: f64, size: f64, color: u32) voi
         .check => .check,
     };
     const stroke: f64 = if (kind == .close or kind == .check) 2.4 else 2;
-    const s: i32 = @intFromFloat(@round(size));
-    const x: i32 = @intFromFloat(@round(cx - @as(f64, @floatFromInt(s)) / 2));
-    const y: i32 = @intFromFloat(@round(cy - @as(f64, @floatFromInt(s)) / 2));
-    icons.drawStroke(c, ic, x, y, s, stroke, color);
+    icons.drawAt(c, ic, cx, cy, size, .{ .stroke = stroke }, color);
 }
 
 /// Text centred in `r` (vertically by line height).
@@ -188,6 +188,7 @@ pub fn textCentered(c: *Canvas, r: @import("shapes.zig").Rect, size: f64, color:
 }
 
 /// `s` cut with "..." to fit `max_w` pixels.
+/// TODO(wave 2): remove; use text.ellipsize, measuring in the style drawn.
 pub fn ellipsize(buf: []u8, size: f64, s: []const u8, max_w: i32) []const u8 {
     if (text.width(size, s) <= max_w) return s;
     var n = s.len;
@@ -214,18 +215,15 @@ test "premultiply and fades keep opaque pixels and clear transparent ones" {
     try std.testing.expectEqual(@as(u32, 0x40), f[1] >> 24);
 }
 
-test "pictures cover close shapes and fit very different ones" {
-    // 1600x1000 into 240x150 (same shape): all of it, edge to edge
-    const a = fillPlan(1600, 1000, 240, 150);
-    try std.testing.expectApproxEqAbs(@as(f64, 1600), a.src.w, 1e-6);
-    try std.testing.expectEqual(@as(u32, 240), a.w);
-    // 1600x1200 into 240x150: cropped top and bottom, centred
-    const b = fillPlan(1600, 1200, 240, 150);
-    try std.testing.expectApproxEqAbs(@as(f64, 1000), b.src.h, 1e-6);
-    try std.testing.expectApproxEqAbs(@as(f64, 100), b.src.y, 1e-6);
-    // a tall strip into a wide box: whole, letterboxed in the middle
-    const c = fillPlan(100, 1000, 240, 150);
-    try std.testing.expectEqual(@as(u32, 15), c.w);
-    try std.testing.expectEqual(@as(u32, 150), c.h);
-    try std.testing.expectEqual(@as(i32, 112), c.x);
+test {
+    _ = card;
+    _ = overlay;
+    // the shared UI modules (no other test root reaches them yet)
+    _ = @import("scale.zig");
+    _ = @import("press.zig");
+    _ = @import("focus.zig");
+    _ = @import("floatwin.zig");
+    _ = @import("badge.zig");
+    _ = @import("menukit.zig");
+    _ = @import("material.zig");
 }

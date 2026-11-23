@@ -8,6 +8,9 @@
 //!   draw(canvas, icon, x, y, size_px, color)        default stroke
 //!   drawStroke(canvas, icon, x, y, size_px, stroke_units, color)
 //!   drawCentered(canvas, icon, cx, cy, size_px, color)   centre in px
+//!   drawAt(canvas, icon, cx, cy, size, opts, color)  centred on a
+//!                          fractional point, `size` rounded; opts.stroke
+//!                          overrides the default stroke
 //!   deinit()               free the cache (optional; process exit)
 //! Sizes are physical pixels: pass round(logical * scale).
 
@@ -72,6 +75,14 @@ pub const Icon = enum {
     capture_area,
     capture_screen,
     record,
+    // the recorder
+    mic,
+    speaker,
+    click,
+    film,
+    scissors,
+    play,
+    pause,
 };
 
 /// Path data, 24x24 units. The first block is the "Glass" mockup's set.
@@ -100,7 +111,13 @@ pub fn data(icon: Icon) []const u8 {
         .folder => "M3 7h6l2 2h10v10H3z",
         .plus => "M12 5v14M5 12h14",
         .search => "M11 4a7 7 0 1 0 0 14a7 7 0 1 0 0-14zM20 20l-4-4",
-        // same style, for what the mockup does not show
+        else => moreData(icon),
+    };
+}
+
+/// Same style, for what the mockup does not show.
+fn moreData(icon: Icon) []const u8 {
+    return switch (icon) {
         .pixelate => "M4 4h16v16H4zM9.33 4v16M14.67 4v16M4 9.33h16M4 14.67h16",
         .redact => "M4 7h16v10H4zM8 10.5h8M8 13.5h5",
         .save_as => "M3 7h6l2 2h10v10H3zM12 11.5v5M9.5 14l2.5 2.5 2.5-2.5",
@@ -127,13 +144,22 @@ pub fn data(icon: Icon) []const u8 {
         // the ring of a record button (its dot is filled by the caller)
         .record => "M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 1 0 0-17z",
         .timer => "M12 6c4.4 0 8 3.6 8 8s-3.6 8-8 8-8-3.6-8-8 3.6-8 8-8zM12 10v4l2.5 1.5M10 2h4",
+        .mic => "M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6",
+        .speaker => "M4 9h4l5-4v14l-5-4H4zM16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11",
+        .click => "M9 9l11 4-5 2-2 5zM5 5l2 2M9 3v2.5M3 9h2.5",
+        .film => "M4 5h16v14H4zM8 5v14M16 5v14M4 9h4M4 15h4M16 9h4M16 15h4",
+        .scissors => "M6 4a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5zM6 15a2.5 2.5 0 1 0 0 5a2.5 2.5 0 1 0 0-5zM8 8l12 9M8 16l12-9",
+        .play => "M8 5l11 7-11 7z",
+        .pause => "M8 5v14M16 5v14",
+        // data() has the rest (the test below draws every icon)
+        else => "",
     };
 }
 
 /// Stroke in icon units: the mockup draws the dots heavier.
 pub fn defaultStroke(icon: Icon) f64 {
     return switch (icon) {
-        .more => 2.5,
+        .more, .pause => 2.5,
         .chevron_down, .copy, .close => 2,
         else => theme.icon_stroke,
     };
@@ -193,18 +219,24 @@ pub fn drawStroke(canvas: *render.Canvas, icon: Icon, x: i32, y: i32, size_px: i
     if (size_px <= 0) return;
     const size: usize = @intCast(size_px);
     const m = maskFor(icon, size, stroke_units) orelse return;
-    const ca: u32 = color >> 24;
-    const rgb = color & 0x00FFFFFF;
-    for (0..size) |row| {
-        const py = y + @as(i32, @intCast(row));
-        if (py < 0 or py >= canvas.h) continue;
-        for (0..size) |col| {
-            const cv: u32 = m[row * size + col];
-            if (cv == 0) continue;
-            const px = x + @as(i32, @intCast(col));
-            canvas.blend(px, py, rgb | (((ca * cv + 127) / 255) << 24));
-        }
-    }
+    canvas.blendMask(m, size, size, x, y, color);
+}
+
+pub const DrawOpts = struct {
+    /// stroke in icon units; null: the icon's default
+    stroke: ?f64 = null,
+};
+
+/// Draw `icon` `size` px square (rounded) centred on the fractional
+/// point (cx, cy).
+pub fn drawAt(canvas: *render.Canvas, icon: Icon, cx: f64, cy: f64, size: f64, opts: DrawOpts, color: u32) void {
+    if (!(size >= 1 and size < 4096)) return;
+    const s: i32 = @intFromFloat(@round(size));
+    const half = @as(f64, @floatFromInt(s)) / 2;
+    if (!(@abs(cx) < 1e9 and @abs(cy) < 1e9)) return;
+    const x: i32 = @intFromFloat(@round(cx - half));
+    const y: i32 = @intFromFloat(@round(cy - half));
+    drawStroke(canvas, icon, x, y, s, opts.stroke orelse defaultStroke(icon), color);
 }
 
 test "every icon's path parses and draws something" {
@@ -222,4 +254,29 @@ test "every icon's path parses and draws something" {
         for (px) |p| lit += @intFromBool(p != 0xFF000000);
         try std.testing.expect(lit > 4);
     }
+}
+
+test "drawAt centres on a fractional point" {
+    defer deinit();
+    var px: [40 * 40]u32 = @splat(0xFF000000);
+    var c = render.Canvas.init(&px, 40, 40);
+    drawAt(&c, .rect, 20, 20, 20, .{}, 0xFFFFFFFF);
+    // lit columns span symmetrically around the centre
+    var lo: usize = 40;
+    var hi: usize = 0;
+    for (px, 0..) |p, i| if (p != 0xFF000000) {
+        lo = @min(lo, i % 40);
+        hi = @max(hi, i % 40);
+    };
+    try std.testing.expect(lo >= 10 and hi < 30);
+    try std.testing.expect(lo + hi >= 38 and lo + hi <= 40);
+    // a heavier stroke lights more
+    var n1: usize = 0;
+    for (px) |p| n1 += @intFromBool(p != 0xFF000000);
+    @memset(&px, 0xFF000000);
+    drawAt(&c, .rect, 20, 20, 20, .{ .stroke = 4 }, 0xFFFFFFFF);
+    var n2: usize = 0;
+    for (px) |p| n2 += @intFromBool(p != 0xFF000000);
+    try std.testing.expect(n2 > n1);
+    drawAt(&c, .rect, std.math.nan(f64), 1e300, 20, .{}, 0xFFFFFFFF);
 }

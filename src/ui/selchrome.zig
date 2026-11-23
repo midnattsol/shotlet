@@ -13,6 +13,11 @@
 //!   pill(canvas, r, radius, th)               a label pill on the capture
 //!   size_style, sizeLabel(buf, w, h), sizePillRect(label, frame, bounds_w, f)
 //!   sizePill(canvas, r, f, th, label)
+//!   hintPillSize(s, f), hintPill(canvas, at, s, f, th) Rect   a quiet
+//!                                             instruction on the capture
+//!                                             ("Drag to choose...")
+//!   tooltipSize(name, key, f), tooltip(canvas, r, name, key, f, th)
+//!                                             a control's name and shortcut
 
 const std = @import("std");
 const render = @import("../gfx/render.zig");
@@ -111,6 +116,42 @@ pub fn sizePill(cv: *Canvas, r: Rect, f: f64, th: Theme, label: []const u8) void
     text.drawStyled(cv, r.x + px(10, f), r.y + px(4, f), theme.font_small * f, th.pill_fg, size_style, label);
 }
 
+/// The size of a hint pill showing `s`.
+pub fn hintPillSize(s: []const u8, f: f64) [2]i32 {
+    const fs = theme.font_label * f;
+    return .{ text.width(fs, s) + px(32, f), text.height(fs) + px(14, f) };
+}
+
+/// A hint pill with its top-left corner at `at`; returns where it is.
+pub fn hintPill(cv: *Canvas, at: Point, s: []const u8, f: f64, th: Theme) Rect {
+    const sz = hintPillSize(s, f);
+    const r: Rect = .{ .x = at.x, .y = at.y, .w = sz[0], .h = sz[1] };
+    pill(cv, r, @as(f64, @floatFromInt(r.h)) / 2.0, th);
+    const fs = theme.font_label * f;
+    text.draw(cv, r.x + px(16, f), r.y + @divTrunc(r.h - text.height(fs), 2), fs, th.pill_fg, s);
+    return r;
+}
+
+/// The size of a tooltip naming a control, with its shortcut `key`
+/// (empty: none).
+pub fn tooltipSize(name: []const u8, key: []const u8, f: f64) [2]i32 {
+    const fs = theme.font_small * f;
+    var tw = text.width(fs, name);
+    if (key.len > 0) tw += px(8, f) + text.width(fs, key);
+    return .{ tw + px(20, f), text.height(fs) + px(8, f) };
+}
+
+/// A tooltip in `r` (tooltipSize): a pill with a soft shadow, the name,
+/// and the shortcut right-aligned and quieter.
+pub fn tooltip(cv: *Canvas, r: Rect, name: []const u8, key: []const u8, f: f64, th: Theme) void {
+    const fs = theme.font_small * f;
+    cv.fillRoundRectAA(r.x, r.y + px(2, f), r.w, r.h, 7.0 * f, 0x1F000000);
+    pill(cv, r, 7.0 * f, th);
+    const ty = r.y + @divTrunc(r.h - text.height(fs), 2);
+    text.draw(cv, r.x + px(10, f), ty, fs, th.pill_fg, name);
+    if (key.len > 0) text.draw(cv, r.right() - px(10, f) - text.width(fs, key), ty, fs, th.pill_muted, key);
+}
+
 test "the mid-edge handles show only near the pointer" {
     const s: Rect = .{ .x = 100, .y = 100, .w = 200, .h = 100 };
     try std.testing.expect(handleShown(s, 0, null, 10));
@@ -136,4 +177,17 @@ test "the size pill sits above the selection, or inside it at the top" {
     try std.testing.expectEqual(@as(i32, 100), above.x);
     const inside = sizePillRect("400 x 300", .{ .x = 100, .y = 4, .w = 400, .h = 300 }, 1600, 1);
     try std.testing.expect(inside.y > 4);
+}
+
+test "hint pills and tooltips fit their text" {
+    const th = Theme.get(true, null);
+    var buf: [200 * 60]u32 = @splat(0xFF808080);
+    var cv = Canvas.init(&buf, 200, 60);
+    const r = hintPill(&cv, .{ .x = 4, .y = 4 }, "Drag", 1, th);
+    try std.testing.expectEqual(hintPillSize("Drag", 1)[0], r.w);
+    try std.testing.expect(buf[@as(usize, @intCast(r.y + @divTrunc(r.h, 2))) * 200 + 6] != 0xFF808080);
+    const a = tooltipSize("Copy", "", 1);
+    const b = tooltipSize("Copy", "Ctrl+C", 1);
+    try std.testing.expect(b[0] > a[0] and b[1] == a[1]);
+    tooltip(&cv, .{ .x = 10, .y = 30, .w = b[0], .h = b[1] }, "Copy", "Ctrl+C", 1, th);
 }

@@ -53,6 +53,7 @@ pub const Canvas = struct {
     pub const fillTriangle = basic.fillTriangle;
     pub const ellipseOutline = basic.ellipseOutline;
     pub const pixelate = basic.pixelate;
+    pub const blendMask = basic.blendMask;
 
     // anti-aliased primitives
     pub const fillCircleAA = aa.fillCircleAA;
@@ -72,6 +73,21 @@ pub const Canvas = struct {
 // keep the moved tests reachable from the test root
 comptime {
     _ = @import("render/aa_test.zig");
+    _ = @import("render/sdf.zig");
+    _ = @import("color.zig");
+}
+
+test "a coverage mask blends its colour by coverage, clipped" {
+    var px: [3 * 2]u32 = @splat(0xFF000000);
+    var c = Canvas.init(&px, 3, 2);
+    const mask = [_]u8{ 255, 0, 128, 255 };
+    c.blendMask(&mask, 2, 2, 2, 0, 0xFFFFFFFF);
+    try std.testing.expectEqual(@as(u32, 0xFFFFFFFF), px[2]); // (2,0): full
+    try std.testing.expectEqual(@as(u32, 0xFF000000), px[0]);
+    const half = px[5] & 0xFF; // (2,1): coverage 128
+    try std.testing.expect(half >= 127 and half <= 129);
+    c.blendMask(&mask, 2, 2, -5, -5, 0xFFFFFFFF);
+    c.blendMask(&mask, 2, 2, std.math.maxInt(i32), std.math.maxInt(i32), 0xFFFFFFFF);
 }
 
 test "fill and blend" {

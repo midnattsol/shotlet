@@ -1,6 +1,6 @@
 //! Pixel conversions for the video encoders: 0xAARRGGBB to planar
-//! YUV 4:2:0 (BT.709, limited range, as players assume for HD video),
-//! and box downscaling for GIFs with a maximum width.
+//! YUV 4:2:0 (BT.709, limited range, as players assume for HD video);
+//! `downscale` is gfx/resample.zig's box filter (GIFs with a maximum width).
 
 const std = @import("std");
 
@@ -64,25 +64,8 @@ pub fn pixelOf(yv: u8, u: u8, v: u8) u32 {
     return 0xFF000000 | @as(u32, @intCast(r)) << 16 | @as(u32, @intCast(g)) << 8 | @as(u32, @intCast(b));
 }
 
-/// Area-average downscale of sw x sh (stride `ss`) into dw x dh.
-pub fn downscale(src: []const u32, ss: usize, sw: usize, sh: usize, dst: []u32, dw: usize, dh: usize) void {
-    for (0..dh) |dy| {
-        const y0 = dy * sh / dh;
-        const y1 = @max(y0 + 1, (dy + 1) * sh / dh);
-        for (0..dw) |dx| {
-            const x0 = dx * sw / dw;
-            const x1 = @max(x0 + 1, (dx + 1) * sw / dw);
-            var acc: [3]u32 = @splat(0);
-            for (y0..y1) |yy| for (src[yy * ss + x0 .. yy * ss + x1]) |c| {
-                acc[0] += (c >> 16) & 0xFF;
-                acc[1] += (c >> 8) & 0xFF;
-                acc[2] += c & 0xFF;
-            };
-            const n: u32 = @intCast((y1 - y0) * (x1 - x0));
-            dst[dy * dw + dx] = 0xFF000000 | ((acc[0] + n / 2) / n) << 16 | ((acc[1] + n / 2) / n) << 8 | ((acc[2] + n / 2) / n);
-        }
-    }
-}
+/// Area-average downscale (gfx/resample.zig's box).
+pub const downscale = @import("../gfx/resample.zig").box;
 
 test "I420 round-trips colours closely" {
     const colors = [_]u32{ 0xFF000000, 0xFFFFFFFF, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF, 0xFF2A5DB0, 0xFF808080 };
@@ -100,11 +83,4 @@ test "I420 round-trips colours closely" {
             try std.testing.expect(@abs(a - b) <= 4);
         }
     }
-}
-
-test "downscale averages blocks" {
-    const src = [_]u32{ 0xFF000000, 0xFFFFFFFF, 0xFF000000, 0xFFFFFFFF, 0xFF000000, 0xFFFFFFFF, 0xFF000000, 0xFFFFFFFF };
-    var dst: [2]u32 = undefined;
-    downscale(&src, 4, 4, 2, &dst, 2, 1);
-    try std.testing.expectEqual(@as(u32, 0xFF808080), dst[0]);
 }

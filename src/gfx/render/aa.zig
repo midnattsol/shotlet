@@ -9,6 +9,7 @@ const std = @import("std");
 const Canvas = @import("../render.zig").Canvas;
 const pixel = @import("pixel.zig");
 const stroke = @import("stroke.zig");
+const sdf = @import("sdf.zig");
 const toI32 = pixel.toI32;
 const span = pixel.span;
 
@@ -99,10 +100,9 @@ pub fn fillRoundRectAA(c: *Canvas, x0: i32, y0: i32, w: i32, h: i32, radius: f64
     var y = ys[0];
     while (y <= ys[1]) : (y += 1) {
         const py = @as(f64, @floatFromInt(y)) + 0.5;
-        const qy = @max(@max(fy0 + r - py, py - (fy1 - r)), 0.0);
         if (mid_a <= mid_b) {
-            // signed distance with qx = 0 is qy - r
-            const cov = @max(0.0, @min(1.0, r - qy + 0.5));
+            // between the corners only the row matters: measure at the middle
+            const cov = sdf.cov(sdf.roundRectDist((fx0 + fx1) / 2, py, fx0, fy0, fx1, fy1, r));
             if (cov >= 1.0) pixel.hspan(c, mid_a, mid_b, y, color) else {
                 var x = mid_a;
                 while (x <= mid_b) : (x += 1) c.blendCov(x, y, color, cov);
@@ -115,10 +115,7 @@ pub fn fillRoundRectAA(c: *Canvas, x0: i32, y0: i32, w: i32, h: i32, radius: f64
                 continue;
             }
             const px = @as(f64, @floatFromInt(x)) + 0.5;
-            // signed distance to the rounded rect
-            const qx = @max(@max(fx0 + r - px, px - (fx1 - r)), 0.0);
-            const d = @sqrt(qx * qx + qy * qy) - r;
-            c.blendCov(x, y, color, @max(0.0, @min(1.0, -d + 0.5)));
+            c.blendCov(x, y, color, sdf.cov(sdf.roundRectDist(px, py, fx0, fy0, fx1, fy1, r)));
         }
     }
 }
