@@ -47,16 +47,9 @@ pub fn handle(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.
 
 /// An item's a{sv}: its label, or its separator type.
 fn putItemProps(m: *dbus.Marshal, item: Item) !void {
-    const props = try m.beginArray(8);
-    try m.beginStruct();
-    if (item.separator) {
-        try m.putString("type");
-        try m.putVariantString("separator");
-    } else {
-        try m.putString("label");
-        try m.putVariantString(item.label);
-    }
-    m.endArray(props);
+    const props = try m.beginDict();
+    if (item.separator) try props.entry("type", "separator") else try props.entry("label", item.label);
+    props.end();
 }
 
 /// reply: (u(ia{sv}av)), the root and its items without nested children
@@ -66,11 +59,9 @@ fn getLayout(alloc: std.mem.Allocator, bus: *dbus.Connection, msg: *const dbus.M
     try m.putU32(1); // revision
     try m.beginStruct();
     try m.putI32(0); // root id
-    const root_props = try m.beginArray(8);
-    try m.beginStruct();
-    try m.putString("children-display");
-    try m.putVariantString("submenu");
-    m.endArray(root_props);
+    const root_props = try m.beginDict();
+    try root_props.entry("children-display", "submenu");
+    root_props.end();
     const children = try m.beginArray(1); // av: variants align 1
     for (items) |item| {
         try m.putSignature("(ia{sv}av)");
