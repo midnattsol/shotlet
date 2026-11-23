@@ -147,7 +147,7 @@ fn drawStatus(cv: *Canvas, c: *const Card, k: f64, th: Theme) void {
 /// The right-click menu over the card's picture (ui/cardmenu.zig).
 fn drawMenu(self: *const Quick, cv: *Canvas, c: *const Card, i: usize) void {
     var items: [layout.menu_items.len]cardmenu.Item = undefined;
-    for (layout.menu_items, &items) |item, *it| it.* = .{ .label = item.label, .dim = item.action == .annotate and !c.editable };
+    for (layout.menu_items, &items) |item, *it| it.* = .{ .label = item.label, .dim = layout.menuDim(item.action, c.editable, c.meta.saved.len > 0) };
     const hot: ?usize = if (self.hover) |h| (if (h.card == i and h.control == .menu) h.item else null) else null;
     cardmenu.draw(cv, &items, hot, card_w, self.factor(), self.th);
 }

@@ -222,6 +222,8 @@ const Quick = struct {
             .show_in_files => {
                 var bus: ?desktop.Bus = desktop.connect(self.gpa, self.env) catch null;
                 defer if (bus) |*b| b.deinit();
+                // a recording is written to record_dir or Videos from the
+                // start (record/settings.outputDir): saved, never dimmed
                 const path = self.saved orelse self.info.path;
                 if (deliver.showInFiles(self.gpa, self.env, if (bus) |*b| b else null, path, "quick video")) self.life.leave(sys.monoMs());
             },

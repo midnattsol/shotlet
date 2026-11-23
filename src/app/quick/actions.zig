@@ -54,14 +54,6 @@ fn saved(self: *Quick, i: usize) void {
     c.deadline_ms = now + notice_mod.end_ms;
 }
 
-/// What Show in Files shows: the saved file, else the capture as kept
-/// in the history (a file on disk too, as macOS's thumbnail always has
-/// one to show).
-fn shownFile(c: *const stack.Card, buf: *env_mod.PathBuf) ![]const u8 {
-    if (c.meta.saved.len > 0 and (sys.fileSize(c.meta.saved) catch null) != null) return c.meta.saved;
-    return history.entryPath(buf, c.kept.root(), c.kept.id.slice(), history.File.image.name());
-}
-
 /// Card i's capture, for deliver.zig.
 fn entry(self: *Quick, i: usize) deliver.Entry {
     const c = &self.cards.items[i];
@@ -85,7 +77,7 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
         },
         .save, .save_as => if (try entry(self, i).save(ctx(self), if (a == .save_as) .ask else .folder)) saved(self, i),
         .annotate => {
-            if (!c.editable) return;
+            if (layout.menuDim(a, c.editable, true)) return;
             entry(self, i).edit(self.env);
             self.remove(i);
         },
@@ -95,10 +87,10 @@ fn actInner(self: *Quick, i: usize, a: Action) !void {
         },
         // the file manager takes over: the card goes, as after Annotate
         // (it stays, and a problem card says why, when none answered)
+        // (dimmed, and nothing, until saved: layout.menuDim)
         .show_in_files => {
-            var buf: env_mod.PathBuf = undefined;
-            const path = try shownFile(c, &buf);
-            if (deliver.showInFiles(self.gpa, self.env, self.bus_(), path, "quick access")) c.life.leave(sys.monoMs());
+            if (layout.menuDim(a, c.editable, c.meta.saved.len > 0)) return;
+            if (deliver.showInFiles(self.gpa, self.env, self.bus_(), c.meta.saved, "quick access")) c.life.leave(sys.monoMs());
         },
         .close => {
             log.info("closed {s}", .{c.kept.id.slice()});

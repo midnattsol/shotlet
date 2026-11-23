@@ -55,6 +55,26 @@ pub const Action = enum {
     }
 };
 
+/// Whether menu item `a` is dimmed (does nothing): Annotate without the
+/// annotations to reopen, Show in Files until the capture is saved (the
+/// kept copy lives in Shotlet's own state folder, no place to send
+/// anyone).
+pub fn menuDim(a: Action, editable: bool, saved: bool) bool {
+    return switch (a) {
+        .annotate => !editable,
+        .show_in_files => !saved,
+        else => false,
+    };
+}
+
+test "Annotate and Show in Files dim until they apply" {
+    try std.testing.expect(menuDim(.show_in_files, true, false));
+    try std.testing.expect(!menuDim(.show_in_files, false, true));
+    try std.testing.expect(menuDim(.annotate, false, true));
+    try std.testing.expect(!menuDim(.annotate, true, false));
+    try std.testing.expect(!menuDim(.copy, false, false));
+}
+
 /// The bottom buttons: Save (which ends the card) and Copy.
 pub const pill_actions = [2]Action{ .save, .copy };
 

@@ -72,7 +72,7 @@ scenario_quick_saved() {
     saved_card_goes
     saved_alt_keeps
     saved_menu_shows
-    unsaved_menu_shows
+    unsaved_menu_dim
     copy_keeps
     menu_show_fails
     video_menu_shows
@@ -147,16 +147,21 @@ saved_menu_shows() {
 }
 
 # not saved: the capture as kept in the history
-unsaved_menu_shows() {
+# not saved: the item is dimmed (the kept copy is in Shotlet's own state
+# folder) and does nothing
+unsaved_menu_dim() {
+    local n
     new_capture third
+    n=$(grep -c "^ShowItems" "$OUT/fm.log")
     menu_show unsaved
-    check "before a save, Show in Files shows the kept capture" \
-        wait_log 5 "string \"file://$XDG_STATE_HOME/shotlet/history/[0-9a-f-]+/image.png\"" "$OUT/showitems.txt"
-    check "  ... and the card goes" wait_until 5 eval '! card_shows'
+    sleep 1
+    check "before a save, Show in Files is dimmed and does nothing" eq "$(grep -c "^ShowItems" "$OUT/fm.log")" "$n"
+    away
+    check "  ... the card stays" card_shows
 }
 
+# (the same card)
 copy_keeps() {
-    new_capture fourth
     hover
     point 177 23 # Copy
     click 0 "$PX" "$PY"
@@ -166,8 +171,10 @@ copy_keeps() {
     check "  ... on screen" card_shows
 }
 
-# a file manager that refuses: the problem card; the card stays
+# a file manager that refuses: the problem card; the card stays (saved
+# with Alt held, so that it stays for its menu)
 menu_show_fails() {
+    card_save alt
     echo fail >"$OUT/fm.mode"
     menu_show refused
     check "when the file manager fails, a problem card says so" \

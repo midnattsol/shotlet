@@ -23,7 +23,8 @@ pub const pad = theme.card_room;
 /// `show_in_files`: only in the menu
 pub const Control = enum { body, close, trim, copy, save_as, show_in_files };
 
-/// the right-click menu's rows
+/// the right-click menu's rows (none dimmed: Show in Files has a file in
+/// the person's own folder from the start, record_dir or Videos)
 pub const menu_items = [_]struct { label: []const u8, control: Control }{
     .{ .label = "Copy", .control = .copy },
     .{ .label = "Save as\u{2026}", .control = .save_as },

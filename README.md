@@ -302,9 +302,8 @@ says what happened, "Copied" or "Saved · name.png". On hover:
 | × | close |
 | drag | drop the image into any app (offered as `image/png` and as a file, `text/uri-list`) |
 
-Show in Files opens the file manager with the file selected (the saved
-one; before a save, the capture as Recent captures keeps it) and the
-thumbnail goes. When no file manager answers
+Show in Files opens the file manager with the saved file selected (it
+is dimmed until the capture is saved) and the thumbnail goes. When no file manager answers
 (`org.freedesktop.FileManager1`), a card says so and where the file is,
 and the thumbnail stays.
 
@@ -497,8 +496,8 @@ and is kept in Recent captures. Its thumbnail shows the first picture and
 the length, and plays a filmstrip under the pointer: Copy puts the file on
 the clipboard (`text/uri-list`, and the bytes as `video/mp4` or
 `image/gif`), Save as… copies it elsewhere and the thumbnail goes (hold
-`Alt` to keep it), its right-click menu has Show in Files (the copy once
-saved, else the recording) as well, `Ctrl+C`, `Ctrl+S` and `Esc` work
+`Alt` to keep it), its right-click menu has Show in Files (the recording,
+already in your Videos folder, or the copy once saved) as well, `Ctrl+C`, `Ctrl+S` and `Esc` work
 while the pointer is on it, dragging drops the file into
 another app, and the scissors open the trim window (drag the start and
 end handles on the filmstrip, play the range, Save trimmed: a new
