@@ -29,8 +29,6 @@ pub const keysymChar = keysyms.keysymChar;
 pub const Translated = translator.Translated;
 pub const Keyboard = translator.Keyboard;
 pub const Repeat = repeat.Repeat;
-// TODO(wave 2): remove; window/* moves to sys.monoMs
-pub const monotonicMs = @import("sys.zig").monoMs;
 
 // Reach every submodule's tests (a `test {}` block would count as one).
 comptime {

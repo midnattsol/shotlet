@@ -9,11 +9,8 @@ const events = @import("events.zig");
 
 const Window = window.Window;
 
-/// Both versions: exporter request 1 exports a toplevel, the exported
-/// object's event 0 is its handle, request 0 destroys either.
-const export_toplevel = 1;
-const ev_handle = 0;
-const destroy = 0;
+const exporter = wl.zxdg_exporter_v2;
+const exported = wl.zxdg_exported_v2;
 
 /// Export surface 0's toplevel; "wayland:HANDLE" in `buf`. It stays
 /// exported until unexport() (or another export).
@@ -24,25 +21,31 @@ pub fn parentHandle(w: *Window, buf: []u8) ![]const u8 {
     unexport(w);
     const c = &w.conn;
     const id = c.newId();
-    try c.request(w.globals.exporter, export_toplevel, &.{ .{ .new_id = id }, .{ .object = s.wl_surface } });
+    try c.request(w.globals.exporter, exporter.export_toplevel, &.{ .{ .new_id = id }, .{ .object = s.wl_surface } });
     w.exported = id;
-    const cb = try c.sync();
-    var handle: ?[]const u8 = null;
-    while (true) {
-        const ev = try c.readEvent();
-        if (ev.object == cb and ev.opcode == wl.wl_callback.ev_done) break;
-        if (ev.object == id and ev.opcode == ev_handle) {
-            var r = wl.ArgReader{ .data = ev.body };
-            handle = try std.fmt.bufPrint(buf, "wayland:{s}", .{try r.string()});
-        } else try events.handleEvent(w, ev);
-    }
-    return handle orelse error.NoHandle;
+    var wait: Wait = .{ .w = w, .id = id, .buf = buf };
+    try c.roundtrip(&wait, Wait.onEvent);
+    return wait.handle orelse error.NoHandle;
 }
+
+/// The roundtrip that brings the exported object's handle.
+const Wait = struct {
+    w: *Window,
+    id: u32,
+    buf: []u8,
+    handle: ?[]const u8 = null,
+
+    fn onEvent(self: *Wait, ev: wl.Event) !void {
+        if (ev.object != self.id or ev.opcode != exported.ev_handle) return events.handleEvent(self.w, ev);
+        var r = ev.reader();
+        self.handle = try std.fmt.bufPrint(self.buf, "wayland:{s}", .{try r.string()});
+    }
+};
 
 /// Withdraw the handle parentHandle() gave out.
 pub fn unexport(w: *Window) void {
     if (w.exported == 0) return;
-    w.conn.request(w.exported, destroy, &.{}) catch {};
+    w.conn.request(w.exported, exported.destroy, &.{}) catch {};
     w.exported = 0;
     w.conn.flush() catch {};
 }

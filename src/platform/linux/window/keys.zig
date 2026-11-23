@@ -95,7 +95,7 @@ fn onKey(w: *Window, r: *wl.ArgReader) !void {
     const pressed = state == 1;
     const key = translate(w, code, pressed, true);
     if (pressed) {
-        w.kb.repeat.press(code, w.kb.keyRepeats(code), keyboard.monotonicMs());
+        w.kb.repeat.press(code, w.kb.keyRepeats(code), sys.monoMs());
     } else {
         w.kb.repeat.release(code);
     }

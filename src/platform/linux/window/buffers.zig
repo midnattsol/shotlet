@@ -2,7 +2,6 @@
 //! free back buffer, and presenting it (attach, damage, frame, commit).
 
 const std = @import("std");
-const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
 const window = @import("../window.zig");
 const surface = @import("surface.zig");
@@ -28,18 +27,7 @@ pub fn destroyPool(c: *wl.Connection, s: *Surface) void {
             b.* = .{};
         }
     }
-    if (s.pool != 0) {
-        c.request(s.pool, wl.wl_shm_pool.destroy, &.{}) catch {};
-        s.pool = 0;
-    }
-    if (s.pool_mem.len > 0) {
-        sys.munmap(s.pool_mem);
-        s.pool_mem = &.{};
-    }
-    if (s.pool_fd >= 0) {
-        sys.close(s.pool_fd);
-        s.pool_fd = -1;
-    }
+    s.pool.deinit(c);
     s.last_presented = null;
 }
 
@@ -48,43 +36,22 @@ pub fn createBuffers(w: *Window, idx: u8, width: u32, height: u32) !void {
     const s = &w.surfaces[idx];
     const c = &w.conn;
     destroyPool(c, s);
-    const stride = width * 4;
-    const buf_size: usize = @as(usize, stride) * height;
-    const total = buf_size * 2;
-    if (total > std.math.maxInt(i32)) return error.BufferTooLarge;
-
-    s.pool_fd = try sys.memfdCreate("shotlet-shm", sys.MFD_CLOEXEC);
-    try sys.ftruncate(s.pool_fd, total);
-    s.pool_mem = try sys.mmapRw(s.pool_fd, total);
-
-    s.pool = c.newId();
-    try c.request(w.globals.shm, wl.wl_shm.create_pool, &.{
-        .{ .new_id = s.pool },
-        .{ .fd = s.pool_fd },
-        .{ .int = @intCast(total) },
-    });
+    const buf_size: usize = @as(usize, width) * 4 * height;
+    s.pool = try .create(c, w.globals.shm, buf_size * 2);
     for (&s.buffers, 0..) |*b, i| try createBuffer(c, s, b, i * buf_size, width, height);
     s.width = width;
     s.height = height;
-    try c.flush(); // send while pool_fd is guaranteed open
+    try c.flush();
     if (idx == 0) surface.syncPrimary(w);
     try w.queue.append(w.alloc, .{ .resize = .{ .w = width, .h = height, .surface = idx } });
 }
 
 /// One wl_buffer at `offset` of the surface's pool.
 fn createBuffer(c: *wl.Connection, s: *Surface, b: *Buffer, offset: usize, width: u32, height: u32) !void {
-    const buf_size: usize = @as(usize, width) * 4 * height;
-    b.id = c.newId();
+    const format = if (s.transparent) wl.wl_shm.format_argb8888 else wl.wl_shm.format_xrgb8888;
+    b.id = try s.pool.buffer(c, offset, width, height, width * 4, format);
     b.busy = false;
-    b.pixels = @alignCast(s.pool_mem[offset..][0..buf_size]);
-    try c.request(s.pool, wl.wl_shm_pool.create_buffer, &.{
-        .{ .new_id = b.id },
-        .{ .int = @intCast(offset) },
-        .{ .int = @intCast(width) },
-        .{ .int = @intCast(height) },
-        .{ .int = @intCast(width * 4) },
-        .{ .uint = if (s.transparent) wl.wl_shm.format_argb8888 else wl.wl_shm.format_xrgb8888 },
-    });
+    b.pixels = @alignCast(s.pool.bytes(offset, @as(usize, width) * 4 * height));
 }
 
 /// Returns a drawable back buffer as u32 pixels (0xAARRGGBB) for
@@ -100,7 +67,7 @@ pub fn backBufferOf(w: *Window, idx: u8) ![]u32 {
     while (true) {
         const s = &w.surfaces[idx];
         if (!s.alive) return error.NoSuchSurface;
-        if (s.pool == 0) return error.NotConfigured;
+        if (s.pool.id == 0) return error.NotConfigured;
         if (!s.buffers[s.cur_buf].busy) break;
         if (!s.buffers[1 - s.cur_buf].busy) {
             s.cur_buf = 1 - s.cur_buf;
@@ -132,7 +99,7 @@ pub fn presentSurface(w: *Window, idx: u8) !void {
 pub fn presentDamaged(w: *Window, idx: u8, damage: ?Rect) !void {
     if (idx >= w.n_surfaces) return error.NoSuchSurface;
     const s = &w.surfaces[idx];
-    if (!s.alive or s.pool == 0) return error.NoSuchSurface;
+    if (!s.alive or s.pool.id == 0) return error.NoSuchSurface;
     const c = &w.conn;
     const b = &s.buffers[s.cur_buf];
     if (s.fs_obj == 0 and s.committed_scale != s.int_scale and w.globals.compositor_version >= 3) {

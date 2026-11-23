@@ -24,7 +24,7 @@ pub const Drag = struct {
     // the icon surface and its buffer
     icon: u32 = 0,
     icon_buf: u32 = 0,
-    icon_mem: []align(std.heap.page_size_min) u8 = &.{},
+    icon_pool: wl.shm.Pool = .{},
 };
 
 /// Start dragging an image out of surface idx; call on the button
@@ -59,9 +59,7 @@ pub fn startDrag(w: *Window, idx: u8, png_data: []u8, uri_list: []u8, icon: ?Dra
 fn makeIcon(w: *Window, ic: DragIcon) !u32 {
     const d = &w.drag;
     const c = &w.conn;
-    const fd = try sys.memfdCreate("shotlet-dnd", sys.MFD_CLOEXEC);
-    defer sys.close(fd); // flushed below while still open
-    try makeIconBuffer(w, ic, fd);
+    try makeIconBuffer(w, ic);
     d.icon = c.newId();
     try c.request(w.globals.compositor, wl.wl_compositor.create_surface, &.{.{ .new_id = d.icon }});
     const k = @max(1, ic.scale);
@@ -77,27 +75,20 @@ fn makeIcon(w: *Window, ic: DragIcon) !u32 {
     }
     try c.request(d.icon, wl.wl_surface.damage_buffer, &.{ .{ .int = 0 }, .{ .int = 0 }, .{ .int = std.math.maxInt(i32) }, .{ .int = std.math.maxInt(i32) } });
     try c.request(d.icon, wl.wl_surface.commit, &.{});
-    try c.flush(); // the memfd travels with these bytes
+    try c.flush();
     return d.icon;
 }
 
-/// Copy the icon's pixels into a shm buffer backed by memfd `fd`, which
-/// must stay open until the requests are flushed.
-fn makeIconBuffer(w: *Window, ic: DragIcon, fd: sys.fd_t) !void {
+/// Copy the icon's pixels into a shm buffer.
+fn makeIconBuffer(w: *Window, ic: DragIcon) !void {
     const d = &w.drag;
     const c = &w.conn;
-    const size: usize = @as(usize, ic.width) * ic.height * 4;
-    try sys.ftruncate(fd, size);
-    d.icon_mem = try sys.mmapRw(fd, size);
-    @memcpy(@as([*]u32, @ptrCast(@alignCast(d.icon_mem.ptr)))[0 .. size / 4], ic.pixels[0 .. size / 4]);
-    const pool = c.newId();
-    try c.request(w.globals.shm, wl.wl_shm.create_pool, &.{ .{ .new_id = pool }, .{ .fd = fd }, .{ .int = @intCast(size) } });
-    d.icon_buf = c.newId();
-    try c.request(pool, wl.wl_shm_pool.create_buffer, &.{
-        .{ .new_id = d.icon_buf },       .{ .int = 0 },                      .{ .int = @intCast(ic.width) },
-        .{ .int = @intCast(ic.height) }, .{ .int = @intCast(ic.width * 4) }, .{ .uint = wl.wl_shm.format_argb8888 },
-    });
-    try c.request(pool, wl.wl_shm_pool.destroy, &.{});
+    const n = @as(usize, ic.width) * ic.height;
+    if (ic.pixels.len < n) return error.BadBufferSize;
+    d.icon_pool = try .create(c, w.globals.shm, n * 4);
+    @memcpy(@as([*]u32, @ptrCast(@alignCast(d.icon_pool.mem.ptr)))[0..n], ic.pixels[0..n]);
+    d.icon_buf = try d.icon_pool.buffer(c, 0, ic.width, ic.height, ic.width * 4, wl.wl_shm.format_argb8888);
+    d.icon_pool.drop(c);
 }
 
 /// wl_data_source events of the drag.
@@ -150,8 +141,7 @@ fn releaseSource(w: *Window) void {
     d.icon = 0;
     if (d.icon_buf != 0) c.request(d.icon_buf, wl.wl_buffer.destroy, &.{}) catch {};
     d.icon_buf = 0;
-    if (d.icon_mem.len > 0) sys.munmap(d.icon_mem);
-    d.icon_mem = &.{};
+    d.icon_pool.deinit(c);
     c.flush() catch {};
 }
 

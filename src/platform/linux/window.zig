@@ -377,8 +377,8 @@ test "live: one surface per output" {
     // wait for a real unplug when the harness triggers one
     if (std.c.getenv("SHOTLET_LIVE_WAIT_MS")) |ms_z| {
         const ms = std.fmt.parseInt(i64, std.mem.span(ms_z), 10) catch 0;
-        const end = keyboard.monotonicMs() + ms;
-        while (keyboard.monotonicMs() < end) _ = try win.nextEventTimeout(100);
+        const end = sys.monoMs() + ms;
+        while (sys.monoMs() < end) _ = try win.nextEventTimeout(100);
         var alive: usize = 0;
         for (win.surfaceList()) |s| alive += @intFromBool(s.alive);
         std.debug.print("after wait: {d} surfaces alive, outputs:", .{alive});

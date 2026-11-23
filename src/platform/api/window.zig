@@ -8,8 +8,9 @@
 
 /// Most surfaces one window has (one per monitor for the editor).
 pub const max_surfaces = 8;
-/// Most monitors tracked.
-pub const max_outputs = 8;
+/// Most monitors tracked, by the window and by every capture path (one
+/// limit for the whole program).
+pub const max_outputs = 16;
 
 pub const Rect = struct { x: i32, y: i32, w: i32, h: i32 };
 

@@ -7,6 +7,7 @@ const keyboard = @import("../keyboard.zig");
 const window = @import("../window.zig");
 const output = @import("output.zig");
 const Env = @import("../../../app/env.zig").Env;
+const switches = @import("../../api/switches.zig");
 const pointer = @import("pointer.zig");
 const keys = @import("keys.zig");
 const events = @import("events.zig");
@@ -87,12 +88,7 @@ pub fn connect(alloc: std.mem.Allocator, runtime_dir: []const u8, display: []con
 
 /// Dispatch events until the compositor has handled everything sent so far.
 pub fn roundtrip(w: *Window) !void {
-    const cb = try w.conn.sync();
-    while (true) {
-        const ev = try w.conn.readEvent();
-        if (ev.object == cb and ev.opcode == wl.wl_callback.ev_done) return;
-        try events.handleEvent(w, ev);
-    }
+    try w.conn.roundtrip(w, events.handleEvent);
 }
 
 /// The compositor offers zwlr_layer_shell_v1 (KDE, wlroots; not GNOME).
@@ -101,83 +97,82 @@ pub fn hasLayerShell(w: *const Window) bool {
 }
 
 /// wl_registry events.
-pub fn handleEvent(w: *Window, opcode: u16, r: *wl.ArgReader) !void {
-    switch (opcode) {
-        wl.wl_registry.ev_global => {
-            const name = try r.uint();
-            const iface = try r.string();
-            const version = try r.uint();
-            try handleGlobal(w, name, iface, version);
-        },
-        wl.wl_registry.ev_global_remove => try handleGlobalRemove(w, try r.uint()),
-        else => {},
+pub fn handleEvent(w: *Window, ev: wl.Event) !void {
+    if (try wl.Global.of(w.globals.registry, ev)) |g| return handleGlobal(w, g);
+    if (ev.opcode == wl.wl_registry.ev_global_remove) {
+        var r = ev.reader();
+        try handleGlobalRemove(w, try r.uint());
     }
 }
 
-fn handleGlobal(w: *Window, name: u32, iface: []const u8, version: u32) !void {
-    if (Effects.of(iface)) |e| w.globals.effects = e;
-    if (try bindCore(w, name, iface, version)) return;
-    if (try bindExtension(w, name, iface, version)) return;
-    if (std.mem.eql(u8, iface, "wl_output")) try output.add(w, name, iface, version);
+fn handleGlobal(w: *Window, g: wl.Global) !void {
+    if (Effects.of(g.interface)) |e| w.globals.effects = e;
+    if (try bindCore(w, g)) return;
+    if (try bindExtension(w, g)) return;
+    if (g.is("wl_output")) try output.add(w, g);
 }
 
-/// Core protocol globals; false when `iface` is none of them.
-fn bindCore(w: *Window, name: u32, iface: []const u8, version: u32) !bool {
-    const eql = std.mem.eql;
-    const g = &w.globals;
+/// Core protocol globals; false when `g` is none of them.
+fn bindCore(w: *Window, g: wl.Global) !bool {
+    const gl = &w.globals;
     const c = &w.conn;
-    if (eql(u8, iface, "wl_compositor")) {
+    const reg = gl.registry;
+    if (g.is("wl_compositor")) {
         // v6 for wl_surface.preferred_buffer_scale
-        g.compositor_version = @min(version, 6);
-        g.compositor = try c.bind(g.registry, name, iface, g.compositor_version);
-    } else if (eql(u8, iface, "wl_shm")) {
-        g.shm = try c.bind(g.registry, name, iface, 1);
-    } else if (eql(u8, iface, "xdg_wm_base")) {
+        const b = try c.bindGlobal(reg, g, 6);
+        gl.compositor = b.id;
+        gl.compositor_version = b.version;
+    } else if (g.is("wl_shm")) {
+        gl.shm = (try c.bindGlobal(reg, g, 1)).id;
+    } else if (g.is("xdg_wm_base")) {
         // v2 for the tiled_* states (a tiled window draws no shadow)
-        g.wm_base = try c.bind(g.registry, name, iface, @min(version, 2));
-    } else if (eql(u8, iface, "wl_seat") and g.seat == 0) {
+        gl.wm_base = (try c.bindGlobal(reg, g, 2)).id;
+    } else if (g.is("wl_seat")) {
+        if (gl.seat != 0) return true;
         // v8 adds axis_value120 (exact wheel notches); keymaps are
         // already mapped MAP_PRIVATE as v7 requires
-        g.seat_version = @min(version, 8);
-        g.seat = try c.bind(g.registry, name, iface, g.seat_version);
-    } else if (eql(u8, iface, "wl_data_device_manager")) {
+        const b = try c.bindGlobal(reg, g, 8);
+        gl.seat = b.id;
+        gl.seat_version = b.version;
+    } else if (g.is("wl_data_device_manager")) {
         // v3: drag-and-drop actions (copy) for startDrag
-        g.ddm_version = @min(version, 3);
-        g.ddm = try c.bind(g.registry, name, iface, g.ddm_version);
+        const b = try c.bindGlobal(reg, g, 3);
+        gl.ddm = b.id;
+        gl.ddm_version = b.version;
     } else return false;
     return true;
 }
 
-/// Optional protocol extensions; false when `iface` is none of them.
-fn bindExtension(w: *Window, name: u32, iface: []const u8, version: u32) !bool {
-    const eql = std.mem.eql;
-    const g = &w.globals;
+/// Optional protocol extensions; false when `g` is none of them. The
+/// SHOTLET_NO_* switches hide some (testing the fallbacks).
+fn bindExtension(w: *Window, g: wl.Global) !bool {
+    const gl = &w.globals;
     const c = &w.conn;
-    if (eql(u8, iface, "zwlr_layer_shell_v1")) {
-        if (std.c.getenv("SHOTLET_NO_LAYER_SHELL") == null) {
-            g.layer_shell_version = @min(version, 4);
-            g.layer_shell = try c.bind(g.registry, name, iface, g.layer_shell_version);
-        }
-    } else if (eql(u8, iface, "wp_viewporter")) {
-        g.viewporter = try c.bind(g.registry, name, iface, 1);
-    } else if (eql(u8, iface, "wp_fractional_scale_manager_v1")) {
-        if (std.c.getenv("SHOTLET_NO_FRACTIONAL") == null)
-            g.fs_manager = try c.bind(g.registry, name, iface, 1);
-    } else if (eql(u8, iface, "wp_cursor_shape_manager_v1")) {
-        if (std.c.getenv("SHOTLET_NO_CURSOR_SHAPE") == null)
-            g.cursor_shape = try c.bind(g.registry, name, iface, 1);
-    } else if (eql(u8, iface, "zxdg_output_manager_v1")) {
-        g.xdg_output_manager = try c.bind(g.registry, name, iface, @min(version, 3));
+    const reg = gl.registry;
+    const sw = switches.get();
+    if (g.is("zwlr_layer_shell_v1")) {
+        if (sw.no_layer_shell) return true;
+        const b = try c.bindGlobal(reg, g, 4);
+        gl.layer_shell = b.id;
+        gl.layer_shell_version = b.version;
+    } else if (g.is("wp_viewporter")) {
+        gl.viewporter = (try c.bindGlobal(reg, g, 1)).id;
+    } else if (g.is("wp_fractional_scale_manager_v1")) {
+        if (!sw.no_fractional) gl.fs_manager = (try c.bindGlobal(reg, g, 1)).id;
+    } else if (g.is("wp_cursor_shape_manager_v1")) {
+        if (!sw.no_cursor_shape) gl.cursor_shape = (try c.bindGlobal(reg, g, 1)).id;
+    } else if (g.is("zxdg_output_manager_v1")) {
+        gl.xdg_output_manager = (try c.bindGlobal(reg, g, 3)).id;
         _ = try output.ensureAllXdg(w);
-    } else if (eql(u8, iface, "zwp_relative_pointer_manager_v1")) {
-        g.rel_manager = try c.bind(g.registry, name, iface, 1);
-    } else if (eql(u8, iface, "zxdg_exporter_v2")) {
-        g.exporter = try c.bind(g.registry, name, iface, 1);
-    } else if (eql(u8, iface, "zxdg_exporter_v1")) {
+    } else if (g.is("zwp_relative_pointer_manager_v1")) {
+        gl.rel_manager = (try c.bindGlobal(reg, g, 1)).id;
+    } else if (g.is("zxdg_exporter_v2")) {
+        gl.exporter = (try c.bindGlobal(reg, g, 1)).id;
+    } else if (g.is("zxdg_exporter_v1")) {
         // the same requests and events; v2 wins when both are offered
-        if (g.exporter == 0) g.exporter = try c.bind(g.registry, name, iface, 1);
-    } else if (eql(u8, iface, "zwp_text_input_manager_v3")) {
-        g.ti_manager = try c.bind(g.registry, name, iface, 1);
+        if (gl.exporter == 0) gl.exporter = (try c.bindGlobal(reg, g, 1)).id;
+    } else if (g.is("zwp_text_input_manager_v3")) {
+        gl.ti_manager = (try c.bindGlobal(reg, g, 1)).id;
     } else return false;
     return true;
 }

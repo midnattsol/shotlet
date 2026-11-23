@@ -56,11 +56,8 @@ pub const Surface = struct {
 pub const Output = struct {
     /// 0: an empty slot
     id: u32 = 0,
+    /// integer scale, at least 1
     scale: i32 = 1,
-    x: i32 = 0,
-    y: i32 = 0,
-    w: i32 = 0,
-    h: i32 = 0,
 
     pub fn name(self: *const Output) []const u8 {
         _ = self;
@@ -70,8 +67,10 @@ pub const Output = struct {
         _ = self;
         return "";
     }
+    /// Where it sits in the desktop's logical space.
     pub fn logicalRect(self: *const Output) Rect {
-        return .{ .x = self.x, .y = self.y, .w = self.w, .h = self.h };
+        _ = self;
+        return .{ .x = 0, .y = 0, .w = 0, .h = 0 };
     }
 };
 

@@ -68,7 +68,7 @@ pub fn applySize(w: *Window, idx: u8) !void {
         }
     }
     if (size[0] == 0 or size[1] == 0) return;
-    if (size[0] != s.width or size[1] != s.height or s.pool == 0) {
+    if (size[0] != s.width or size[1] != s.height or s.pool.id == 0) {
         try buffers.createBuffers(w, idx, size[0], size[1]);
     }
     if (s.viewport != 0) {

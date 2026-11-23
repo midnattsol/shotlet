@@ -5,7 +5,6 @@
 const std = @import("std");
 const sys = @import("../sys.zig");
 const wl = @import("../wayland.zig");
-const keyboard = @import("../keyboard.zig");
 const window = @import("../window.zig");
 const registry = @import("registry.zig");
 const output = @import("output.zig");
@@ -31,11 +30,11 @@ pub fn nextEvent(w: *Window) !InputEvent {
 
 /// Like nextEvent but returns null after timeout_ms with no events.
 pub fn nextEventTimeout(w: *Window, timeout_ms: i32) !?InputEvent {
-    const deadline = keyboard.monotonicMs() + @max(0, timeout_ms);
+    const deadline = sys.monoMs() + @max(0, timeout_ms);
     while (w.queue.items.len == 0) {
-        const left = @max(0, deadline - keyboard.monotonicMs());
+        const left = @max(0, deadline - sys.monoMs());
         const progressed = try waitAndDispatch(w, @intCast(left));
-        if (!progressed and keyboard.monotonicMs() >= deadline) return null;
+        if (!progressed and sys.monoMs() >= deadline) return null;
     }
     return w.queue.orderedRemove(0);
 }
@@ -65,14 +64,14 @@ fn waitAndDispatch(w: *Window, max_ms: i32) !bool {
 /// (-1 = forever) shortened to the next pending key repeat. Such loops
 /// should call drainPending() after waking so repeats get queued.
 pub fn pollTimeoutMs(w: *const Window, max_ms: i32) i32 {
-    const rep = w.kb.repeat.timeoutMs(keyboard.monotonicMs()) orelse return max_ms;
+    const rep = w.kb.repeat.timeoutMs(sys.monoMs()) orelse return max_ms;
     const r: i32 = @intCast(@min(rep, std.math.maxInt(i32)));
     return if (max_ms < 0) r else @min(max_ms, r);
 }
 
 /// Queue a synthesized key press if the held key is due to repeat.
 fn pumpRepeat(w: *Window) !void {
-    const code = w.kb.repeat.due(keyboard.monotonicMs()) orelse return;
+    const code = w.kb.repeat.due(sys.monoMs()) orelse return;
     var key = keys.translate(w, code, true, false);
     key.repeat = true;
     try w.queue.append(w.alloc, .{ .key = key });
@@ -108,23 +107,15 @@ pub fn handleEvent(w: *Window, ev: wl.Event) !void {
 fn routeConnection(w: *Window, ev: wl.Event, r: *wl.ArgReader) !bool {
     if (ev.object == wl.wl_display.id) {
         // delete_id needs nothing: ids are not recycled
-        if (ev.opcode == wl.wl_display.ev_error) return displayError(r);
+        try ev.checkDisplayError();
     } else if (ev.object == w.globals.registry) {
-        try registry.handleEvent(w, ev.opcode, r);
+        try registry.handleEvent(w, ev);
     } else if (ev.object == w.globals.wm_base and ev.opcode == wl.xdg_wm_base.ev_ping) {
         const serial = try r.uint();
         try w.conn.request(w.globals.wm_base, wl.xdg_wm_base.pong, &.{.{ .uint = serial }});
         try w.conn.flush();
     } else return false;
     return true;
-}
-
-fn displayError(r: *wl.ArgReader) !bool {
-    const obj = try r.uint();
-    const code = try r.uint();
-    const msg = try r.string();
-    std.log.err("wayland protocol error on object {d} code {d}: {s}", .{ obj, code, msg });
-    return error.ProtocolError;
 }
 
 /// Our surfaces' objects and the outputs.
@@ -162,7 +153,7 @@ fn routeSeat(w: *Window, ev: wl.Event, r: *wl.ArgReader) !void {
     } else if (ev.object == w.pointer.id) {
         try pointer.handleEvent(w, ev.opcode, r);
     } else if (ev.object == w.pointer.rel) {
-        if (ev.opcode == 0) try pointer.handleRelative(w, r);
+        if (ev.opcode == wl.zwp_relative_pointer_v1.ev_relative_motion) try pointer.handleRelative(w, r);
     } else if (ev.object == w.keys.id) {
         try keys.handleEvent(w, ev.opcode, r);
     } else if (ev.object == w.text_input.id) {

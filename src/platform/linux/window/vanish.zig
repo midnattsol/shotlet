@@ -23,19 +23,15 @@ const present_timeout_ms = 120;
 
 /// The clear buffers, alive until the surfaces are gone.
 pub const Clear = struct {
-    pool: [window.max_surfaces]u32 = @splat(0),
+    pool: [window.max_surfaces]wl.shm.Pool = @splat(.{}),
     buffer: [window.max_surfaces]u32 = @splat(0),
-    fd: [window.max_surfaces]sys.fd_t = @splat(-1),
 
     /// Drop the buffers and pools (after the surfaces they were on).
     pub fn release(self: *Clear, c: *wl.Connection) void {
-        for (&self.pool, &self.buffer, &self.fd) |*p, *b, *f| {
+        for (&self.pool, &self.buffer) |*p, *b| {
             if (b.* != 0) c.request(b.*, wl.wl_buffer.destroy, &.{}) catch {};
-            if (p.* != 0) c.request(p.*, wl.wl_shm_pool.destroy, &.{}) catch {};
-            if (f.* >= 0) sys.close(f.*);
             b.* = 0;
-            p.* = 0;
-            f.* = -1;
+            p.deinit(c);
         }
     }
 };
@@ -72,7 +68,7 @@ fn minimize(w: *Window) void {
 }
 
 fn wants(s: *const Surface) bool {
-    return s.alive and s.fullscreen and s.pool != 0 and s.width > 0 and s.height > 0;
+    return s.alive and s.fullscreen and s.pool.id != 0 and s.width > 0 and s.height > 0;
 }
 
 fn anyFullscreen(w: *const Window) bool {
@@ -81,24 +77,12 @@ fn anyFullscreen(w: *const Window) bool {
 }
 
 /// Attach a buffer of the surface's size that is transparent all over
-/// (a fresh memfd reads as zeros: no pixels to write), with a frame
+/// (a fresh pool reads as zeros: no pixels to write), with a frame
 /// callback to know when it is on screen.
 fn commitClear(w: *Window, s: *Surface, clear: *Clear, i: usize) !void {
     const c = &w.conn;
-    const size = @as(usize, s.width) * s.height * 4;
-    if (size > std.math.maxInt(i32)) return error.BufferTooLarge;
-    const fd = try sys.memfdCreate("shotlet-clear", sys.MFD_CLOEXEC);
-    clear.fd[i] = fd;
-    try sys.ftruncate(fd, size);
-    clear.pool[i] = c.newId();
-    try c.request(w.globals.shm, wl.wl_shm.create_pool, &.{ .{ .new_id = clear.pool[i] }, .{ .fd = fd }, .{ .int = @intCast(size) } });
-    clear.buffer[i] = c.newId();
-    try c.request(clear.pool[i], wl.wl_shm_pool.create_buffer, &.{
-        .{ .new_id = clear.buffer[i] },    .{ .int = 0 },
-        .{ .int = @intCast(s.width) },     .{ .int = @intCast(s.height) },
-        .{ .int = @intCast(s.width * 4) }, .{ .uint = wl.wl_shm.format_argb8888 },
-    });
-    try c.flush(); // the fd goes out with this
+    clear.pool[i] = try .create(c, w.globals.shm, @as(usize, s.width) * s.height * 4);
+    clear.buffer[i] = try clear.pool[i].buffer(c, 0, s.width, s.height, s.width * 4, wl.wl_shm.format_argb8888);
     try c.request(s.wl_surface, wl.wl_surface.set_opaque_region, &.{.{ .object = 0 }});
     try c.request(s.wl_surface, wl.wl_surface.attach, &.{ .{ .object = clear.buffer[i] }, .{ .int = 0 }, .{ .int = 0 } });
     try c.request(s.wl_surface, wl.wl_surface.damage_buffer, &.{ .{ .int = 0 }, .{ .int = 0 }, .{ .int = @intCast(s.width) }, .{ .int = @intCast(s.height) } });
