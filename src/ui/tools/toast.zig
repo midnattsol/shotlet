@@ -1,7 +1,6 @@
 //! The tools' toast: a small Glass pill at the bottom of the screen
 //! ("#FF453A copied", "Copied: first line of the text", how to install
-//! Tesseract), gone after a few seconds. The editor's copy notice ("Copy
-//! failed") shows in it too.
+//! Tesseract, "Copy failed"), gone after a few seconds.
 
 const render = @import("../../gfx/render.zig");
 const text_mod = @import("../../gfx/text.zig");
@@ -66,15 +65,10 @@ fn now() i64 {
 
 const icon_box = 22;
 
-/// What the toast says now: the editor's copy notice (export.zig sets
-/// it) over the tools' message.
+/// What the toast says now.
 const Shown = struct { badge: badge.Kind, text: []const u8 };
 
 fn shown(ed: *const Editor) ?Shown {
-    switch (ed.copy_notice) {
-        .failed => return .{ .badge = .problem, .text = "Copy failed" },
-        .none => {},
-    }
     const t = &ed.tools.toast;
     if (!t.visible()) return null;
     if (t.swatch) |c| return .{ .badge = .{ .swatch = c }, .text = t.text() };

@@ -8,7 +8,7 @@ const proc = @import("../platform/api.zig").proc;
 const gif = @import("../encode/gif.zig");
 const gifdec = @import("../encode/gifdec.zig");
 const sys = @import("../platform/api.zig").sys;
-const shot = @import("../app/shot.zig");
+const filename = @import("../app/filename.zig");
 
 pub const Range = struct { start_ms: i64, end_ms: i64 };
 
@@ -19,9 +19,7 @@ pub fn outputPath(gpa: std.mem.Allocator, src: []const u8) ![:0]u8 {
     if (dot < slash) return error.BadPath;
     var base_buf: [256]u8 = undefined;
     const base = try std.fmt.bufPrint(&base_buf, "{s}-trim", .{src[slash + 1 .. dot]});
-    const p = try shot.writeUnique(gpa, src[0..slash], base, src[dot..], "");
-    defer gpa.free(p);
-    return gpa.dupeSentinel(u8, p, 0);
+    return filename.reserveUnique(gpa, src[0..slash], base, src[dot..]);
 }
 
 /// Write the part `r` of `src` to `dst` (already reserved).

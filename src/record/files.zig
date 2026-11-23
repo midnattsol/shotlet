@@ -4,6 +4,9 @@
 const std = @import("std");
 const transfer = @import("../ui/transfer.zig");
 const env_mod = @import("../app/env.zig");
+const config = @import("../app/config.zig");
+const deliver = @import("../app/deliver.zig");
+const filename = @import("../app/filename.zig");
 const sys = @import("../platform/api.zig").sys;
 const window = @import("../platform/api.zig").window;
 const desktop = @import("../platform/api.zig").desktop;
@@ -48,22 +51,24 @@ pub fn copyFile(gpa: std.mem.Allocator, src: []const u8, dst: []const u8) !void 
     }
 }
 
-/// Ask where (the desktop's save dialog) and copy the recording there;
-/// the new path, or null when cancelled.
+/// Ask where (the desktop's save dialog, as a screenshot's Save As does:
+/// deliver.askTarget) and copy the recording there; the new path, or null
+/// when cancelled.
 pub fn saveAs(gpa: std.mem.Allocator, env: env_mod.Env, session: *desktop.Session, src: []const u8) !?[]u8 {
     var dir_buf: [1024]u8 = undefined;
-    const set = settings_mod.load(gpa, env.home);
-    const dir = try settings_mod.outputDir(gpa, &set, env.home, &dir_buf);
+    const cfg = config.load(gpa, env.home);
+    const dir = try settings_mod.outputDir(gpa, &cfg.record, env.home, &dir_buf);
     const slash = std.mem.lastIndexOfScalar(u8, src, '/') orelse return error.BadPath;
-    const name = src[slash + 1 ..];
-    const path = switch (try desktop.askSavePath(gpa, session, .{ .title = "Save Recording", .current_name = name, .current_folder = dir }, null)) {
-        .chosen => |p| p,
+    const opts: desktop.SaveOptions = .{ .title = "Save Recording", .current_name = src[slash + 1 ..], .current_folder = dir };
+    const path = switch (try deliver.askTarget(gpa, session, opts, filename.extension(src), null)) {
+        .path => |p| p,
         .cancelled => return null,
         .unavailable => return error.NoFileChooser,
     };
     errdefer gpa.free(path);
     if (std.mem.eql(u8, path, src)) return path;
-    // the chooser asked before replacing a file
+    // the chooser asked before replacing a file (or the name is ours,
+    // reserved with its extension added)
     sys.unlink(path) catch {};
     try copyFile(gpa, src, path);
     return path;

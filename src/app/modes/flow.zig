@@ -17,8 +17,7 @@ const capture = @import("../capture.zig");
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const keep_mod = @import("../keep.zig");
-const save = @import("../shot/save.zig");
-const png = @import("../../gfx/png.zig");
+const deliver_mod = @import("../deliver.zig");
 const doc_mod = @import("../../ui/doc.zig");
 const window = @import("../../platform/api.zig").window;
 const geom = @import("geom.zig");
@@ -85,7 +84,7 @@ fn previous(c: Ctx, cap: *const capture.Capture) ?geom.Rect {
 
 /// A window from the GNOME extension (or KWin): the whole image, framed.
 fn windowShot(c: Ctx, cap: *capture.Capture) !Outcome {
-    const s = settings.load(c.gpa, c.env.home);
+    const s = &c.cfg.modes;
     const scale: f64 = if (cap.monitors[0].logical) |l| @as(f64, @floatFromInt(cap.image.width)) / @as(f64, @floatFromInt(@max(1, l.w))) else 1;
     std.log.info("window capture: {d}x{d}", .{ cap.image.width, cap.image.height });
     cap.image = try window_frame.frame(c.gpa, cap.image, scale, s.window_shadow, beautify(c.cfg));
@@ -106,52 +105,53 @@ pub fn deliverScreen(c: Ctx, cap: *capture.Capture, r: geom.Rect) !void {
 
 /// A screen capture opens the editor (Screen then selects in place).
 pub fn screenOpensEditor(c: Ctx) bool {
-    return settings.load(c.gpa, c.env.home).after == .editor;
+    return c.cfg.modes.after == .editor;
 }
 
 /// Screens and windows: no region to pick, so straight to what the
 /// settings say.
 fn instant(c: Ctx, cap: *capture.Capture, r: geom.Rect, alpha: bool) !Outcome {
-    const s = settings.load(c.gpa, c.env.home);
+    const s = &c.cfg.modes;
     std.log.info("capture mode: {d}x{d} at {d},{d}, then {t}", .{ r.w, r.h, r.x, r.y, s.after });
     if (s.after == .editor) return .{ .edit = .{ .sel = r, .keep_alpha = alpha } };
     // a window is already framed; screens get the beautify frame here
     const b: doc_mod.Beautify = if (alpha) .{} else beautify(c.cfg);
     const exported = try doc_mod.exportImage(c.gpa, cap.image.pixels, cap.image.width, cap.image.height, .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h }, b);
     defer c.gpa.free(exported.pixels);
-    const see_through = alpha or (b.enabled and b.background().transparent());
-    const data = try png.encodeWith(c.gpa, exported.pixels, exported.width, exported.height, .{ .alpha = if (see_through) .auto else .never });
+    const data = try deliver_mod.encodePng(c.gpa, exported, b, alpha);
     errdefer c.gpa.free(data);
     try deliver(c, cap, r, data, settings.delivery(s.after, c.cfg));
     return .done;
 }
 
-/// Save `data` (owned) when asked to, keep it for the thumbnail and the
-/// history, then copy it and serve the clipboard when asked to.
+/// Save `data` (owned) when asked to (deliver.zig: copied too with
+/// copy_on_save, and notified), keep it for the thumbnail and the
+/// history, then copy it when asked to and serve the clipboard.
 fn deliver(c: Ctx, cap: *capture.Capture, r: geom.Rect, data: []u8, d: settings.Delivery) !void {
-    const path: ?[]u8 = if (d.save) saveFile(c, data) else null;
+    const path: ?[]u8 = if (d.save) saveFile(c, data, d.thumbnail) else null;
     defer if (path) |p| c.gpa.free(p);
     var doc = doc_mod.Document.init(c.gpa, cap.image.width, cap.image.height);
     defer doc.deinit();
     doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     const kept = keep_mod.keep(c.gpa, c.env, c.cfg, .{ .image_png = data, .source = &cap.image, .doc = &doc, .saved = path orelse "" });
     if (d.thumbnail) if (kept) |k| keep_mod.spawnQuick(c.gpa, c.env, &k, null);
-    // a save that failed still copies: the capture lands somewhere
-    if (!d.copy and path != null) {
+    // saved: copy_on_save already copied; a save that failed still
+    // copies, so the capture lands somewhere
+    if (path != null) {
         c.gpa.free(data);
+        if (c.win.hasClipboard()) try c.win.serveClipboard();
         return;
     }
     try copy(c, data);
 }
 
 /// Into the screenshots folder; null (logged) when it could not be written.
-fn saveFile(c: Ctx, data: []const u8) ?[]u8 {
-    const path = save.savePng(c.gpa, c.env, c.cfg, data) catch |err| {
+fn saveFile(c: Ctx, data: []const u8, thumbnail: bool) ?[]u8 {
+    const dc: deliver_mod.Ctx = .{ .gpa = c.gpa, .env = c.env, .cfg = c.cfg, .bus = c.conn, .win = c.win, .win_closed = true, .thumbnail_shows = thumbnail, .who = "capture" };
+    return (deliver_mod.savePng(dc, data, .folder) catch |err| {
         std.log.warn("could not save the capture ({t}); copying it instead", .{err});
         return null;
-    };
-    std.log.info("capture saved to {s}", .{path});
-    return path;
+    }).?;
 }
 
 /// Put `data` (owned) on the clipboard and serve it.
@@ -168,8 +168,7 @@ fn copy(c: Ctx, data: []u8) !void {
 /// Pick a region, scroll it and stitch; the tall image replaces the
 /// capture and opens in the editor.
 fn scrolling(c: Ctx, cap: *capture.Capture) !Outcome {
-    const s = settings.load(c.gpa, c.env.home);
-    var tall = (scroll.run(c, cap, s) catch |err| {
+    var tall = (scroll.run(c, cap, c.cfg.modes) catch |err| {
         std.log.warn("scrolling capture failed ({t})", .{err});
         return .done;
     }) orelse return .done;

@@ -3,9 +3,8 @@
 //! in place, show the window menu (Keep on Top), close it or every pin.
 
 const std = @import("std");
-const png = @import("../../gfx/png.zig");
 const config = @import("../config.zig");
-const shot = @import("../shot.zig");
+const deliver = @import("../deliver.zig");
 const desktop = @import("../../platform/api.zig").desktop;
 const sys = @import("../../platform/api.zig").sys;
 const state = @import("state.zig");
@@ -72,16 +71,17 @@ fn copy(p: *Pin) !void {
     std.log.info("pin: copied", .{});
 }
 
-/// Where the person says, as the editor's Save As does.
+/// Where the person says, as the editor's Save As does (copy_on_save
+/// and the notification included).
 fn save(p: *Pin) !void {
-    const data = try png.encodeWith(p.gpa, p.img.pixels, p.img.width, p.img.height, .{ .alpha = .auto });
+    const data = try deliver.encodePng(p.gpa, .{ .pixels = p.img.pixels, .width = p.img.width, .height = p.img.height }, .{}, true);
     defer p.gpa.free(data);
     var bus = try desktop.connect(p.gpa, p.env);
     defer bus.deinit();
     const cfg = config.load(p.gpa, p.env.home);
-    const path = (try shot.saveAs(p.gpa, p.env, &bus, &cfg, data, p.win)) orelse return;
-    defer p.gpa.free(path);
-    std.log.info("pin: saved to {s}", .{path});
+    const c: deliver.Ctx = .{ .gpa = p.gpa, .env = p.env, .cfg = &cfg, .bus = &bus, .win = p.win, .over = p.win, .who = "pin" };
+    const path = (try deliver.savePng(c, data, .ask)) orelse return;
+    p.gpa.free(path);
 }
 
 /// Locked, clicks go through the pin to what lies below, but for its

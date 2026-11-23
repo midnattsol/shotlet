@@ -8,8 +8,7 @@ const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../config.zig");
 const env_mod = @import("../env.zig");
 const history = @import("../history.zig");
-const keep = @import("../keep.zig");
-const shot = @import("../shot.zig");
+const deliver = @import("../deliver.zig");
 const ocr_search = @import("../../ocr/search.zig");
 const sys = @import("../../platform/api.zig").sys;
 const png = @import("../../gfx/png.zig");
@@ -179,24 +178,20 @@ pub const Panel = struct {
 
     fn actInner(self: *Panel, i: usize, a: Action) !void {
         const it = &self.items.items[i];
-        const id = it.entry.id.slice();
-        var pbuf: [1200]u8 = undefined;
-        const image = try history.entryPath(&pbuf, self.root(), id, "image.png");
+        const e: deliver.Entry = .{ .root = self.root(), .id = it.entry.id.slice(), .meta = &it.entry.meta };
         switch (a) {
-            .copy => try self.copy(id, image),
-            .save => try self.save(it, image),
-            .annotate => {
-                if (!it.entry.editable) return;
-                try self.annotate(id);
+            .copy => {
+                try e.copy(self.ctx());
+                self.say("Copied");
             },
-            .pin => {
-                const p = try self.gpa.dupeSentinel(u8, image, 0);
-                defer self.gpa.free(p);
-                keep.spawnPin(self.env, p, it.entry.meta.at);
-            },
+            // saving here is saving from the editor: copy_on_save, and a
+            // notification (no thumbnail reports it)
+            .save => if (try e.save(self.ctx(), .folder)) self.say("Saved"),
+            .annotate => if (it.entry.editable) try e.edit(self.gpa, self.env),
+            .pin => try e.pin(self.gpa, self.env),
             .delete => {
-                try history.remove(self.root(), id);
-                std.log.info("history: deleted {s}", .{id});
+                try history.remove(self.root(), e.id);
+                std.log.info("history: deleted {s}", .{e.id});
                 self.selected = null;
                 try self.load();
                 try self.resize();
@@ -205,37 +200,8 @@ pub const Panel = struct {
         self.dirty = true;
     }
 
-    fn copy(self: *Panel, id: []const u8, image: []const u8) !void {
-        const data = try sys.readFileAlloc(self.gpa, image, 512 * 1024 * 1024);
-        self.win.setClipboardPng(data) catch |err| {
-            self.gpa.free(data);
-            return err;
-        };
-        std.log.info("history: copied {s}", .{id});
-        self.say("Copied");
-    }
-
-    /// Save to the save folder and remember where in the entry's meta.
-    fn save(self: *Panel, it: *Item, image: []const u8) !void {
-        const data = try sys.readFileAlloc(self.gpa, image, 512 * 1024 * 1024);
-        defer self.gpa.free(data);
-        const path = try shot.savePng(self.gpa, self.env, &self.cfg, data);
-        defer self.gpa.free(path);
-        self.gpa.free(it.entry.meta.saved);
-        it.entry.meta.saved = &.{};
-        it.entry.meta.saved = try self.gpa.dupe(u8, path);
-        history.writeMeta(self.gpa, self.root(), it.entry.id.slice(), &it.entry.meta) catch {};
-        std.log.info("history: saved to {s}", .{path});
-        self.say("Saved");
-    }
-
-    /// Open the capture in the editor (a new process).
-    fn annotate(self: *Panel, id: []const u8) !void {
-        const r = try self.gpa.dupeSentinel(u8, self.root(), 0);
-        defer self.gpa.free(r);
-        const idz = try self.gpa.dupeSentinel(u8, id, 0);
-        defer self.gpa.free(idz);
-        keep.spawnSelf(self.env, &.{ "edit", r.ptr, idz.ptr });
+    fn ctx(self: *Panel) deliver.Ctx {
+        return .{ .gpa = self.gpa, .env = self.env, .cfg = &self.cfg, .bus = self.bus_(), .win = &self.win, .who = "history" };
     }
 
     pub fn clearAll(self: *Panel) !void {

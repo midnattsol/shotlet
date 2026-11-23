@@ -53,7 +53,6 @@ pub const Tool = shapes_mod.Tool;
 pub const scrollSteps = @import("scroll_steps.zig").scrollSteps;
 pub const RectList = @import("rect_list.zig").RectList;
 pub const Action = types.Action;
-pub const CopyNotice = types.CopyNotice;
 pub const Result = types.Result;
 pub const DragMode = types.DragMode;
 pub const max_panes = types.max_panes;
@@ -167,8 +166,6 @@ pub const Editor = struct {
     smoke_deadline_ms: i64 = 0, // dev: auto-cancel timestamp (0 = off)
     cfg_thickness: i32 = 3,
     binds: [config.n_actions]config.Bind = config.default_binds,
-    copy_notice: CopyNotice = .none,
-    copy_notice_hide_at_ms: i64 = 0,
     preset_sel: ?[4]i32 = null,
     /// the image has see-through pixels worth keeping (a window capture)
     keep_alpha: bool = false,
