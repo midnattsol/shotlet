@@ -64,7 +64,7 @@ pub fn takeDrop(gpa: std.mem.Allocator, env: Env, win: *window.Window) void {
     win.dropped = null;
     defer gpa.free(d.data);
     if (win.drag_state != .none) return;
-    var buf: [1024]u8 = undefined;
+    var buf: env_mod.PathBuf = undefined;
     const path = if (std.mem.eql(u8, d.mime, "text/uri-list"))
         imgload.firstFileUri(buf[0 .. buf.len - 1], d.data) orelse return
     else
@@ -81,11 +81,8 @@ pub fn takeDrop(gpa: std.mem.Allocator, env: Env, win: *window.Window) void {
 fn savedDrop(gpa: std.mem.Allocator, env: Env, data: []const u8, buf: []u8) ![]const u8 {
     _ = gpa;
     if (imgload.sniff(data) == .unknown) return error.UnknownImageFormat;
-    var dir_buf: [1024]u8 = undefined;
-    const cache = try env_mod.cacheDir(&dir_buf, env.home);
-    var drop_dir: [1100]u8 = undefined;
-    const dir = try std.fmt.bufPrint(&drop_dir, "{s}/drop", .{cache});
-    sys.mkdirAll(dir, 0o700);
+    var dir_buf: env_mod.PathBuf = undefined;
+    const dir = try env_mod.ensureCacheDir(&dir_buf, env.home, "drop");
     const path = try std.fmt.bufPrint(buf[0 .. buf.len - 1], "{s}/dropped-{d}.png", .{ dir, sys.realtimeMs() });
     try sys.writeFileExclusive(path, data, 0o600);
     return path;

@@ -104,6 +104,11 @@ pub fn waitReadable(fd: fd_t, deadline_ms: ?i64) Error!bool {
     _ = .{ fd, deadline_ms };
     return error.SyscallFailed;
 }
+/// Read `fd` until EOF, `max` bytes or the deadline (none: no limit).
+pub fn readBounded(alloc: std.mem.Allocator, fd: fd_t, max: usize, deadline_ms: ?i64) Error![]u8 {
+    _ = .{ alloc, fd, max, deadline_ms };
+    return error.SyscallFailed;
+}
 pub fn fsync(fd: fd_t) void {
     _ = fd;
 }
@@ -141,6 +146,13 @@ pub fn writeFileExclusive(path: []const u8, data: []const u8, mode: u32) Error!v
 }
 pub fn writeFile(path: []const u8, data: []const u8) Error!void {
     _ = .{ path, data };
+    return error.AccessDenied;
+}
+/// Replace the file at `path` with `data` atomically (a temp file beside
+/// it, created exclusively with `mode`, synced, renamed over it); a
+/// symlink at `path` is replaced, never followed.
+pub fn writeAtomic(path: []const u8, data: []const u8, mode: u32) Error!void {
+    _ = .{ path, data, mode };
     return error.AccessDenied;
 }
 pub fn readFileAlloc(alloc: std.mem.Allocator, path: []const u8, max: usize) Error![]u8 {

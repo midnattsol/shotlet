@@ -15,7 +15,7 @@ const Env = env_mod.Env;
 /// user's XDG Pictures directory.
 fn saveDir(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, buf: []u8) ![]u8 {
     if (cfg.saveDir()) |d| return env_mod.expandHome(buf, env.home, d);
-    return env_mod.picturesDir(gpa, buf, env.home);
+    return env_mod.userDir(gpa, buf, env.home, .pictures);
 }
 
 /// "shotlet-20260701-140501" in local time.

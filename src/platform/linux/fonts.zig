@@ -5,7 +5,8 @@
 //! caller (free with the same allocator).
 
 const std = @import("std");
-const linux = std.os.linux;
+const sys = @import("sys.zig");
+const env_mod = @import("../../app/env.zig");
 
 const types = @import("../api/fonts.zig");
 pub const Query = types.Query;
@@ -141,43 +142,27 @@ fn isFontFile(name: []const u8) bool {
 /// Recursively collect font file paths under `dir` (bounded depth/count).
 fn scanDir(alloc: std.mem.Allocator, out: *std.ArrayList([]u8), dir: []const u8, depth: u8) void {
     if (depth > 8 or out.items.len > 50_000) return;
-    var pathz: [4096]u8 = undefined;
-    if (dir.len >= pathz.len) return;
-    @memcpy(pathz[0..dir.len], dir);
-    pathz[dir.len] = 0;
-    const rc = linux.openat(linux.AT.FDCWD, pathz[0..dir.len :0].ptr, .{ .ACCMODE = .RDONLY, .DIRECTORY = true, .CLOEXEC = true }, 0);
-    if (linux.errno(rc) != .SUCCESS) return;
-    const fd: i32 = @intCast(rc);
-    defer _ = linux.close(fd);
+    const Scan = struct {
+        alloc: std.mem.Allocator,
+        out: *std.ArrayList([]u8),
+        dir: []const u8,
+        depth: u8,
 
-    var buf: [8192]u8 align(8) = undefined;
-    while (true) {
-        const n = linux.getdents64(fd, &buf, buf.len);
-        if (linux.errno(n) != .SUCCESS or n == 0) return;
-        var off: usize = 0;
-        while (off + @sizeOf(linux.dirent64) <= n) {
-            const ent: *align(1) const linux.dirent64 = @ptrCast(&buf[off]);
-            const reclen = ent.reclen;
-            if (reclen == 0 or off + reclen > n) return;
-            const name_ptr: [*:0]const u8 = @ptrCast(&buf[off + @offsetOf(linux.dirent64, "name")]);
-            const name = std.mem.span(name_ptr);
-            off += reclen;
-            if (name.len == 0 or name[0] == '.') continue;
-            const child = std.fmt.allocPrint(alloc, "{s}/{s}", .{ dir, name }) catch return;
-            const dt = ent.type;
-            if (dt == linux.DT.DIR or ((dt == linux.DT.LNK or dt == linux.DT.UNKNOWN) and !isFontFile(name))) {
-                scanDir(alloc, out, child, depth + 1);
-                alloc.free(child);
-            } else if (isFontFile(name)) {
-                out.append(alloc, child) catch {
-                    alloc.free(child);
-                    return;
-                };
-            } else {
-                alloc.free(child);
-            }
+        fn visit(self: *const @This(), name: []const u8, kind: sys.EntryKind) void {
+            if (name.len == 0 or name[0] == '.') return;
+            const font = isFontFile(name);
+            // a link or an entry of unknown kind may be a directory
+            const descend = kind == .dir or ((kind == .symlink or kind == .other) and !font);
+            if (!descend and !font) return;
+            const child = std.fmt.allocPrint(self.alloc, "{s}/{s}", .{ self.dir, name }) catch return;
+            if (descend) {
+                defer self.alloc.free(child);
+                scanDir(self.alloc, self.out, child, self.depth + 1);
+            } else self.out.append(self.alloc, child) catch self.alloc.free(child);
         }
-    }
+    };
+    const scan: Scan = .{ .alloc = alloc, .out = out, .dir = dir, .depth = depth };
+    sys.eachEntry(dir, &scan, Scan.visit) catch {};
 }
 
 pub const Db = struct {
@@ -214,19 +199,19 @@ pub const Db = struct {
             var list: std.ArrayList([]u8) = .empty;
             const roots = [_][]const u8{ "/usr/share/fonts", "/usr/local/share/fonts" };
             for (roots) |r| scanDir(self.alloc, &list, r, 0);
-            if (std.c.getenv("XDG_DATA_HOME")) |x| {
-                if (std.fmt.allocPrint(self.alloc, "{s}/fonts", .{std.mem.span(x)})) |p| {
+            // the user's own: $XDG_DATA_HOME/fonts (~/.local/share/fonts), ~/.fonts
+            if (env_mod.xdg.home) |home| {
+                var buf: env_mod.PathBuf = undefined;
+                if (env_mod.dataHome(&buf, home)) |data| {
+                    if (std.fmt.allocPrint(self.alloc, "{s}/fonts", .{data})) |p| {
+                        scanDir(self.alloc, &list, p, 0);
+                        self.alloc.free(p);
+                    } else |_| {}
+                } else |_| {}
+                if (std.fmt.allocPrint(self.alloc, "{s}/.fonts", .{home})) |p| {
                     scanDir(self.alloc, &list, p, 0);
                     self.alloc.free(p);
                 } else |_| {}
-            }
-            if (std.c.getenv("HOME")) |h| {
-                const home = std.mem.span(h);
-                for ([_][]const u8{ ".local/share/fonts", ".fonts" }) |rel| {
-                    const p = std.fmt.allocPrint(self.alloc, "{s}/{s}", .{ home, rel }) catch continue;
-                    scanDir(self.alloc, &list, p, 0);
-                    self.alloc.free(p);
-                }
             }
             self.files = list;
         }

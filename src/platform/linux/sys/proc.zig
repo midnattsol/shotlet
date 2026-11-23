@@ -30,3 +30,10 @@ pub fn exitProcess(code: u8) noreturn {
 pub fn processId() u32 {
     return @intCast(linux.getpid());
 }
+
+/// This program's own path (/proc/self/exe), into `buf`.
+pub fn selfExe(buf: []u8) ![]const u8 {
+    const rc = linux.readlinkat(linux.AT.FDCWD, "/proc/self/exe", buf.ptr, buf.len);
+    if (linux.errno(rc) != .SUCCESS or rc >= buf.len) return error.NoExe;
+    return buf[0..rc];
+}

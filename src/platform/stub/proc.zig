@@ -45,9 +45,9 @@ pub fn processEnv(environ: anytype) Envp {
 }
 const empty = [_:null]?[*:0]const u8{};
 
-/// The program's absolute path on PATH (into buf), or null.
-pub fn which(buf: []u8, name: []const u8) ?[:0]const u8 {
-    _ = .{ buf, name };
+/// The program's absolute path on the PATH of `envp` (into buf), or null.
+pub fn which(buf: []u8, envp: Envp, name: []const u8) ?[:0]const u8 {
+    _ = .{ buf, envp, name };
     return null;
 }
 

@@ -1,23 +1,24 @@
 //! What the editor remembers between captures: the beautify frame's
-//! style, whether every capture starts with it ("always apply"), whether
-//! the first-run hint was shown and the magnifier's zoom (in the config
-//! file), whether the magnifier's hint was (zoom_hint.zig). Beautify
-//! itself is per capture.
+//! style, whether every capture starts with it ("always apply") and the
+//! magnifier's zoom (in the config file); whether the first-run hint and
+//! the magnifier's hint were shown (state flags, stateflag.zig).
+//! Beautify itself is per capture.
 
 const std = @import("std");
 const config = @import("config.zig");
-const zoom_hint = @import("zoom_hint.zig");
+const stateflag = @import("stateflag.zig");
 const Env = @import("env.zig").Env;
 
-/// Store the editor's beautify style, "always apply", the first-run
-/// hint flag and the magnifier's zoom, only the keys that changed (other
-/// settings in the file are left alone); the magnifier's hint once shown.
+/// Store the editor's beautify style, "always apply" and the
+/// magnifier's zoom, only the keys that changed (other settings in the
+/// file are left alone); the hints once shown.
 pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed: anytype) void {
-    if (ed.loupe.hint.seen) zoom_hint.remember(env.home);
+    if (ed.loupe.hint.seen) stateflag.set(env.home, .zoom_hint);
+    if (ed.hint_seen and !cfg.hint_shown) stateflag.set(env.home, .editor_hint);
     const b = ed.beautify;
     var bg_buf: [8]u8 = undefined;
     var zoom_buf: [8]u8 = undefined;
-    var changes: [7]config.Change = undefined;
+    var changes: [6]config.Change = undefined;
     var n: usize = 0;
     const tf = struct {
         fn s(v: bool) []const u8 {
@@ -42,10 +43,6 @@ pub fn remember(gpa: std.mem.Allocator, env: Env, cfg: *const config.Config, ed:
     }
     if (b.shadow != cfg.beautify_shadow) {
         changes[n] = .{ .key = "beautify_shadow", .value = tf(b.shadow) };
-        n += 1;
-    }
-    if (ed.hint_seen and !cfg.hint_shown) {
-        changes[n] = .{ .key = "hint_shown", .value = "true" };
         n += 1;
     }
     if (ed.loupe.zoom != cfg.loupe_zoom) {

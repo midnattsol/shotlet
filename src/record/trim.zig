@@ -37,7 +37,7 @@ fn seconds(buf: []u8, ms: i64) ![:0]u8 {
 
 fn cutMp4(gpa: std.mem.Allocator, envp: proc.Envp, src: []const u8, dst: [:0]const u8, r: Range) !void {
     var exe_buf: [512]u8 = undefined;
-    const exe = proc.which(&exe_buf, "ffmpeg") orelse return error.NoFfmpeg;
+    const exe = proc.which(&exe_buf, envp, "ffmpeg") orelse return error.NoFfmpeg;
     const srcz = try gpa.dupeSentinel(u8, src, 0);
     defer gpa.free(srcz);
     var a: [32]u8 = undefined;
@@ -83,7 +83,7 @@ fn cutGif(gpa: std.mem.Allocator, src: []const u8, dst: [:0]const u8, r: Range) 
 /// The first picture of an MP4 at `ms`, as 0xFFRRGGBB w x h (ffmpeg).
 pub fn frameAt(gpa: std.mem.Allocator, envp: proc.Envp, path: []const u8, ms: i64, w: u32, h: u32) ![]u32 {
     var exe_buf: [512]u8 = undefined;
-    const exe = proc.which(&exe_buf, "ffmpeg") orelse return error.NoFfmpeg;
+    const exe = proc.which(&exe_buf, envp, "ffmpeg") orelse return error.NoFfmpeg;
     const pz = try gpa.dupeSentinel(u8, path, 0);
     defer gpa.free(pz);
     var a: [32]u8 = undefined;

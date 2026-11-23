@@ -5,27 +5,22 @@ const std = @import("std");
 const sys = @import("../platform/api.zig").sys;
 
 /// Read `fd` until EOF, `max_bytes` or the deadline, whichever comes
-/// first; a cut never splits a UTF-8 sequence. Caller owns the bytes.
+/// first (sys.readBounded); a cut never splits a UTF-8 sequence. Caller
+/// owns the bytes.
 pub fn readBounded(alloc: std.mem.Allocator, fd: sys.fd_t, max_bytes: usize, deadline_ms: i64) ![]u8 {
-    var out: std.ArrayList(u8) = .empty;
-    errdefer out.deinit(alloc);
-    var buf: [4096]u8 = undefined;
-    while (out.items.len < max_bytes) {
-        if (!try sys.waitReadable(fd, deadline_ms)) break; // timed out
-        const n = try sys.read(fd, buf[0..@min(buf.len, max_bytes - out.items.len)]);
-        if (n == 0) break;
-        try out.appendSlice(alloc, buf[0..n]);
-    }
-    if (out.items.len == max_bytes) {
-        // drop a trailing partial character
-        var i = out.items.len;
-        while (i > 0 and (out.items[i - 1] & 0xC0) == 0x80) i -= 1;
-        if (i > 0 and out.items[i - 1] >= 0xC0) {
-            const need = std.unicode.utf8ByteSequenceLength(out.items[i - 1]) catch 1;
-            if (out.items.len - (i - 1) < need) out.shrinkRetainingCapacity(i - 1);
+    const out = try sys.readBounded(alloc, fd, max_bytes, deadline_ms);
+    if (out.len < max_bytes) return out;
+    // drop a trailing partial character
+    var i = out.len;
+    while (i > 0 and (out[i - 1] & 0xC0) == 0x80) i -= 1;
+    if (i > 0 and out[i - 1] >= 0xC0) {
+        const need = std.unicode.utf8ByteSequenceLength(out[i - 1]) catch 1;
+        if (out.len - (i - 1) < need) {
+            defer alloc.free(out);
+            return alloc.dupe(u8, out[0 .. i - 1]);
         }
     }
-    return out.toOwnedSlice(alloc);
+    return out;
 }
 
 test "bounded reads stop at EOF, the size limit and the deadline" {

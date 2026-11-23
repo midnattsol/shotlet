@@ -622,8 +622,13 @@ own decoder (baseline); progressive JPEGs need `libturbojpeg` and WebP
 | Thumbnails with the history off, dragged files | `$XDG_CACHE_HOME/shotlet/` (`quick/`, `drag/`) |
 | Recordings | the `record_dir` setting, else your XDG Videos folder, else `~/Videos`; kept entries add `video` (path, length, size) and `strip.png` (the filmstrip) |
 | GNOME Shell extension | `~/.local/share/gnome-shell/extensions/shotlet@midnattsol.github.io` |
-| Capture path | `$XDG_STATE_HOME/shotlet/capture-path`: how the last capture went (`gnome`, `direct`, `portal`) |
+| Capture path | `$XDG_STATE_HOME/shotlet/capture-path`: how the last capture went (`shell`, `direct`, `portal`) |
 | Pending GNOME setup | `$XDG_STATE_HOME/shotlet/gnome-setup-pending`: install's answer, until the extension loads |
+| Hints already shown | `$XDG_STATE_HOME/shotlet/editor-hint-shown`, `zoom-hint-shown` (empty files) |
+| Moved GNOME shortcuts | `$XDG_CONFIG_HOME/shotlet/gnome-moved-shortcuts`, `gnome-moved-keys`: what `gnome-integration uninstall` puts back |
+
+Shotlet's own state and record files are private (0600, in 0700
+directories) and replaced atomically, never written through a symlink.
 
 The settings file is plain `key=value`. Shotlet only rewrites the keys it
 changes, so editing it by hand while Shotlet runs is safe.
@@ -786,6 +791,36 @@ trixie's wlroots offers only wlr-screencopy; `Containerfile.sid` builds
 ext-image-copy-capture path: `CTR_IMAGE=shotlet-e2e:sid
 tools/container/run.sh sway:capture sway:multimon sway:rotated`. CI runs it nightly and on demand
 (`.github/workflows/e2e-container.yml`).
+
+### Debugging and test switches
+
+Every `SHOTLET_*` variable the program reads, read once at startup
+(`src/platform/api/switches.zig` holds the same table). A switch that
+turns something off is on when set at all (`=1`); the others take a value.
+
+| Variable | Effect | Read by |
+| --- | --- | --- |
+| `SHOTLET_NO_DIRECT` | never capture straight from the compositor (ext-image-copy / wlr-screencopy / KWin): the portal or the GNOME integration only | `platform/linux/capture*` |
+| `SHOTLET_NO_LAYER_SHELL` | ignore wlr-layer-shell: floating windows become plain toplevels | `platform/linux/window/registry.zig` |
+| `SHOTLET_NO_FRACTIONAL` | ignore wp-fractional-scale: integer buffer scales only | `platform/linux/window/registry.zig` |
+| `SHOTLET_NO_CURSOR_SHAPE` | ignore cursor-shape-v1: Shotlet draws its own cursors | `platform/linux/window/registry.zig` |
+| `SHOTLET_NO_SHELL_RECORD` | record through the ScreenCast portal even when the GNOME integration could | `platform/linux/record/source.zig` |
+| `SHOTLET_NO_LIBAV` | do not load the FFmpeg libraries (MP4s go through the `ffmpeg` program) | `encode/av.zig` |
+| `SHOTLET_NO_VAAPI` | no VA-API hardware encoding through the `ffmpeg` program | `encode/ffmpeg_proc.zig` |
+| `SHOTLET_NO_OCR` | do not load Tesseract: no text recognition or search | `ocr/tesseract.zig` |
+| `SHOTLET_ENCODER=libav\|ffmpeg` | force one MP4 encoder path | `encode/sink.zig` |
+| `SHOTLET_OCR_LANG=eng+spa` | Tesseract's languages (default: the desktop's language plus English) | `ocr/tesseract.zig` |
+| `SHOTLET_DUMP_FRAME=/path/prefix` | each window surface's last frame goes to `<prefix>-<n>.png` when it closes | `platform/linux/window/dump.zig` |
+| `SHOTLET_EDITOR_DUMP=/path/prefix` | the editor writes every pane's last frame and the export at exit | `ui/editor/session.zig` |
+| `SHOTLET_EDITOR_SCRIPT="key ...; quit"` | scripted editor input (`ui/script_input.zig`); turns animations off | `ui/editor/session.zig` |
+| `SHOTLET_SETTINGS_FOCUS=n` | Settings starts with its n-th control focused | `ui/settings/app.zig` |
+| `SHOTLET_SETTINGS_VIEW=general\|editor\|shortcuts\|recording` | the view Settings starts on | `ui/settings/app.zig` |
+
+Only the tests read these: `SHOTLET_LIVE_WINDOW_TEST=1` (with
+`SHOTLET_LIVE_WAIT_MS`) runs the window unit test against a live
+compositor (inside `tools/headless.sh` only); `SHOTLET_CONTAINER` and
+`SHOTLET_BIN` are set by the container runner; `E2E_OUT` keeps an
+end-to-end run's logs and screenshots.
 
 ## License
 

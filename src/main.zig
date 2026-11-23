@@ -6,6 +6,7 @@ const Env = env_mod.Env;
 const launch = @import("ui/tools/launch.zig");
 const desktop = @import("platform/api.zig").desktop;
 const proc = @import("platform/api.zig").proc;
+const switches = @import("platform/api/switches.zig");
 
 const is_debug = @import("builtin").mode == .debug;
 
@@ -26,9 +27,12 @@ pub fn main(init: std.process.Init) !void {
     };
     const gpa = if (is_debug) gpa_state.allocator() else std.heap.smp_allocator;
 
+    // the environment is read here, once: switches and XDG directories
+    // for code handed no Env, then the Env everyone else gets
+    switches.init(init.environ_map);
+    env_mod.xdg = .read(init.environ_map);
     const env = try readEnv(arena, init);
     launch.env = env;
-    setXdgDirs(init.environ_map);
     try @import("app/dispatch.zig").run(gpa, env, parsed);
 }
 
@@ -42,15 +46,6 @@ fn readEnv(arena: std.mem.Allocator, init: std.process.Init) !Env {
         .home = env_mod.absolute(vars.get("HOME")) orelse return error.NoHome,
         .envp = proc.processEnv(init.minimal.environ),
         .tz = vars.get("TZ"),
-    };
-}
-
-fn setXdgDirs(vars: anytype) void {
-    env_mod.xdg = .{
-        .config_home = env_mod.absolute(vars.get("XDG_CONFIG_HOME")),
-        .state_home = env_mod.absolute(vars.get("XDG_STATE_HOME")),
-        .pictures_dir = env_mod.absolute(vars.get("XDG_PICTURES_DIR")),
-        .cache_home = env_mod.absolute(vars.get("XDG_CACHE_HOME")),
     };
 }
 
@@ -85,7 +80,7 @@ test {
     _ = @import("app/binds.zig");
     _ = @import("app/quick_ipc.zig");
     _ = @import("app/editor_prefs.zig");
-    _ = @import("app/zoom_hint.zig");
+    _ = @import("app/stateflag.zig");
     _ = @import("ui/beautify.zig");
     _ = @import("ui/drag.zig");
     _ = @import("ui/help.zig");
@@ -124,6 +119,8 @@ test {
     _ = @import("gfx/resample.zig");
     _ = @import("app/capture.zig");
     _ = @import("app/env.zig");
+    _ = @import("app/statefile.zig");
+    _ = switches;
     _ = @import("app/clock.zig");
     _ = @import("app/shot.zig");
     _ = @import("gfx/font.zig");

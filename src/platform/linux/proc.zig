@@ -3,7 +3,7 @@
 //! Shotlet itself started detached (the thumbnail, toasts, the editor).
 
 const std = @import("std");
-const sys = @import("../api.zig").sys;
+const sys = @import("sys.zig");
 const linux = std.os.linux;
 
 pub const Envp = [*:null]const ?[*:0]const u8;
@@ -47,8 +47,7 @@ pub const Child = struct {
                 _ = linux.wait4(self.pid, &status, 0, null);
                 return null;
             }
-            var ts: linux.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
-            _ = linux.nanosleep(&ts, null);
+            sys.sleepMs(10);
         }
         const st: u32 = @bitCast(status);
         if (linux.W.IFEXITED(st)) return linux.W.EXITSTATUS(st);
@@ -67,9 +66,19 @@ pub fn processEnv(environ: anytype) Envp {
     return environ.block.slice.ptr;
 }
 
-/// The program's absolute path on PATH (into buf), or null.
-pub fn which(buf: []u8, name: []const u8) ?[:0]const u8 {
-    const path = if (std.c.getenv("PATH")) |p| std.mem.span(p) else "/usr/local/bin:/usr/bin:/bin";
+/// The value of `name` in `envp` ("PATH"), or null.
+pub fn envValue(envp: Envp, name: []const u8) ?[]const u8 {
+    var i: usize = 0;
+    while (envp[i]) |e| : (i += 1) {
+        const s = std.mem.span(e);
+        if (s.len > name.len and s[name.len] == '=' and std.mem.startsWith(u8, s, name)) return s[name.len + 1 ..];
+    }
+    return null;
+}
+
+/// The program's absolute path on the PATH of `envp` (into buf), or null.
+pub fn which(buf: []u8, envp: Envp, name: []const u8) ?[:0]const u8 {
+    const path = envValue(envp, "PATH") orelse "/usr/local/bin:/usr/bin:/bin";
     var it = std.mem.splitScalar(u8, path, ':');
     while (it.next()) |dir| {
         if (dir.len == 0 or dir[0] != '/') continue;
@@ -176,28 +185,23 @@ pub fn hwEncodeDevices(buf: *[2][:0]const u8) []const [:0]const u8 {
     return buf[0..n];
 }
 
-/// Run to completion, collecting stdout (at most `max` bytes).
+/// Run to completion, collecting stdout (at most `max` bytes, else
+/// error.TooMuchOutput); killed once `timeout_ms` has passed.
 pub fn output(gpa: std.mem.Allocator, argv: []const ?[*:0]const u8, envp: Envp, max: usize, timeout_ms: i64) !struct { status: ?u8, out: []u8 } {
     var c = try spawn(argv, envp, .{ .stdout = true });
-    var buf: std.ArrayList(u8) = .empty;
-    errdefer buf.deinit(gpa);
+    errdefer c.kill();
     const deadline = sys.monoMs() + timeout_ms;
-    var chunk: [65536]u8 = undefined;
-    while (sys.monoMs() < deadline) {
-        if (!(sys.waitReadable(c.stdout.?, deadline) catch false)) break;
-        const n = sys.read(c.stdout.?, &chunk) catch break;
-        if (n == 0) break;
-        if (buf.items.len + n > max) return error.TooMuchOutput;
-        try buf.appendSlice(gpa, chunk[0..n]);
-    }
+    const out = try sys.readBounded(gpa, c.stdout.?, max + 1, deadline);
+    errdefer gpa.free(out);
+    if (out.len > max) return error.TooMuchOutput;
     const st = c.wait(@max(0, deadline - sys.monoMs()));
-    return .{ .status = st, .out = try buf.toOwnedSlice(gpa) };
+    return .{ .status = st, .out = out };
 }
 
 test "spawn runs a program with pipes and reports its status" {
-    var buf: [256]u8 = undefined;
-    const sh = which(&buf, "sh") orelse return error.SkipZigTest;
     const envp: Envp = @ptrCast(std.c.environ);
+    var buf: [256]u8 = undefined;
+    const sh = which(&buf, envp, "sh") orelse return error.SkipZigTest;
     const gpa = std.testing.allocator;
     const r = try output(gpa, &.{ sh.ptr, "-c", "echo hi; exit 3" }, envp, 1024, 5000);
     defer gpa.free(r.out);
@@ -208,4 +212,12 @@ test "spawn runs a program with pipes and reports its status" {
     var c = try spawn(&.{ sh.ptr, "-c", "cat <&3 >/dev/null; cat >/dev/null" }, envp, .{ .stdin = true, .fd3 = true });
     try sys.writeAll(c.fd3.?, "abc");
     try std.testing.expectEqual(@as(?u8, 0), c.wait(5000));
+}
+
+test "variables are found in an environment block" {
+    const envp = [_:null]?[*:0]const u8{ "PATHX=/no", "PATH=/a:/b", "HOME=/h" };
+    try std.testing.expectEqualStrings("/a:/b", envValue(&envp, "PATH").?);
+    try std.testing.expect(envValue(&envp, "PAT") == null);
+    var buf: [64]u8 = undefined;
+    try std.testing.expect(which(&buf, &envp, "sh") == null);
 }

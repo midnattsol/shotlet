@@ -2,7 +2,6 @@
 //! clock (tests feed it a fake one).
 
 const std = @import("std");
-const linux = std.os.linux;
 
 /// Deadline-based key repeat, driven by wl_keyboard.repeat_info. The window
 /// asks `timeoutMs` how long it may sleep and calls `due` when it wakes.
@@ -61,12 +60,6 @@ pub const Repeat = struct {
         return self.code;
     }
 };
-
-pub fn monotonicMs() i64 {
-    var ts: linux.timespec = undefined;
-    _ = linux.clock_gettime(.MONOTONIC, &ts);
-    return @as(i64, ts.sec) * 1000 + @divTrunc(ts.nsec, 1_000_000);
-}
 
 const testing = std.testing;
 

@@ -10,6 +10,7 @@
 //! use they are checked against the defaults the allocators put there.
 
 const std = @import("std");
+const switches = @import("../platform/api/switches.zig");
 const dynlib = @import("../platform/api.zig").libs;
 
 pub const Ctx = anyopaque;
@@ -92,7 +93,7 @@ fn openAny(base: []const u8, versions: []const []const u8) ?dynlib.Lib {
 }
 
 fn load() bool {
-    if (std.c.getenv("SHOTLET_NO_LIBAV") != null) {
+    if (switches.get().no_libav) {
         why_missing = "turned off (SHOTLET_NO_LIBAV)";
         return false;
     }

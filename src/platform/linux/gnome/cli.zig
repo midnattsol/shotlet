@@ -103,8 +103,7 @@ fn setCaptureShortcut(gpa: std.mem.Allocator, env: Env, sd: []const u8, accels: 
     defer arena_state.deinit();
     const arena = arena_state.allocator();
     try gsettings.set(arena, env, sd, ext_schema_id, "capture-shortcut", try gnome_keys.userStrv(arena, accels));
-    var ts: std.os.linux.timespec = .{ .sec = 0, .nsec = 200 * std.time.ns_per_ms };
-    _ = std.os.linux.nanosleep(&ts, null);
+    sys.sleepMs(200);
 }
 
 fn runStatus(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) void {

@@ -5,6 +5,7 @@
 //! API is not needed (libtesseract pulls it in itself).
 
 const std = @import("std");
+const switches = @import("../platform/api/switches.zig");
 const SpinLock = @import("spinlock.zig").SpinLock;
 const libs = @import("../platform/api.zig").libs;
 
@@ -33,7 +34,7 @@ pub fn available() bool {
     defer mutex.unlock();
     if (tried) return api != null;
     tried = true;
-    if (std.c.getenv("SHOTLET_NO_OCR") != null) return false;
+    if (switches.get().no_ocr) return false;
     lib = libs.open("tesseract", &.{ "5", "4" });
     var l = &(lib orelse return false);
     var a: Api = undefined;
@@ -50,19 +51,15 @@ pub fn available() bool {
 
 /// Languages to recognise: $SHOTLET_OCR_LANG (e.g. "eng+spa"), else the
 /// desktop's language plus English ("spa+eng" under es_ES), else eng.
-fn languages(buf: *[32]u8) [:0]const u8 {
-    if (std.c.getenv("SHOTLET_OCR_LANG")) |l| return std.mem.span(l);
-    for ([_][*:0]const u8{ "LC_ALL", "LC_MESSAGES", "LANG" }) |name| {
-        const v = std.mem.span(std.c.getenv(name) orelse continue);
-        if (v.len == 0) continue;
-        return localeLanguages(buf, v);
-    }
-    return "eng";
+fn languages(buf: *[128]u8) [:0]const u8 {
+    if (switches.get().ocr_lang) |l| return std.fmt.bufPrintSentinel(buf, "{s}", .{l}, 0) catch "eng";
+    const locale = switches.locale().of(.messages) orelse return "eng";
+    return localeLanguages(buf, locale);
 }
 
 /// Tesseract's language names for a POSIX locale ("es_ES.UTF-8"), with
 /// English as a second language for the Latin text every screen has.
-fn localeLanguages(buf: *[32]u8, locale: []const u8) [:0]const u8 {
+fn localeLanguages(buf: []u8, locale: []const u8) [:0]const u8 {
     const code = locale[0 .. std.mem.indexOfAny(u8, locale, "_.@") orelse locale.len];
     const table = [_][2][]const u8{
         .{ "es", "spa" }, .{ "ca", "cat" },     .{ "gl", "glg" }, .{ "eu", "eus" },
@@ -112,7 +109,7 @@ fn run(alloc: std.mem.Allocator, pixels: []const u32, width: u32, height: u32, w
     }
     const h = a.TessBaseAPICreate() orelse return null;
     defer a.TessBaseAPIDelete(h);
-    var lbuf: [32]u8 = undefined;
+    var lbuf: [128]u8 = undefined;
     const langs = languages(&lbuf);
     if (a.TessBaseAPIInit3(h, null, langs.ptr) != 0) {
         // the locale's language data may not be installed: English alone

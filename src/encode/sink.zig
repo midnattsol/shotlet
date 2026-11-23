@@ -4,6 +4,7 @@
 //! A recording with sound goes to the ffmpeg program.
 
 const std = @import("std");
+const switches = @import("../platform/api/switches.zig");
 const gif = @import("gif.zig");
 const av = @import("av.zig");
 const av_mp4 = @import("av_mp4.zig");
@@ -81,7 +82,7 @@ pub const Sink = struct {
 
     /// SHOTLET_ENCODER=libav|ffmpeg picks one path (tests, bug reports).
     fn forced() ?Backend {
-        const v = std.mem.span(std.c.getenv("SHOTLET_ENCODER") orelse return null);
+        const v = switches.get().encoder orelse return null;
         if (std.mem.eql(u8, v, "libav")) return .libav;
         if (std.mem.eql(u8, v, "ffmpeg")) return .ffmpeg;
         return null;

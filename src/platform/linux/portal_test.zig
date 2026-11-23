@@ -7,7 +7,7 @@ const std = @import("std");
 const dbus = @import("dbus.zig");
 const portal = @import("portal.zig");
 const sys = @import("sys.zig");
-const linux = std.os.linux;
+const proc = @import("proc.zig");
 
 const Mode = enum(u8) { normal, cancel, silent, vanish, mute };
 
@@ -206,7 +206,7 @@ fn findDbusDaemon() ?[:0]const u8 {
 
 const Bus = struct {
     dir: []u8,
-    pid: linux.pid_t,
+    daemon: proc.Child,
     addr: []u8,
 
     fn start(alloc: std.mem.Allocator) !Bus {
@@ -221,10 +221,12 @@ const Bus = struct {
         const arg = try std.fmt.allocPrintSentinel(alloc, "--config-file={s}", .{conf_path}, 0);
         defer alloc.free(arg);
 
-        const pid = try spawnDaemon(daemon, arg);
-        errdefer stopPid(pid);
+        // in the foreground, its output silenced
+        const empty = [_:null]?[*:0]const u8{};
+        var child = proc.spawn(&.{ daemon.ptr, arg.ptr, "--nofork", "--nopidfile" }, &empty, .{}) catch return error.SkipZigTest;
+        errdefer child.kill();
         try waitForSocket(alloc, dir);
-        return .{ .dir = dir, .pid = pid, .addr = try std.fmt.allocPrint(alloc, "unix:path={s}/bus", .{dir}) };
+        return .{ .dir = dir, .daemon = child, .addr = try std.fmt.allocPrint(alloc, "unix:path={s}/bus", .{dir}) };
     }
 
     /// Write a permissive session bus config listening in `dir`; returns
@@ -252,24 +254,6 @@ const Bus = struct {
         return conf_path;
     }
 
-    /// Fork and exec dbus-daemon in the foreground, its output silenced.
-    fn spawnDaemon(daemon: [:0]const u8, config_arg: [:0]const u8) !linux.pid_t {
-        const argv = [_:null]?[*:0]const u8{ daemon.ptr, config_arg.ptr, "--nofork", "--nopidfile" };
-        const envp = [_:null]?[*:0]const u8{};
-        const rc = linux.fork();
-        if (linux.errno(rc) != .SUCCESS) return error.SkipZigTest;
-        if (rc == 0) {
-            const devnull = linux.open("/dev/null", .{ .ACCMODE = .RDWR }, 0);
-            if (linux.errno(devnull) == .SUCCESS) {
-                _ = linux.dup2(@intCast(devnull), 1);
-                _ = linux.dup2(@intCast(devnull), 2);
-            }
-            _ = linux.execve(daemon.ptr, &argv, &envp);
-            linux.exit(127);
-        }
-        return @intCast(rc);
-    }
-
     /// Wait up to 5 s for the bus socket to appear (else skip the test).
     fn waitForSocket(alloc: std.mem.Allocator, dir: []const u8) !void {
         const sock = try std.fmt.allocPrint(alloc, "{s}/bus", .{dir});
@@ -278,22 +262,15 @@ const Bus = struct {
         while (true) {
             if (sys.fileSize(sock)) |_| break else |_| {}
             if (sys.monoMs() > deadline) return error.SkipZigTest;
-            var ts: linux.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
-            _ = linux.nanosleep(&ts, null);
+            sys.sleepMs(10);
         }
     }
 
     fn stop(self: *Bus, alloc: std.mem.Allocator) void {
-        stopPid(self.pid);
+        self.daemon.kill();
         sys.removeTree(self.dir);
         alloc.free(self.dir);
         alloc.free(self.addr);
-    }
-
-    fn stopPid(pid: linux.pid_t) void {
-        _ = linux.kill(pid, .TERM);
-        var status: i32 = 0;
-        _ = linux.wait4(pid, &status, 0, null);
     }
 };
 
@@ -410,8 +387,7 @@ fn checkSilentPortal(alloc: std.mem.Allocator, conn: *dbus.Connection, mock: *Mo
     try std.testing.expect(sys.monoMs() - t0 < 3000);
     const close_deadline = sys.monoMs() + 2000;
     while (mock.closed_requests.load(.acquire) == 0 and sys.monoMs() < close_deadline) {
-        var ts: linux.timespec = .{ .sec = 0, .nsec = 10 * std.time.ns_per_ms };
-        _ = linux.nanosleep(&ts, null);
+        sys.sleepMs(10);
     }
     try std.testing.expectEqual(@as(u32, 1), mock.closed_requests.load(.acquire));
 }

@@ -187,7 +187,10 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, conn: *desktop.Session, c
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.monitors = cap.monitors;
     configureEditor(&ed, conn, cfg, smoke_ms);
-    ed.loupe.hint.due = @import("zoom_hint.zig").due(env.home);
+    const stateflag = @import("stateflag.zig");
+    ed.loupe.hint.due = !stateflag.isSet(env.home, .zoom_hint);
+    // older versions kept the first-run hint in the config (hint_shown)
+    ed.show_hint = !(cfg.hint_shown or stateflag.isSet(env.home, .editor_hint));
     ed.presetSelection(preset_sel);
     if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     ed.keep_alpha = edit.keep_alpha;
@@ -243,7 +246,6 @@ fn configureEditor(ed: *editor_mod.Editor, conn: *desktop.Session, cfg: *const c
         .shadow = cfg.beautify_shadow,
     };
     ed.beautify_always = cfg.beautify_always;
-    ed.show_hint = !cfg.hint_shown;
 }
 
 /// A reopened capture: the shapes as they were, still editable.

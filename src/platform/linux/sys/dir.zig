@@ -57,18 +57,49 @@ pub fn makeTempDir(alloc: std.mem.Allocator, base: []const u8, prefix: []const u
     return error.CannotCreateTempDir;
 }
 
-const Dirent = struct { name: []const u8, is_dir: bool };
+/// What a directory entry is, as the directory itself says (`other`
+/// includes "unknown": some file systems do not tell).
+pub const EntryKind = enum { file, dir, symlink, other };
+
+const Dirent = struct {
+    name: []const u8,
+    kind: EntryKind,
+    is_dir: bool,
+};
 
 /// Next entry of a getdents64 batch at `off.*`, skipping "." and "..".
 fn nextDirent(batch: []align(8) const u8, off: *usize) ?Dirent {
     while (off.* < batch.len) {
         const ent: *const linux.dirent64 = @ptrCast(@alignCast(&batch[off.*]));
+        if (ent.reclen == 0) return null;
         const name = std.mem.sliceTo(@as([*:0]const u8, @ptrCast(&batch[off.* + @offsetOf(linux.dirent64, "name")])), 0);
         off.* += ent.reclen;
         if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
-        return .{ .name = name, .is_dir = ent.type == 4 }; // DT_DIR
+        const kind: EntryKind = switch (ent.type) {
+            linux.DT.REG => .file,
+            linux.DT.DIR => .dir,
+            linux.DT.LNK => .symlink,
+            else => .other,
+        };
+        return .{ .name = name, .kind = kind, .is_dir = kind == .dir };
     }
     return null;
+}
+
+/// Call `visit(ctx, name, kind)` for every entry of the directory `path`
+/// ("." and ".." left out), without allocating; `name` is only valid
+/// during the call.
+pub fn eachEntry(path: []const u8, ctx: anytype, comptime visit: fn (@TypeOf(ctx), []const u8, EntryKind) void) !void {
+    const dfd = try openDir(path);
+    defer io.close(dfd);
+    var buf: [8192]u8 align(8) = undefined;
+    while (true) {
+        const n = linux.getdents64(dfd, &buf, buf.len);
+        if (linux.errno(n) != .SUCCESS) return error.SyscallFailed;
+        if (n == 0) return;
+        var off: usize = 0;
+        while (nextDirent(buf[0..n], &off)) |e| visit(ctx, e.name, e.kind);
+    }
 }
 
 /// rm -rf for a directory we created (tests only; does not follow symlinks).
@@ -153,4 +184,30 @@ pub fn listDir(alloc: std.mem.Allocator, path: []const u8) ![]DirEntry {
 
 pub fn freeNames(alloc: std.mem.Allocator, list: []const DirEntry) void {
     for (list) |e| alloc.free(e.name);
+}
+
+test "eachEntry reports every entry with its kind" {
+    const alloc = std.testing.allocator;
+    const dir = try makeTempDir(alloc, "/tmp", "shotlet-each");
+    defer alloc.free(dir);
+    defer removeTree(dir);
+    var a: [256]u8 = undefined;
+    mkdirMode(try std.fmt.bufPrint(&a, "{s}/sub", .{dir}), 0o700);
+    try fs.writeFile(try std.fmt.bufPrint(&a, "{s}/file", .{dir}), "x");
+    const Seen = struct {
+        files: usize = 0,
+        dirs: usize = 0,
+        fn visit(self: *@This(), name: []const u8, kind: EntryKind) void {
+            _ = name;
+            switch (kind) {
+                .file => self.files += 1,
+                .dir => self.dirs += 1,
+                else => {},
+            }
+        }
+    };
+    var seen: Seen = .{};
+    try eachEntry(dir, &seen, Seen.visit);
+    try std.testing.expectEqual(@as(usize, 1), seen.files);
+    try std.testing.expectEqual(@as(usize, 1), seen.dirs);
 }

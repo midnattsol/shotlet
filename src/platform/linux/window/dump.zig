@@ -1,18 +1,19 @@
 //! Debug aid: SHOTLET_DUMP_FRAME=/path/prefix writes each surface's last
-//! presented frame to <prefix>-<index>.png when the window closes.
+//! presented frame to <prefix>-<index>.png when the window closes; and
+//! `write`, the one way debug output reaches a file (devtools too).
 
 const std = @import("std");
 const sys = @import("../sys.zig");
 const png = @import("../../../gfx/png.zig");
 const window = @import("../window.zig");
+const switches = @import("../../api/switches.zig");
 
 const Window = window.Window;
 
 /// Write the last presented frame of each surface, once, so headless runs
 /// can be inspected. No-op without SHOTLET_DUMP_FRAME.
 pub fn dumpFrames(w: *Window) void {
-    const prefix = std.mem.span(std.c.getenv("SHOTLET_DUMP_FRAME") orelse return);
-    if (prefix.len == 0) return;
+    const prefix = switches.get().dump_frame orelse return;
     for (w.surfaces[0..w.n_surfaces], 0..) |*s, i| {
         const idx = s.last_presented orelse continue;
         const b = &s.buffers[idx];
@@ -31,9 +32,12 @@ fn writeDump(alloc: std.mem.Allocator, prefix: []const u8, index: usize, px: []c
         return;
     };
     defer alloc.free(data);
-    sys.writeFile(path, data) catch |err| {
-        std.log.warn("frame dump: cannot write {s}: {t}", .{ path, err });
-        return;
-    };
-    std.log.info("frame dump: wrote {s} ({d}x{d})", .{ path, w, h });
+    write(path, data) catch |err| std.log.warn("frame dump: cannot write {s}: {t}", .{ path, err });
+}
+
+/// Write a debug file: private (0600), replacing what was there without
+/// following a symlink planted in its place; logged.
+pub fn write(path: []const u8, data: []const u8) !void {
+    try sys.writeAtomic(path, data, 0o600);
+    std.log.info("debug output: wrote {s}", .{path});
 }

@@ -1,4 +1,6 @@
-//! Tray daemon: owns the StatusNotifierItem and spawns capture children.
+//! Tray daemon: owns the StatusNotifierItem and starts capture children
+//! (detached, proc.spawnSelf: never the daemon's zombies, so SIGCHLD keeps
+//! its default and children that wait for their own children work).
 //! Detaches from the terminal (double fork + setsid) unless asked to stay
 //! in the foreground; only one instance can own the bus name
 //! io.github.midnattsol.Shotlet (its app id).
@@ -8,15 +10,15 @@ const dbus = @import("../dbus.zig");
 const portal = @import("../portal.zig");
 const sys = @import("../sys.zig");
 const env_mod = @import("../../../app/env.zig");
+const statefile = @import("../../../app/statefile.zig");
+const proc = @import("../proc.zig");
 const gnome = @import("../gnome.zig");
 const Env = env_mod.Env;
 
 const tray_mod = @import("tray.zig");
-const linux = std.os.linux;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, foreground: bool) !void {
     if (!foreground) detach(env);
-    reapChildrenAutomatically();
 
     var conn = try dbus.Connection.connectSession(gpa, env.session.bus);
     defer conn.deinit();
@@ -54,16 +56,6 @@ fn detach(env: Env) void {
     if ((sys.fork() catch 0) != 0) sys.exitProcess(0);
     sys.chdirRoot();
     redirectStdio(env);
-}
-
-/// Capture children are reaped by the kernel (SIGCHLD ignored).
-fn reapChildrenAutomatically() void {
-    var sa: linux.Sigaction = .{
-        .handler = .{ .handler = linux.SIG.IGN },
-        .mask = linux.sigemptyset(),
-        .flags = 0,
-    };
-    _ = linux.sigaction(linux.SIG.CHLD, &sa, null);
 }
 
 /// The bus loop: tray calls until Quit or the session bus goes away.
@@ -118,25 +110,12 @@ fn perform(gpa: std.mem.Allocator, env: Env, conn: *dbus.Connection, action: tra
     }
 }
 
-/// Fork+exec a shotlet subcommand child so the daemon stays responsive and
-/// a crash in the editor can't take down the tray.
+/// Start a shotlet subcommand detached, so the daemon stays responsive
+/// and a crash in the editor can't take down the tray. It gets the
+/// daemon's own environment, so locale, XDG dirs, TZ, PATH and the rest
+/// reach the editor unchanged.
 fn spawnChild(env: Env, subcommand: [*:0]const u8) void {
-    const pid = linux.fork();
-    if (linux.errno(pid) != .SUCCESS) {
-        std.log.err("fork failed", .{});
-        return;
-    }
-    if (pid != 0) return; // parent
-
-    // child: exec ourselves with the daemon's own environment, so locale,
-    // XDG dirs, TZ, PATH and the rest reach the editor unchanged
-    const argv = [_:null]?[*:0]const u8{ "shotlet", subcommand };
-    _ = linux.execve("/proc/self/exe", &argv, env.envp);
-    quitChild();
-}
-
-fn quitChild() noreturn {
-    std.os.linux.exit(127);
+    proc.spawnSelf(env.envp, &.{subcommand}, null);
 }
 
 /// stdin -> /dev/null; stdout/stderr -> append-only daemon log.
@@ -154,7 +133,7 @@ fn redirectStdio(env: Env) void {
 /// `max_bytes` into a single .old file, checked at start and while running,
 /// so it stays around 2 * max_bytes even with chatty children.
 const LogFile = struct {
-    path_buf: [1024]u8 = undefined,
+    path_buf: env_mod.PathBuf = undefined,
     path_len: usize = 0,
     enabled: bool = false,
     last_check_ms: i64 = 0,
@@ -164,10 +143,7 @@ const LogFile = struct {
     fn init(env: Env, foreground: bool) LogFile {
         var self = LogFile{};
         if (foreground) return self; // logging to the terminal
-        var dir_buf: [1024]u8 = undefined;
-        const dir = env_mod.stateDir(&dir_buf, env.home) catch return self;
-        sys.mkdirAll(dir, 0o700);
-        const p = std.fmt.bufPrint(&self.path_buf, "{s}/daemon.log", .{dir}) catch return self;
+        const p = statefile.prepare(&self.path_buf, env.home, .state, "daemon.log") catch return self;
         self.path_len = p.len;
         self.enabled = true;
         return self;
@@ -190,7 +166,7 @@ const LogFile = struct {
     fn rotateIfBig(self: *LogFile) void {
         if (!self.enabled) return;
         if ((sys.fileSize(self.path()) catch 0) <= max_bytes) return;
-        var old_buf: [1100]u8 = undefined;
+        var old_buf: env_mod.PathBuf = undefined;
         const old_path = std.fmt.bufPrint(&old_buf, "{s}.old", .{self.path()}) catch return;
         sys.rename(self.path(), old_path) catch {};
     }
@@ -207,11 +183,11 @@ const LogFile = struct {
         self.reopen();
         // children started before the rotation keep appending to .old;
         // cut it if one of them is very chatty
-        var old_buf: [1100]u8 = undefined;
+        var old_buf: env_mod.PathBuf = undefined;
         const old_path = std.fmt.bufPrint(&old_buf, "{s}.old", .{self.path()}) catch return;
         if ((sys.fileSize(old_path) catch 0) > 4 * max_bytes) {
             if (sys.openRw(old_path)) |fd| {
-                sys.ftruncateFd(fd, 0);
+                sys.ftruncate(fd, 0) catch {};
                 sys.close(fd);
             } else |_| {}
         }
