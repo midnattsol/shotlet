@@ -3,10 +3,11 @@
 # helpers): the editor (Print), the recording picker (shotlet record) and
 # the scrolling capture's picker (Ctrl+Super+Print).
 #   area-editor      every gesture in the editor: drag out, resize by a
-#   area-record      corner, move, arrows (Shift: 10 px, Alt: resize), the
-#   area-scroll      size label, Enter; Shift draws a square, a click takes
-#                    the monitor, one Esc leaves; Enter with nothing
-#                    selected takes the monitor under the pointer
+#   area-record      corner, move, arrows (Shift: 10 px, Ctrl: resize), the
+#   area-scroll      size label, Enter; Shift draws a square, Ctrl from the
+#                    centre, a click takes the monitor, one Esc leaves;
+#                    Enter with nothing selected takes the monitor under
+#                    the pointer
 #   area-shots       light: each picker idle, dragging, selected with its
 #                    handles, a handle under the pointer, into
 #                    $OUT/<mode>-<state>.png (the before/after pictures)
@@ -77,15 +78,16 @@ area_gestures() {
     sleep 0.4
     shot 0 "$m-g3"
     check "$m: a drag inside moves it" eval 'lit_at "$m-g3" 1080 680 && dim_at "$m-g3" 450 280'
-    keys right shift+down alt+right
+    keys right shift+down ctrl+right
     sleep 0.3
     shot 0 "$m-g4"
     keys enter
-    check "$m: arrows nudge it (1 px, Shift 10), Alt+arrow resizes; Enter takes it (501,310 601x400)" area_done "$m" 1 501,310,601,400
+    check "$m: arrows nudge it (1 px, Shift 10), Ctrl+arrow resizes; Enter takes it (501,310 601x400)" area_done "$m" 1 501,310,601,400
 }
 
-# area_more MODE: Shift draws a square, a click takes the monitor, one
-# Esc leaves; then Enter with nothing selected takes the monitor
+# area_more MODE: Shift draws a square, Ctrl from the centre, a click
+# takes the monitor, one Esc leaves; then Enter with nothing selected
+# takes the monitor
 area_more() {
     local m=$1
     area_open "$m" 2 || { fail "$m: the picker did not come up"; return; }
@@ -94,6 +96,13 @@ area_more() {
     sleep 0.4
     shot 0 "$m-m1"
     check "$m: Shift draws a square" eval 'lit_at "$m-m1" 400 380 && dim_at "$m-m1" 600 300'
+    # (Ctrl let go before the picture: the editor's magnifier goes with it)
+    # (away from the square's bar: the editor's toolbar reaches 800,450)
+    approach 0 1100 300 && drv key ctrl down && drv down && drv move 0 1200 350 && drv move 0 1300 400 &&
+        drv sleep 150 && drv up && drv key ctrl up
+    sleep 0.5
+    shot 0 "$m-m1c"
+    check "$m: Ctrl draws it from the centre" eval 'lit_at "$m-m1c" 920 220 && dim_at "$m-m1c" 880 220'
     click 0 1200 700
     sleep 0.4
     shot 0 "$m-m2"

@@ -76,16 +76,14 @@ modes_area() {
 
 # area_steps: one area through every gesture (ui/areasel.zig, the same in
 # each picker): drawn out, a corner dragged, moved from inside, nudged by
-# the arrows (Shift: 10 px, Alt: the bottom-right corner); Enter takes
-# exactly 501,310 ${AREA_W}x400. labwc keeps Alt+arrows for itself
-# (MoveToEdge in its default keybinds): no Alt there, 600 wide.
+# the arrows (Shift: 10 px, Ctrl: resize from the bottom-right corner;
+# Ctrl, not Alt, which labwc keeps for MoveToEdge); Enter takes exactly
+# 501,310 601x400
 area_steps() {
     slow_drag 0 400 250 650 425 900 600
     slow_drag 0 900 600 1000 650
     slow_drag 0 700 450 800 500
-    keys right shift+down
-    AREA_W=600
-    if [ "$COMP" != labwc ]; then keys alt+right; AREA_W=601; fi
+    keys right shift+down ctrl+right
     sleep 0.3
     keys enter
 }
@@ -96,19 +94,19 @@ modes_gestures() {
     run_shotlet gestures area
     check "the editor's area" wait_editor 15
     area_steps
-    check "  ... dragged, resized, moved, nudged: Enter copies exactly ${AREA_W}x400" clip_is gestures "${AREA_W}x400" 5
+    check "  ... dragged, resized, moved, nudged: Enter copies exactly 601x400" clip_is gestures 601x400 5
     stop_shotlet
     run_shotlet rec-pick record --gif --seconds 1 --no-countdown --no-control
     check "the recording picker" wait_log 15 "picker up"
     sleep 1 # (the picker takes the keyboard a moment after it logs)
     area_steps
-    check "  ... the same gestures: Enter records 501,310 ${AREA_W}x400" wait_log 5 "picked 501,310 ${AREA_W}x400"
+    check "  ... the same gestures: Enter records 501,310 601x400" wait_log 5 "picked 501,310 601x400"
     stop_shotlet
     run_shotlet scroll-pick scroll
     check "the scrolling capture's picker" wait_log 15 "scrolling capture: pick a region"
     sleep 1
     area_steps
-    check "  ... the same gestures: Enter scrolls ${AREA_W}x400 at 501,310" wait_log 5 "region ${AREA_W}x400 at 501,310"
+    check "  ... the same gestures: Enter scrolls 601x400 at 501,310" wait_log 5 "region 601x400 at 501,310"
     stop_shotlet
 }
 

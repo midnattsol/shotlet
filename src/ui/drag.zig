@@ -1,15 +1,15 @@
 //! Drag constraints: Shift makes squares, circles and 45-degree lines,
-//! Alt draws from the centre.
+//! Ctrl (or Alt) draws from the centre.
 
 const std = @import("std");
 const shapes = @import("shapes.zig");
 const Point = shapes.Point;
 const Rect = shapes.Rect;
 
-// --- drag constraints (Shift: square / 45 degrees, Alt: from the centre) ---
+// --- drag constraints (Shift: square / 45 degrees, Ctrl: from the centre) ---
 
 /// Corners of a box dragged from `anchor` to `p`: Shift makes it a
-/// square (circle), Alt grows it around the anchor.
+/// square (circle), `center` (Ctrl or Alt) grows it around the anchor.
 pub fn dragCorners(anchor: Point, p: Point, square: bool, center: bool) [2]Point {
     var q = p;
     if (square) {

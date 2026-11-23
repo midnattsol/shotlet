@@ -214,7 +214,7 @@ always while pointing and dragging, or never; an older
 
 **Picking an area** works the same in the editor, the recording picker
 and the scrolling capture's picker: drag out an area (`Shift`: a square,
-`Alt`: from its centre, hold `Space` to move it), drag inside it to move
+`Ctrl`: from its centre, hold `Space` to move it), drag inside it to move
 it, drag a corner, or an edge's middle (it shows as the pointer comes
 near), to resize it; its size in pixels sits above it. A click without
 dragging takes the window under the pointer where windows are known
@@ -226,10 +226,11 @@ monitor it is mostly on; in the editor it may span monitors. Only the
 bar under the area differs: the editor's toolbar, Record, Start
 scrolling capture.
 
-**Arrow keys** move the selection by a pixel (`Shift`: 10): the whole
-of it, or once you have dragged one of its edges or corners, that edge
-or corner (`Alt`+arrows: the right and bottom edges); with `Ctrl` held
-the magnifier shows the edge as it moves.
+**Arrow keys** move the selection by a pixel (`Shift`: 10). `Ctrl`+arrows
+resize it: the edge or corner you last dragged, else the bottom-right
+corner; the magnifier shows the edge as it moves. (`Ctrl`, not `Alt`:
+on Linux window managers keep `Alt`+arrows and `Alt`+drag for
+themselves.)
 
 **Click a window while selecting an area**, as on macOS: the window under
 the pointer lights up (an accent outline, the rest dimmed), a click
@@ -578,7 +579,7 @@ the editor for the full list.
 
 | Key | Action |
 | --- | --- |
-| Drag | select a region (`Shift` square, `Alt` from the centre, hold `Space` to move it); a click takes the monitor |
+| Drag | select a region (`Shift` square, `Ctrl` from the centre, hold `Space` to move it); a click takes the monitor |
 | Click a window | select that window (before a selection; GNOME with the extension, KDE) |
 | `G` `W` `D` `J` `O` `Q` `H` | before a selection: area, window, screen, scrolling, text, record, timer (the mode strip) |
 | hold `Ctrl` | while picking an area or moving an edge: the magnifier |
@@ -596,8 +597,8 @@ the editor for the full list.
 | `Ctrl+P` | pin to the screen |
 | `1`-`8`, `9` | preset colours, custom colour |
 | wheel, `-` `=` | size |
-| `Shift` while drawing | square, circle, 45° lines and arrows (`Alt`: from the centre) |
-| arrows, `Shift`+arrows | move the shape, the selection's edge last dragged or the whole selection by 1 / 10 px (`Alt`: resize) |
+| `Shift` while drawing | square, circle, 45° lines and arrows (`Ctrl`: from the centre) |
+| arrows, `Shift`+arrows | move the shape or the selection by 1 / 10 px (`Ctrl`: resize the selection by the edge last dragged, else the bottom-right corner) |
 | `Delete`, `Ctrl+D`, `Ctrl+]` | delete, duplicate, bring to front |
 | `Ctrl+Z` / `Ctrl+Shift+Z`, `Ctrl+Y` | undo / redo |
 | `Tab`, `Enter` | move through the toolbar, activate |

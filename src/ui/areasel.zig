@@ -5,20 +5,26 @@
 //! callers map the pointer into them, and hit-test the handles where they
 //! are drawn (grabAt, in buffer pixels).
 //!
-//!   drag outside  a new area (Shift: a square, Alt: from its centre,
+//!   drag outside  a new area (Shift: a square, Ctrl: from its centre,
 //!                 Space held: moves it)
 //!   drag inside   moves it; a handle resizes it (the corners; an edge's
 //!                 middle shows near the pointer, ui/selchrome.zig)
 //!   click         the window under the pointer where windows are known
 //!                 (the editor's area capture), else its whole monitor
-//!   arrows        move it 1 px, Shift 10; after a handle was dragged,
-//!                 that handle's edges; Alt: the bottom-right corner
+//!   arrows        move it 1 px, Shift 10; Ctrl+arrows resize it: the
+//!                 edges of the handle last dragged, else the
+//!                 bottom-right corner
 //!   Enter         confirms; with nothing selected, what a click at the
 //!                 pointer takes (confirm); Esc cancels (the callers)
 //!
 //! An area stays on what the mode can capture (Area.one_monitor): the
 //! monitor it is mostly on for a recording or a scrolling capture, the
 //! whole image in the editor.
+//!
+//! Ctrl, not Alt, is the modifier: on Linux Alt belongs to the window
+//! manager (labwc, Openbox, Xfce take Alt+arrows and Alt+drag), and
+//! GIMP's rectangle select draws from the centre with Ctrl. Alt still
+//! does what Ctrl does where it reaches Shotlet (a Mac habit).
 
 const std = @import("std");
 const geom = @import("../geom.zig");
@@ -96,19 +102,25 @@ pub fn cursorFor(drag: Drag, g: Grab) window.Cursor {
 
 /// The modifiers held while drawing an area out.
 pub const Mods = struct {
-    /// Shift
+    /// Shift: a square
     square: bool = false,
-    /// Alt
-    center: bool = false,
+    /// Ctrl (or Alt): from the centre
+    ctrl: bool = false,
+    alt: bool = false,
     /// Space: the pointer moves the area being drawn
     space: bool = false,
+
+    pub fn center(self: Mods) bool {
+        return self.ctrl or self.alt;
+    }
 
     /// Follow a key event; true when a modifier changed.
     pub fn track(self: *Mods, k: window.Key) bool {
         const was = self.*;
         switch (k.code) {
             .shift_left, .shift_right => self.square = k.pressed,
-            .alt_left, .alt_right => self.center = k.pressed,
+            .ctrl_left, .ctrl_right => self.ctrl = k.pressed,
+            .alt_left, .alt_right => self.alt = k.pressed,
             .space => self.space = k.pressed,
             else => return false,
         }
@@ -133,7 +145,7 @@ pub const Drawing = struct {
             }
             self.last = q;
         } else self.last = null;
-        const cs = dragCorners(self.anchor, q, mods.square, mods.center);
+        const cs = dragCorners(self.anchor, q, mods.square, mods.center());
         return Rect.fromCorners(cs[0], cs[1]).intersect(self.limit) orelse Rect.fromCorners(q, q);
     }
 };
@@ -295,10 +307,11 @@ pub const Selection = struct {
         return true;
     }
 
-    /// The edge an arrow `k` moves: Alt the bottom-right corner, else
-    /// the handle last dragged; null for the whole area.
+    /// The edge an arrow `k` moves: with Ctrl (or Alt) the handle last
+    /// dragged, else the bottom-right corner; null (no Ctrl) for the
+    /// whole area.
     pub fn nudgeEdge(self: *const Selection, k: window.Key) ?Handle {
-        return if (k.alt) 4 else self.edge;
+        return if (k.ctrl or k.alt) self.edge orelse 4 else null;
     }
 
     /// A key press or release for the area (modifiers, arrows). True when
@@ -324,8 +337,8 @@ const testing = std.testing;
 const two = [_]Rect{ .{ .x = 0, .y = 0, .w = 1600, .h = 900 }, .{ .x = 1600, .y = 100, .w = 1280, .h = 720 } };
 const image: Rect = .{ .x = 0, .y = 0, .w = 2880, .h = 900 };
 
-fn key(code: window.KeyCode, pressed: bool, shift: bool, alt: bool) window.Key {
-    return .{ .code = code, .pressed = pressed, .ctrl = false, .shift = shift, .alt = alt };
+fn key(code: window.KeyCode, pressed: bool, shift: bool, ctrl: bool) window.Key {
+    return .{ .code = code, .pressed = pressed, .ctrl = ctrl, .shift = shift };
 }
 
 fn dragFrom(s: *Selection, a: Point, b: Point, g: Grab) void {
@@ -366,16 +379,21 @@ test "a click takes the window under it first" {
     try testing.expectEqual(Rect{ .x = 150, .y = 150, .w = 300, .h = 200 }, s.sel.?);
 }
 
-test "modifiers: Shift a square, Alt from the centre, Space moves it" {
+test "modifiers: Shift a square, Ctrl (or Alt) from the centre, Space moves it" {
     var s: Selection = .{ .area = .{ .bounds = image } };
     _ = s.key(key(.shift_left, true, true, false));
     dragFrom(&s, .{ .x = 100, .y = 100 }, .{ .x = 300, .y = 150 }, .outside);
     try testing.expectEqual(Rect{ .x = 100, .y = 100, .w = 200, .h = 200 }, s.sel.?);
     _ = s.key(key(.shift_left, false, false, false));
-    s.mods.center = true;
+    _ = s.key(key(.ctrl_left, true, false, true));
     dragFrom(&s, .{ .x = 500, .y = 500 }, .{ .x = 600, .y = 550 }, .outside);
     try testing.expectEqual(Rect{ .x = 400, .y = 450, .w = 200, .h = 100 }, s.sel.?);
-    s.mods.center = false;
+    _ = s.key(key(.ctrl_left, false, false, false));
+    _ = s.key(.{ .code = .alt_right, .pressed = true, .ctrl = false, .shift = false, .alt = true });
+    dragFrom(&s, .{ .x = 500, .y = 500 }, .{ .x = 520, .y = 530 }, .outside);
+    try testing.expectEqual(Rect{ .x = 480, .y = 470, .w = 40, .h = 60 }, s.sel.?);
+    _ = s.key(.{ .code = .alt_right, .pressed = false, .ctrl = false, .shift = false });
+    try testing.expect(!s.mods.center());
     // Space held halfway: the area moves with the pointer
     s.press(.{ .x = 100, .y = 100 }, .outside);
     s.motion(.{ .x = 200, .y = 200 });
@@ -461,7 +479,7 @@ test "a new area stays on the monitor it starts on, up to its edges" {
     try testing.expectEqual(Rect{ .x = 0, .y = 0, .w = 100, .h = 80 }, s.sel.?);
 }
 
-test "arrows nudge it, Shift by 10, Alt resizes, after a handle its edge" {
+test "arrows nudge it, Shift by 10; Ctrl resizes: the bottom-right, after a handle its edge" {
     var s: Selection = .{ .sel = .{ .x = 100, .y = 100, .w = 400, .h = 300 }, .area = .{ .bounds = image, .monitors = &two, .one_monitor = true } };
     try testing.expect(s.key(key(.right, true, false, false)));
     try testing.expectEqual(Rect{ .x = 101, .y = 100, .w = 400, .h = 300 }, s.sel.?);
@@ -473,10 +491,15 @@ test "arrows nudge it, Shift by 10, Alt resizes, after a handle its edge" {
     // never off its monitor
     for (0..30) |_| _ = s.key(key(.up, true, true, false));
     try testing.expectEqual(@as(i32, 0), s.sel.?.y);
-    // after dragging the west handle, arrows move the west edge
+    // after dragging the west handle, Ctrl+arrows move the west edge
+    // (Alt too); plain arrows still move it all
     dragFrom(&s, .{ .x = 101, .y = 150 }, .{ .x = 120, .y = 150 }, .{ .handle = 7 });
-    _ = s.key(key(.left, true, false, false));
+    _ = s.key(key(.left, true, false, true));
     try testing.expectEqual(Rect{ .x = 119, .y = 0, .w = 383, .h = 310 }, s.sel.?);
+    _ = s.key(key(.left, true, false, false));
+    try testing.expectEqual(Rect{ .x = 118, .y = 0, .w = 383, .h = 310 }, s.sel.?);
+    _ = s.key(.{ .code = .left, .pressed = true, .ctrl = false, .shift = false, .alt = true });
+    try testing.expectEqual(Rect{ .x = 117, .y = 0, .w = 384, .h = 310 }, s.sel.?);
     // a move clears it; other keys are not the area's
     dragFrom(&s, .{ .x = 300, .y = 150 }, .{ .x = 301, .y = 150 }, .inside);
     try testing.expectEqual(@as(?Handle, null), s.edge);

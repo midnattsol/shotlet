@@ -86,8 +86,8 @@ pub fn bringSelectedToFront(ed: *Editor) !void {
 }
 
 /// Arrow keys: nudge the selected shape (Shift: 10 pixels), else the
-/// area (editor/area.zig: its edge last dragged, else all of it; Alt:
-/// its bottom-right corner).
+/// area (editor/area.zig: all of it; Ctrl resizes it by its edge last
+/// dragged, else its bottom-right corner).
 pub fn arrowKey(ed: *Editor, k: window.Key) !void {
     const step: i32 = if (k.shift) 10 else 1;
     const dx: i32 = switch (k.code) {
@@ -100,7 +100,7 @@ pub fn arrowKey(ed: *Editor, k: window.Key) !void {
         .down => step,
         else => 0,
     };
-    if (ed.selected != null and !k.alt) {
+    if (ed.selected != null and !k.alt and !k.ctrl) {
         try props.editTarget(ed, 4, struct {
             fn f(s: *Shape, d: [2]i32) void {
                 s.translate(d[0], d[1]);

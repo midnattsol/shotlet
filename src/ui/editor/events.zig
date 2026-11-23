@@ -91,6 +91,7 @@ fn trackModifiers(ed: *Editor, k: window.Key) !void {
     switch (k.code) {
         .shift_left, .shift_right => ed.mod_shift = k.pressed,
         .alt_left, .alt_right => ed.mod_alt = k.pressed,
+        .ctrl_left, .ctrl_right => ed.mod_ctrl = k.pressed,
         .space => {
             const dragging = area.drawing(ed) or ed.drag == .drawing;
             if (k.pressed and dragging) ed.space.held = true;

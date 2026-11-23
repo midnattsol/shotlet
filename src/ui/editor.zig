@@ -102,6 +102,8 @@ pub const Editor = struct {
     scroll_acc: f64 = 0,
     mod_shift: bool = false,
     mod_alt: bool = false,
+    /// Ctrl held: a drag grows from its centre (Alt too)
+    mod_ctrl: bool = false,
     space: types.SpaceMove = .{},
     /// where the current shape drag started (image pixels)
     drag_anchor: Point = .{ .x = 0, .y = 0 },

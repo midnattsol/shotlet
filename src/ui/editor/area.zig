@@ -36,7 +36,7 @@ fn get(ed: *Editor) *areasel.Selection {
     const a = &ed.area;
     a.sel = ed.doc.sel;
     a.area = areaOf(ed);
-    a.mods = .{ .square = ed.mod_shift, .center = ed.mod_alt, .space = ed.space.held };
+    a.mods = .{ .square = ed.mod_shift, .ctrl = ed.mod_ctrl, .alt = ed.mod_alt, .space = ed.space.held };
     return a;
 }
 
