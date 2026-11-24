@@ -14,7 +14,10 @@
 #           layout=L   the XKB layout L
 #           ibus=E     the IBus engine E as the only input source
 #           manual     only when asked for by name, not in the default run
-scenario_table() {
+scenario_table() { table_desktop; table_modes; }
+# (two halves: the captures, the desktop and the integration; the
+# capture modes, recording and the rest)
+table_desktop() {
     cat <<'EOF_TABLE'
 capture             | 1600x900           | nothumb                | the portal's consent, its restore token, the clipboard, a shortcut-style launch
 blink               | 1600x900           | nothumb                | with animations: the editor closes with no ghost frames (filmed)
@@ -44,6 +47,10 @@ shell-owner         | 1600x900           | nothumb ext            | install move
 shell-mixed         | 2560x1440 1280x720 | nothumb ext            | Print through the extension on scales 2 and 1
 shell-tray          | 1600x900           | nothumb ext            | the tray's captures through the extension, one at a time
 shell-terminal      | 1600x900           | nothumb ext            | shotlet and shotlet text from a terminal ask the extension; a copy it does not answer is told so once; the portal without it
+EOF_TABLE
+}
+table_modes() {
+    cat <<'EOF_TABLE'
 modes-screen        | 1600x900 1280x720  | ext                    | the monitor under the pointer, all screens, the previous area, after_fullscreen
 modes-strip         | 1600x900           | ext                    | the editor's mode strip: a window lit and clicked, its keys, More, dark
 modes-timer         | 1600x900           | ext                    | shotlet timer 3: the shell's countdown, not in the capture
@@ -53,6 +60,8 @@ modes-scroll-manual | 1600x900           | ext                    | scroll_auto=
 modes-scroll-stops  | 1600x900           | ext                    | why a scrolling capture pauses or stops: didn't move, no match, height limit, Esc
 modes-scroll-dark   | 1600x900           | ext                    | the same in the dark appearance
 modes-scroll-mixed  | 3456x2160 3840x2160 | ext                   | a scrolling capture on 1.5 beside 2 (4K): stitched at 1.5's pixels
+modes-scroll-ghostty | 3456x2160 3840x2160 | ext                 | Ghostty at 1.5: text to the end, two panes (the still one left out), output at the bottom pauses
+modes-scroll-ghostty-2x | 3456x2160 3840x2160 | ext              | Ghostty at 2: text to the end, two panes
 scroll-unavailable  | 1600x900           | -                      | shotlet scroll without the extension says why and exits 1; works after a new login
 area-editor         | 1600x900           | ext                    | the editor's area: drag, resize, move, arrows, size, Enter, Shift, click, Esc
 area-record         | 1600x900           | ext                    | the same in the recording picker

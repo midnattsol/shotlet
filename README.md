@@ -272,12 +272,20 @@ windows are is taken with the capture, never live:
   (sticky headers and footers kept once, repeated rows handled, frames
   verified pixel by pixel; on a fractional scale such as 1.5, where a
   scroll can land between two physical pixels and every row is painted a
-  little differently, the rows' profiles line them up instead) until the
+  little differently, the rows' profiles line them up instead; a
+  blinking cursor or a spinner is not taken for a scroll; when the
+  region spans something that scrolls and something that stays put, such
+  as two terminal panes side by side or a page beside a fixed sidebar,
+  only the part that scrolls is stitched and kept; the notches turned a
+  step follow how far one notch moved, so a terminal is not scrolled
+  past what lines up) until the
   page stops moving, you press Stop,
   or the image reaches `scroll_max_height=20000` px; a small control
   beside the region shows the image growing and says why it stopped
   ("Reached the end of the page", "Stopped at the 20 000 px limit").
-  When it stops short ("The page didn't move", "Couldn't match the next
+  When it stops short ("The page didn't move", also when the content
+  only moves by itself, such as a terminal at the bottom of its
+  scrollback printing new lines; "Couldn't match the next
   part", "Lost sight of the region") it pauses with **Continue** (C or
   Space: carry on from there, keeping what is stitched; after a jump,
   scroll back a little until the parts line up), **Finish** (Enter: the
