@@ -62,6 +62,16 @@ pub fn place(gpa: std.mem.Allocator, bus: *desktop.Bus, title: []const u8, x: i3
     _ = .{ gpa, bus, title, x, y };
     return false;
 }
+/// It refused this Shotlet at least once in this run: it answers only
+/// the installed one.
+pub fn refusedCaller() bool {
+    return false;
+}
+/// The installed binary it answers, when it is there (into buf).
+pub fn servedExe(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, buf: []u8) ?[]const u8 {
+    _ = .{ gpa, env, bus, buf };
+    return null;
+}
 /// The capture handed over as `id` is on screen (or never will be).
 pub fn unfreeze(bus: *desktop.Bus, id: []const u8) ?FrozenInput {
     _ = .{ bus, id };

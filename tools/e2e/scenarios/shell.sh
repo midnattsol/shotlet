@@ -225,6 +225,7 @@ scenario_shell_terminal() {
     check "  ... whose shotlet is a text capture" shell_wait 10 "text capture: the selected area" 1
     check "  ... in its editor" shell_editor 2
     keys esc
+    shell_copy_refused
     # an older or broken integration: the portal path as before
     ext_gsettings set shotlet-path "'/nonexistent/shotlet'"
     sleep 1.2
@@ -232,4 +233,21 @@ scenario_shell_terminal() {
     check "if the extension cannot capture, the portal asks" share_dialog 0
     check "  ... and the editor opens" wait_editor 10
     keys esc
+}
+
+# shell_copy_refused: a copy of shotlet that is not the one the extension
+# answers (zig-out/bin/shotlet beside the installed one): `scroll` is
+# refused, and says so plainly once, then stops (exit 1)
+shell_copy_refused() {
+    local copy=$OUT/copy/shotlet
+    local title="The GNOME integration only answers the installed Shotlet"
+    mkdir -p "$OUT/copy" && cp "$BIN" "$copy"
+    sleep 1.2
+    BIN=$copy run_shotlet refused scroll
+    check "a copy the extension does not answer: shotlet scroll exits 1" eval 'wait_exit 10 && eq "$RC" 1'
+    problem_reported refused scroll "$title" "Run $BIN, or reinstall"
+    check "  ... said once" eq "$(grep -c "^shotlet scroll: The GNOME integration only answers" "$OUT/refused.log")" 1
+    check "  ... instead of the generic failure" no_log "no frame of the region" "$OUT/refused.log"
+    check "  ... and no region picker" no_log "pick a region" "$OUT/refused.log"
+    card_gone
 }

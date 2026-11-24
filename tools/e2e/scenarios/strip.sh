@@ -4,8 +4,9 @@
 #   modes-strip  Print: the strip at the bottom centre, Area chosen; a
 #                window lit under the pointer, a click selects exactly it,
 #                a drag still draws an area; the strip's letters (O text,
-#                G area, D screen, Q record) and its Window button; the
-#                More menu without capture modes; light and dark
+#                G area, D screen, Q record, J scroll: the pickers on this
+#                same capture) and its Window button; the More menu
+#                without capture modes; light and dark
 # The chosen mode and the toolbar's Copy wear ACCENT_FILL, a lit window's
 # outline ACCENT.
 
@@ -86,16 +87,36 @@ strip_keys() {
     shot 0 record-picker
     keys esc
     check "  ... which Esc cancels" shell_wait 5 "record: cancelled in the picker" 1
-    strip_open 5
+    strip_scroll 5
+    strip_open 6
     strip_chosen && read -r ax ay _ <<<"$VAL"
     click 0 $((ax + 38)) "$ay"
     check "the strip's Window starts the window picker" shell_wait 10 "picking one of" 1
     keys esc
 }
 
+# strip_scroll N: J on the Nth editor hands its capture to the scrolling
+# capture's picker, in the same process: no second capture
+strip_scroll() {
+    local caps pickers t0 t1
+    strip_open "$1"
+    caps=$(shell_count "Shotlet: captured [0-9]* areas")
+    pickers=$(shell_count "area picker: up")
+    t0=$(date +%s%N)
+    keys j
+    check "J hands this capture to the scrolling capture's picker" shell_wait 10 "capture mode: scroll, the picker on this capture" 1
+    check "  ... which comes up" shell_wait 10 "area picker: up" $((pickers + 1))
+    t1=$(date +%s%N)
+    echo "  J to the picker: $(((t1 - t0) / 1000000)) ms"
+    check "  ... over the same capture: none taken anew" eq "$(shell_count "Shotlet: captured [0-9]* areas")" "$caps"
+    check "  ... nor another shotlet started" no_log "started anew" "$SHOTLET_E2E_SHELL_LOG"
+    keys esc
+    sleep 0.5
+}
+
 strip_menu() {
     local cx=0 cy=0 cw=0
-    strip_open 6
+    strip_open 7
     drag 0 400 200 0 800 350 0 1200 500
     sleep 0.6
     # More is left of Copy (the accent fill at the toolbar's right end)
@@ -110,7 +131,7 @@ strip_menu() {
 strip_dark() {
     gsettings set org.gnome.desktop.interface color-scheme prefer-dark
     sleep 0.5
-    strip_open 7
+    strip_open 8
     shot 0 strip-dark
     drv move 0 790 440
     sleep 0.4

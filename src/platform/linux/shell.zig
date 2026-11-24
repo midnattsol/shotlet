@@ -7,6 +7,8 @@ const std = @import("std");
 const dbus = @import("dbus.zig");
 const gnome = @import("gnome.zig");
 const gsettings = @import("gnome/gsettings.zig");
+const proc = @import("proc.zig");
+const sys = @import("sys.zig");
 const gtk_accel = @import("gnome/gtk_accel.zig");
 const mode_keys = @import("gnome/mode_keys.zig");
 const shell1 = @import("gnome/shell1.zig");
@@ -87,6 +89,30 @@ pub fn requestCapture(_: std.mem.Allocator, bus: *dbus.Connection, req: mode.Req
 
 /// Put our window titled `title` at x, y (logical); false when it cannot.
 pub const place = shell1.place;
+
+/// It refused this Shotlet at least once in this run: it answers only
+/// the binary it would start itself, and this is another copy
+/// (zig-out/bin/shotlet, say).
+pub const refusedCaller = shell1.refused;
+
+/// The installed binary it answers (and starts), when it is there: its
+/// `shotlet-path`, else `shotlet` on the PATH (into `buf`); null when
+/// unknown or missing.
+pub fn servedExe(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection, buf: []u8) ?[]const u8 {
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = arena_state.allocator();
+    var sd_buf: [1100]u8 = undefined;
+    const configured: []const u8 = blk: {
+        const sd = gnome.schemaDir(gpa, env, bus, &sd_buf) catch break :blk "";
+        const v = gsettings.get(arena, env, sd, gnome.ext_schema_id, "shotlet-path") catch break :blk "";
+        break :blk gsettings.parseString(arena, v) catch "";
+    };
+    const exe: []const u8 = if (std.mem.startsWith(u8, configured, "/")) configured else proc.which(buf, env.envp, "shotlet") orelse return null;
+    if (sys.fileMode(exe) == null or exe.len > buf.len) return null;
+    std.mem.copyForwards(u8, buf[0..exe.len], exe);
+    return buf[0..exe.len];
+}
 
 /// The capture handed over as `id` is on screen in Shotlet (or never
 /// will be): the shell takes its frozen frame away, and says what the

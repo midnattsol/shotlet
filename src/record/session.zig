@@ -3,6 +3,7 @@
 //! (keeping it in the history, with the thumbnail) or discard it.
 
 const std = @import("std");
+const refused = @import("../app/refused.zig");
 const log = std.log.scoped(.recording);
 const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("../app/env.zig");
@@ -42,6 +43,8 @@ pub const Recording = struct {
             .cancelled => return .cancelled,
             .failed => |e| return .{ .failed = e },
         };
+        // (the portal's when the integration refused this Shotlet: said once)
+        _ = refused.tell(gpa, env, bus);
         const path = outputPath(gpa, env, &set, req.out) catch |e| {
             src.close(gpa, bus);
             return .{ .failed = e };

@@ -85,9 +85,6 @@ pub const Window = struct {
     surfaces: [max_surfaces]Surface = @splat(.{}),
     n_surfaces: u8 = 0,
 
-    /// text and PNG we offer on the clipboard
-    clipboard_text: []u8 = &.{},
-    clipboard_png: []u8 = &.{},
     drag_state: DragState = .none,
     /// drops we take, best first; a completed one lands in `dropped`
     accept_mimes: []const []const u8 = &.{},
@@ -331,9 +328,9 @@ pub const Window = struct {
     pub fn setClipboardText(w: *Window, data: []u8) Error!void {
         _ = .{ w, data };
     }
-    /// Offer `clipboard_text`/`clipboard_png` under these types.
-    pub fn claimClipboardSource(w: *Window, mimes: []const []const u8) Error!void {
-        _ = .{ w, mimes };
+    /// Offer `text` and `data` (owned) under these types.
+    pub fn setClipboardFile(w: *Window, mimes: []const []const u8, text: []u8, data: []u8) Error!void {
+        _ = .{ w, mimes, text, data };
     }
     /// Keep answering paste requests until another client owns it.
     pub fn serveClipboard(w: *Window) Error!void {

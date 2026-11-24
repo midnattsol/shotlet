@@ -28,6 +28,9 @@ pub const Action = enum {
     screen,
     /// close into the recording picker, on the same frozen frame
     record,
+    /// close into the scrolling capture's region picker, on the same
+    /// frozen frame
+    scroll,
 
     /// Whether the session's result carries the exported selection.
     pub fn exports(self: Action) bool {

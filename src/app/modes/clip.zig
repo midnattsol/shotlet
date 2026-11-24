@@ -5,19 +5,13 @@
 //! clipboard, like the editor after Copy.
 
 const std = @import("std");
-const sys = @import("../../platform/api.zig").sys;
 const window = @import("../../platform/api.zig").window;
 
 /// Wait at most this long for the focus.
 const focus_ms = 1500;
 
 fn waitFocus(win: *window.Window) !void {
-    const deadline = sys.monoMs() + focus_ms;
-    while (!win.kb_focus) {
-        const left = deadline - sys.monoMs();
-        if (left <= 0) return error.NoFocus;
-        _ = try win.nextEventTimeout(@intCast(left));
-    }
+    if (!try win.waitKeyboardFocus(focus_ms)) return error.NoFocus;
 }
 
 fn paintClear(win: *window.Window) !void {

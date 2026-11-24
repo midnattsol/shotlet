@@ -27,13 +27,8 @@ pub fn copyToClipboard(gpa: std.mem.Allocator, win: *window.Window, path: []cons
     const size = try sys.fileSize(path);
     const bytes: []u8 = if (size <= max_clipboard_bytes) try sys.readFileAlloc(gpa, path, max_clipboard_bytes) else &.{};
     errdefer gpa.free(bytes);
-    if (bytes.len > 0) {
-        try win.claimClipboardSource(&.{ "text/uri-list", mimeOf(path) });
-    } else {
-        try win.claimClipboardSource(&.{"text/uri-list"});
-    }
-    win.clipboard_text = uri;
-    win.clipboard_png = bytes;
+    const both = [_][]const u8{ "text/uri-list", mimeOf(path) };
+    try win.setClipboardFile(if (bytes.len > 0) &both else both[0..1], uri, bytes);
 }
 
 /// Copy `src` byte for byte to a new path `dst` (never over a file).

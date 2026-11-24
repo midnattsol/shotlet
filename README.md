@@ -299,6 +299,14 @@ windows are is taken with the capture, never live:
   gnome-integration status"; elsewhere "This desktop doesn't let Shotlet
   capture while you scroll". If no frame of the region comes once it has
   started, the control says "Couldn't capture the region" with Close.
+  `J` in the editor's mode strip picks the region on the capture the
+  editor already has (no second capture); the scrolling itself is live.
+  The GNOME integration answers only the installed Shotlet (the binary
+  it would start itself): a copy run from elsewhere (`zig-out/bin/shotlet`)
+  is told so once, on a card and on stderr ("The GNOME integration only
+  answers the installed Shotlet. Run ~/.local/bin/shotlet, or
+  reinstall."); its captures fall back to the portal and a scrolling
+  capture stops there.
 - **Self-timer**: a small countdown in the middle of the screen, gone
   before the capture; on GNOME the shell draws it and it never takes the
   keyboard focus, so a menu left open for it stays open. Click it to
@@ -708,7 +716,7 @@ Each job has one place; use it rather than writing another:
 | Talking to a running shotlet (thumbnail, pins, recording) | `src/app/ipc.zig` |
 | A history entry's `meta` and `video` files | `src/app/kvfile.zig` |
 | Shotlet's own state files and one-time flags | `src/app/statefile.zig`, `src/app/stateflag.zig` |
-| Telling the person about a problem: card, stderr, log | `src/app/report.zig` |
+| Telling the person about a problem: card, stderr, log | `src/app/report.zig` (the desktop integration refusing this copy of Shotlet: `src/app/refused.zig`) |
 | A command's output and exit status | `src/cli/out.zig` |
 | Colours and metrics of every surface, light and dark | `src/ui/theme.zig` (buttons: `src/ui/barkit.zig`) |
 | Picking an area: drag, move, resize, click, arrows | `src/ui/areasel.zig` (the editor through `src/ui/editor/area.zig`) |

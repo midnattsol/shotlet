@@ -48,9 +48,34 @@ pub fn supports(bus: *dbus.Connection, f: Feature) bool {
 }
 
 /// Call `member`: the reply, or the error reply as its CallError (Busy
-/// for Busy and Locked, UnknownMethod from an older extension).
+/// for Busy and Locked, UnknownMethod from an older extension). A call
+/// that checks its caller answered Denied: see `refused`.
 pub fn call(bus: *dbus.Connection, member: []const u8, sig: []const u8, body: []const u8, timeout_ms: i64) !dbus.Message {
-    return bus.call(bus_name, path, iface, member, sig, body, timeout_ms);
+    return bus.call(bus_name, path, iface, member, sig, body, timeout_ms) catch |err| {
+        if (err == error.Denied and checksCaller(member)) refused_caller.store(true, .monotonic);
+        return err;
+    };
+}
+
+/// The extension answers only the binary it would start itself (the
+/// .desktop file's Exec, its `shotlet-path`, or PATH): it refused this
+/// one at least once in this run (AccessDenied from a call that checks
+/// the caller), as it does for a copy run from elsewhere
+/// (zig-out/bin/shotlet).
+pub fn refused() bool {
+    return refused_caller.load(.monotonic);
+}
+
+var refused_caller = std.atomic.Value(bool).init(false);
+
+/// The calls that check who asks (extension.js `_checkCaller`), and
+/// answer AccessDenied for nothing else. (ScrollStep and ScrollEnd say
+/// AccessDenied for other reasons: another caller's session, the control
+/// not on screen.)
+fn checksCaller(member: []const u8) bool {
+    const checked = [_][]const u8{ "Capture", "CaptureMode", "CaptureWindows", "ScrollBegin", "StartRecording", "RecordSelect" };
+    for (checked) |m| if (std.mem.eql(u8, m, member)) return true;
+    return false;
 }
 
 /// A property of the extension (Shortcuts, BlockedShortcuts, ...).
@@ -276,6 +301,11 @@ pub fn watchStop(bus: *dbus.Connection) !void {
 
 pub fn isStopRequest(msg: *const dbus.Message) bool {
     return msg.isSignal(iface, "RecordingStopRequested");
+}
+
+test "only the calls that check the caller tell of a refusal" {
+    try std.testing.expect(checksCaller("Capture") and checksCaller("ScrollBegin") and checksCaller("StartRecording"));
+    try std.testing.expect(!checksCaller("ScrollStep") and !checksCaller("ScrollEnd") and !checksCaller("Place"));
 }
 
 test "the version table" {

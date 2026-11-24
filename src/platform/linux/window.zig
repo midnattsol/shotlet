@@ -166,7 +166,7 @@ pub const Window = struct {
 
     /// text we offer on the clipboard (text/plain;charset=utf-8, UTF8_STRING)
     clipboard_text: []u8 = &.{},
-    /// the PNG we offer on the clipboard (setClipboardPng)
+    /// the PNG (or the file's bytes) we offer on the clipboard
     clipboard_png: []u8 = &.{},
     /// progress of a drag started with startDrag()
     drag_state: DragState = .none,
@@ -297,7 +297,7 @@ pub const Window = struct {
     pub const setClipboardPng = clipboard.setClipboardPng;
     pub const setClipboardImage = clipboard.setClipboardImage;
     pub const setClipboardText = clipboard.setClipboardText;
-    pub const claimClipboardSource = clipboard.claimClipboardSource;
+    pub const setClipboardFile = clipboard.setClipboardFile;
     pub const serveClipboard = clipboard.serveClipboard;
     pub const clipboardText = data_device.clipboardText;
     pub const clipboardAccepted = data_device.clipboardAccepted;

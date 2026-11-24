@@ -4,7 +4,7 @@
 //!     G  Area     drag a region (or click a window); stays here
 //!     W  Window   pick a window (`shotlet window` starts anew)
 //!     D  Screen   the monitor under the pointer
-//!     J  Scroll   a scrolling capture (`shotlet scroll`)
+//!     J  Scroll   a scrolling capture, its picker on this same frozen frame
 //!     O  Text     drag over text: it is read and copied; stays here
 //!     Q  Record   the recording picker, on this same frozen frame
 //!     H  Timer    the self-timer (`shotlet timer`)
@@ -152,7 +152,8 @@ pub fn onKey(ed: *Editor, k: window.Key) !bool {
 }
 
 /// Switch to mode `m`: in place for Area, Text and (when the editor is
-/// what a screen capture opens) Screen; else the editor closes for it.
+/// what a screen capture opens) Screen; else the editor closes for it
+/// (Record and Scroll pick on this same capture).
 pub fn pick(ed: *Editor, m: Mode) !void {
     ed.needs_render = true;
     if (disabledWhy(ed, m) != null) return;
@@ -160,7 +161,7 @@ pub fn pick(ed: *Editor, m: Mode) !void {
         .area, .text => setText(ed, m == .text),
         .screen => screen(ed),
         .window => restart(ed, "window"),
-        .scroll => restart(ed, "scroll"),
+        .scroll => commands.finish(ed, .scroll),
         .timer => restart(ed, "timer"),
         .record => commands.finish(ed, .record),
     }

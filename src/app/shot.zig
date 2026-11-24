@@ -19,6 +19,8 @@ const modes = @import("modes/mode.zig");
 const mode_flow = @import("modes/flow.zig");
 const last_area = @import("modes/last_area.zig");
 const deliver = @import("deliver.zig");
+const refused = @import("refused.zig");
+const out = @import("../cli/out.zig");
 const handoff = @import("shot/handoff.zig");
 const next = @import("shot/next.zig");
 const handed = @import("shot/handed.zig");
@@ -169,7 +171,12 @@ fn handedToShell(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, req: modes
             return true;
         },
         .declined => return true,
-        .unavailable => return false,
+        .unavailable => {
+            // a copy the integration does not answer: said once a run,
+            // and a scrolling capture would only be refused again
+            if (refused.tell(gpa, env, bus) and req.mode == .scroll) out.exit(.failure);
+            return false;
+        },
     }
 }
 
@@ -214,8 +221,24 @@ const Reopen = struct {
 };
 
 /// The editor, then whatever its result asks for: copy, save, save as;
-/// keeping the capture for quick access and the history.
+/// keeping the capture for quick access and the history. The mode
+/// strip's Scroll picks a region on this same capture (its editor gone
+/// first) and opens the tall image in a new editor.
 pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !void {
+    var then = try editOnce(gpa, env, bus, cfg, win, cap, preset_sel, smoke_ms, reopen, edit);
+    while (then == .scroll) {
+        const ctx: mode_flow.Ctx = .{ .gpa = gpa, .env = env, .bus = bus, .cfg = cfg, .win = win };
+        const tall = (try next.scroll(ctx, cap)) orelse return;
+        try openEditor(win, cap, perMonitor(cap));
+        then = try editOnce(gpa, env, bus, cfg, win, cap, null, 0, null, tall);
+    }
+}
+
+/// What follows an editor: nothing more, or a scrolling capture of its
+/// capture.
+const Then = enum { done, scroll };
+
+fn editOnce(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Config, win: anytype, cap: *capture.Capture, preset_sel: ?[4]i32, smoke_ms: i64, reopen: ?Reopen, edit: mode_flow.Edit) !Then {
     var ed = editor_mod.Editor.init(gpa, win, &cap.image);
     ed.tools.env = env;
     ed.monitors = cap.monitors;
@@ -245,6 +268,10 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *
             .new_capture => next.restart(ctx, &ed),
             .screen => try next.screen(ctx, &ed, cap),
             .record => try next.record(ctx, &ed, cap, edit.from_shell),
+            .scroll => {
+                next.leave(&ed, win);
+                return .scroll;
+            },
             .cancel, .copied => try f.closed(result.action == .copied),
             .save, .save_as => if (!try f.saved(result.action == .save, result.png_data.?)) {
                 // the file chooser (over the editor) was cancelled or the
@@ -255,7 +282,7 @@ pub fn editAndFinish(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *
                 continue;
             },
         }
-        return;
+        return .done;
     }
 }
 

@@ -5,7 +5,11 @@
 //! - Screen: the monitor it chose is delivered like `shotlet fullscreen`
 //!   (after_fullscreen: copy, thumbnail or save);
 //! - Record: the recording picker opens on this same frozen frame;
-//! - Window, Scroll, Timer: that capture starts anew in a fresh shotlet.
+//! - Scroll: the scrolling capture's region picker opens on this same
+//!   frozen frame (and monitor layout), as `shotlet scroll` would after
+//!   capturing: no second capture; the tall image opens in a new editor
+//!   (app/shot.zig editAndFinish);
+//! - Window, Timer: that capture starts anew in a fresh shotlet.
 
 const std = @import("std");
 const log = std.log.scoped(.capture);
@@ -14,12 +18,13 @@ const relaunch = @import("../relaunch.zig");
 const mode_flow = @import("../modes/flow.zig");
 const editor_mod = @import("../../ui/editor.zig");
 const record_cli = @import("../../record/cli.zig");
+const scroll_available = @import("../scroll/available.zig");
 
 const Editor = editor_mod.Editor;
 
 /// Ease the editor out and close its window: nothing of it stays on
 /// screen for what comes next.
-fn leave(ed: *Editor, win: anytype) void {
+pub fn leave(ed: *Editor, win: anytype) void {
     ed.fadeOut() catch |err| log.debug("editor fade: {t}", .{err});
     win.closeWindow();
 }
@@ -36,6 +41,19 @@ pub fn record(c: mode_flow.Ctx, ed: *Editor, cap: *const capture.Capture, overla
     leave(ed, c.win);
     log.info("capture mode: record, the picker on this capture", .{});
     try record_cli.pickOnCapture(c.gpa, c.env, cap, overlays);
+}
+
+/// The scrolling capture on `cap` (the editor has left): its region
+/// picker at once, the scrolling live. How the editor opens on the tall
+/// image (it replaces `cap`); null when there is nothing to edit (it
+/// cannot run here: the person was told why; cancelled; failed).
+pub fn scroll(c: mode_flow.Ctx, cap: *capture.Capture) !?mode_flow.Edit {
+    log.info("capture mode: scroll, the picker on this capture", .{});
+    if (!scroll_available.ensure(c.gpa, c.env)) return null;
+    return switch (try mode_flow.afterCapture(c, cap, .{ .mode = .scroll })) {
+        .done => null,
+        .edit => |e| e,
+    };
 }
 
 pub fn restart(c: mode_flow.Ctx, ed: *Editor) void {

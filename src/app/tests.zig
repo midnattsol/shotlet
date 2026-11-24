@@ -20,6 +20,7 @@ comptime {
     _ = @import("quick.zig");
     _ = @import("quick_ipc.zig");
     _ = @import("relaunch.zig");
+    _ = @import("refused.zig");
     _ = @import("report.zig");
     _ = @import("shot.zig");
     _ = @import("shot/timeline.zig");

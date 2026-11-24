@@ -43,7 +43,7 @@ shell               | 1600x900           | nothumb ext            | gnome-integr
 shell-owner         | 1600x900           | nothumb ext            | install moves a custom shortcut running shotlet to the extension, uninstall back
 shell-mixed         | 2560x1440 1280x720 | nothumb ext            | Print through the extension on scales 2 and 1
 shell-tray          | 1600x900           | nothumb ext            | the tray's captures through the extension, one at a time
-shell-terminal      | 1600x900           | nothumb ext            | shotlet and shotlet text from a terminal ask the extension; the portal without it
+shell-terminal      | 1600x900           | nothumb ext            | shotlet and shotlet text from a terminal ask the extension; a copy it does not answer is told so once; the portal without it
 modes-screen        | 1600x900 1280x720  | ext                    | the monitor under the pointer, all screens, the previous area, after_fullscreen
 modes-strip         | 1600x900           | ext                    | the editor's mode strip: a window lit and clicked, its keys, More, dark
 modes-timer         | 1600x900           | ext                    | shotlet timer 3: the shell's countdown, not in the capture

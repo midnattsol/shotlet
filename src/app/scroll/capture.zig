@@ -15,6 +15,7 @@ const sys = @import("../../platform/api.zig").sys;
 const shell_seam = @import("../../platform/api.zig").shell;
 const geom = @import("../../geom.zig");
 const flow = @import("../modes/flow.zig");
+const refused = @import("../refused.zig");
 const settings = @import("../modes/settings.zig");
 const region_pick = @import("../../ui/region_pick.zig");
 const hud_mod = @import("../../ui/scroll_hud.zig");
@@ -36,17 +37,23 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
     defer c.win.closeWindow();
     defer hud.deinit();
     try showHud(c, &hud, cap, region, shell);
-    var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| return failed(&hud, err);
+    var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| return failed(c, &hud, err);
     defer session.deinit();
-    return session.collect() catch |err| failed(&hud, err);
+    return session.collect() catch |err| failed(c, &hud, err);
 }
 
 /// No frame of the region came (the source would not start, or gave
 /// nothing): the control says so until it is closed, instead of
-/// vanishing. Null: nothing to edit.
-fn failed(hud: *hud_mod.Hud, err: anyerror) !?png.Image {
-    log.warn("scrolling capture failed ({t}): no frame of the region", .{err});
-    hud.show(.failed, "Couldn\u{2019}t capture the region", "Close and try again", 0);
+/// vanishing; when the integration refused this Shotlet, that (said
+/// once a run on a card and stderr: refused.zig). Null: nothing to edit.
+fn failed(c: flow.Ctx, hud: *hud_mod.Hud, err: anyerror) !?png.Image {
+    if (refused.tell(c.gpa, c.env, c.bus)) {
+        log.warn("stopped: the desktop integration answers only the installed Shotlet", .{});
+        hud.show(.failed, refused.short_title, refused.short_hint, 0);
+    } else {
+        log.warn("scrolling capture failed ({t}): no frame of the region", .{err});
+        hud.show(.failed, "Couldn\u{2019}t capture the region", "Close and try again", 0);
+    }
     while (true) {
         try hud.draw();
         if (try hud.poll(100)) |_| return null;

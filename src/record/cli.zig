@@ -17,6 +17,7 @@ const picker = @import("../ui/recui/picker.zig");
 const capture = @import("../app/capture.zig");
 const config = @import("../app/config.zig");
 const shot = @import("../app/shot.zig");
+const refused = @import("../app/refused.zig");
 const text = @import("../gfx/text.zig");
 const theme = @import("../ui/theme.zig");
 const out = @import("../cli/out.zig");
@@ -98,6 +99,7 @@ fn pickThenRun(gpa: std.mem.Allocator, env: Env, a: Args, set: Settings, cfg: *c
     var bus = try desktop.connectBrief(gpa, env);
     defer bus.deinit();
     if (media.pickInShell(gpa, &bus)) return;
+    _ = refused.tell(gpa, env, &bus);
     desktop.identify(gpa, &bus);
     var cap = (try shot.acquire(gpa, env, &bus, cfg, .{}, null)) orelse return;
     defer cap.deinit(gpa);
