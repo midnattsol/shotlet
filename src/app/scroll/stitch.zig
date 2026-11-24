@@ -21,11 +21,17 @@
 //! fractional scale repaints every row a little differently), the rows'
 //! profiles decide (nearmatch.zig).
 //!
+//! Only the columns that scroll are compared, and only they are kept
+//! when content beside them stays put (another terminal pane, a fixed
+//! sidebar: columns.zig).
+//!
 //! An unchanged frame means the content stopped moving (the end of the
 //! page); no offset means it moved too far between two frames.
 
 const std = @import("std");
 const nearmatch = @import("nearmatch.zig");
+const columns = @import("columns.zig");
+pub const Span = columns.Span;
 
 pub const default_max_height: u32 = 20_000;
 
@@ -47,9 +53,16 @@ pub fn hashWidth(w: u32) u32 {
     return w - margin;
 }
 
-pub fn rowHashes(f: Frame, out: []u64) void {
-    const hw = hashWidth(f.width);
-    for (out, 0..) |*h, y| h.* = std.hash.Wyhash.hash(0x5c011, std.mem.sliceAsBytes(f.row(y)[0..hw]));
+/// Each row's hash over the columns `cols`.
+pub fn rowHashes(f: Frame, cols: Span, out: []u64) void {
+    for (out, 0..) |*h, y| h.* = std.hash.Wyhash.hash(0x5c011, std.mem.sliceAsBytes(f.row(y)[cols.x0..cols.x1]));
+}
+
+/// Nothing scrolled between frames `a` and `b` (same size): identical,
+/// or only a few rows changed (a blinking cursor, a spinner).
+pub fn still(gpa: std.mem.Allocator, a: Frame, b: Frame) !bool {
+    if (std.mem.eql(u32, a.pixels, b.pixels)) return true;
+    return (try columns.split(gpa, a.pixels, b.pixels, a.width, hashWidth(a.width), 0, a.height)) == null;
 }
 
 pub const Bands = struct { top: u32 = 0, bottom: u32 = 0 };
@@ -124,14 +137,13 @@ fn candidateKey(d: u32, anchors: u32, expected: ?u32) i64 {
 }
 
 /// Rows `cur[i]` and `prev[i + d]` are the same pixels (the hashed part).
-fn verify(prev: Frame, cur: Frame, top: u32, body_h: u32, d: u32) bool {
-    const hw = hashWidth(prev.width);
+fn verify(prev: Frame, cur: Frame, cols: Span, top: u32, body_h: u32, d: u32) bool {
     const overlap = body_h - d;
     const step = @max(1, overlap / 32);
     var i: u32 = 0;
     while (i < overlap) : (i += step) {
-        const a = prev.row(top + i + d)[0..hw];
-        const b = cur.row(top + i)[0..hw];
+        const a = prev.row(top + i + d)[cols.x0..cols.x1];
+        const b = cur.row(top + i)[cols.x0..cols.x1];
         if (!std.mem.eql(u32, a, b)) return false;
     }
     return true;
@@ -155,6 +167,8 @@ pub const Stitcher = struct {
     max_height: u32,
     /// the header rows (from the first frame); fixed at the first move
     bands: ?Bands = null,
+    /// the columns lined up and kept; fixed at the first move
+    cols: ?columns.Split = null,
     first: []u32,
     /// body rows appended so far (the first frame's body first)
     body: std.ArrayList(u32) = .empty,
@@ -174,7 +188,6 @@ pub const Stitcher = struct {
         const ph = try gpa.alloc(u64, first.height);
         errdefer gpa.free(ph);
         const ch = try gpa.alloc(u64, first.height);
-        rowHashes(first, ph);
         return .{ .gpa = gpa, .width = first.width, .height = first.height, .max_height = @max(first.height, max_height), .first = copy, .prev = prev, .prev_hash = ph, .cur_hash = ch };
     }
 
@@ -192,8 +205,24 @@ pub const Stitcher = struct {
         return b.top + @as(u32, @intCast(self.body.items.len / self.width)) + b.bottom;
     }
 
+    /// The image's columns (of the region's): all of them unless content
+    /// beside what scrolls stayed put (columns.zig).
+    pub fn kept(self: *const Stitcher) Span {
+        return if (self.cols) |c| c.keep else .{ .x0 = 0, .x1 = self.width };
+    }
+
+    /// Width of the image.
+    pub fn outWidth(self: *const Stitcher) u32 {
+        return self.kept().len();
+    }
+
     /// Row y of the image so far (y < totalHeight()), without building it.
     pub fn row(self: *const Stitcher, y: u32) []const u32 {
+        const k = self.kept();
+        return self.fullRow(y)[k.x0..k.x1];
+    }
+
+    fn fullRow(self: *const Stitcher, y: u32) []const u32 {
         const w = self.width;
         const b = self.bands orelse return self.first[@as(usize, y) * w ..][0..w];
         if (y < b.top) return self.first[@as(usize, y) * w ..][0..w];
@@ -210,39 +239,58 @@ pub const Stitcher = struct {
     pub fn push(self: *Stitcher, f: Frame) !Push {
         if (f.width != self.width or f.height != self.height) return error.FrameSizeChanged;
         if (self.totalHeight() >= self.max_height) return .full;
-        rowHashes(f, self.cur_hash);
+        if (std.mem.eql(u32, self.prev, f.pixels[0..self.prev.len])) return .unchanged;
+        const cols = try self.columnsOf(f);
+        rowHashes(self.prevFrame(), cols.match, self.prev_hash);
+        rowHashes(f, cols.match, self.cur_hash);
         const moved = staticBands(self.prev_hash, self.cur_hash);
         if (moved.top == 0 and moved.bottom == 0 and std.mem.eql(u64, self.prev_hash, self.cur_hash)) return .unchanged;
         const b = self.bands orelse moved;
+        const d = (try self.offset(f, cols.match, b)) orelse return .no_overlap;
+        if (d == 0) return .unchanged;
+        if (self.bands == null) {
+            try self.startBody(b);
+            self.cols = cols;
+        }
+        const room = self.max_height - self.totalHeight();
+        const add = @min(d, room);
+        try self.appendRows(f, self.height - b.bottom - d, add);
+        self.last_step = d;
+        @memcpy(self.prev, f.pixels[0..self.prev.len]);
+        return if (add < d or add == room) .full else .{ .appended = d };
+    }
+
+    /// The columns to line up and keep: fixed at the first move; until
+    /// then, from what this frame changed (every column, scroll bar's
+    /// strip aside, when few rows changed).
+    fn columnsOf(self: *const Stitcher, f: Frame) !columns.Split {
+        if (self.cols) |c| return c;
+        const hw = hashWidth(self.width);
+        const all: columns.Split = .{ .match = .{ .x0 = 0, .x1 = hw }, .keep = .{ .x0 = 0, .x1 = self.width } };
+        return (try columns.split(self.gpa, self.prev, f.pixels, self.width, hw, 0, self.height)) orelse all;
+    }
+
+    /// How far the body moved: exactly (verified pixel by pixel), else by
+    /// the rows' profiles; null when nothing lines up.
+    fn offset(self: *const Stitcher, f: Frame, cols: Span, b: Bands) !?u32 {
         const body_h = self.height - b.top - b.bottom;
         const prev_body = self.prev_hash[b.top..][0..body_h];
         const cur_body = self.cur_hash[b.top..][0..body_h];
-        const exact = try findOffset(self.gpa, prev_body, cur_body, self.last_step);
-        const d = if (exact != null and verify(self.prevFrame(), f, b.top, body_h, exact.?))
-            exact.?
-        else
-            (try self.nearOffset(f, b.top, body_h)) orelse return .no_overlap;
-        if (d == 0) return .unchanged;
-        if (self.bands == null) try self.startBody(b);
-        const room = self.max_height - self.totalHeight();
-        const add = @min(d, room);
-        try self.appendRows(f, b.top + body_h - d, add);
-        self.last_step = d;
-        @memcpy(self.prev, f.pixels[0..self.prev.len]);
-        @memcpy(self.prev_hash, self.cur_hash);
-        return if (add < d or add == room) .full else .{ .appended = d };
+        if (try findOffset(self.gpa, prev_body, cur_body, self.last_step)) |d| {
+            if (verify(self.prevFrame(), f, cols, b.top, body_h, d)) return d;
+        }
+        return self.nearOffset(f, cols, b.top, body_h);
     }
 
     /// No distance lines the rows up exactly (a half-pixel scroll on a
     /// fractional scale): the one their profiles agree on (nearmatch.zig).
-    fn nearOffset(self: *const Stitcher, f: Frame, top: u32, body_h: u32) !?u32 {
+    fn nearOffset(self: *const Stitcher, f: Frame, cols: Span, top: u32, body_h: u32) !?u32 {
         const n = @as(usize, body_h) * nearmatch.blocks;
         const prof = try self.gpa.alloc(u16, 2 * n);
         defer self.gpa.free(prof);
-        const hw = hashWidth(self.width);
-        const at = @as(usize, top) * self.width;
-        nearmatch.profiles(self.prev[at..], self.width, hw, body_h, prof[0..n]);
-        nearmatch.profiles(f.pixels[at..], self.width, hw, body_h, prof[n..]);
+        const at = @as(usize, top) * self.width + cols.x0;
+        nearmatch.profiles(self.prev[at..], self.width, cols.len(), body_h, prof[0..n]);
+        nearmatch.profiles(f.pixels[at..], self.width, cols.len(), body_h, prof[n..]);
         return nearmatch.findOffset(self.gpa, prof[0..n], prof[n..], body_h, self.last_step);
     }
 
@@ -259,18 +307,13 @@ pub const Stitcher = struct {
         try self.body.appendSlice(self.gpa, f.pixels[@as(usize, from) * w ..][0 .. @as(usize, count) * w]);
     }
 
-    /// The stitched image: header, body, footer (from the last frame).
-    /// Caller owns the pixels.
+    /// The stitched image: header, body, footer (from the last frame), of
+    /// the kept columns. Caller owns the pixels.
     pub fn result(self: *const Stitcher) !Frame {
-        const w = self.width;
-        const b = self.bands orelse return .{ .pixels = try self.gpa.dupe(u32, self.first), .width = w, .height = self.height };
+        const w = self.outWidth();
         const h = self.totalHeight();
         const out = try self.gpa.alloc(u32, @as(usize, w) * h);
-        const top_n = @as(usize, b.top) * w;
-        @memcpy(out[0..top_n], self.first[0..top_n]);
-        @memcpy(out[top_n..][0..self.body.items.len], self.body.items);
-        const foot_n = @as(usize, b.bottom) * w;
-        @memcpy(out[top_n + self.body.items.len ..][0..foot_n], self.prev[self.prev.len - foot_n ..]);
+        for (0..h) |y| @memcpy(out[y * w ..][0..w], self.row(@intCast(y)));
         return .{ .pixels = out, .width = w, .height = h };
     }
 };

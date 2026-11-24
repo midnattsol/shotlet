@@ -9,9 +9,15 @@
 //!                          warn (and go on), or stop for a reason
 //!   Watch.restart()        after Continue: count afresh
 //!
-//! When Shotlet turns the wheel (auto): two frames in a row that did not
-//! move end it; at the end of the page when the content had moved, else
-//! the page never moved. No overlap shrinks the step to one notch, and
+//! When Shotlet turns the wheel (auto): two frames in a row that the
+//! wheel did not move end it; at the end of the page when the wheel had
+//! moved the content, else the page never moved. Content that moves by
+//! itself (a terminal's output arriving at the bottom, a few lines at a
+//! time) is stitched, but it is not the wheel's doing: a step that moved
+//! less than `min_notch_px` a notch counts as one that did not move, else
+//! a terminal at the bottom of its scrollback ended "at the end of the
+//! page" with what it printed meanwhile, never saying the wheel did
+//! nothing. No overlap shrinks the step to one notch, and
 //! no overlap at one notch stops it. When the person scrolls, nothing
 //! moving is just waiting, and no overlap is a warning: scrolling back a
 //! little lines it up again by itself.
@@ -19,6 +25,10 @@
 const std = @import("std");
 const stitch = @import("stitch.zig");
 const grouped = @import("../../ui/scroll_hud.zig").grouped;
+
+/// The least a wheel notch moves content: a line of text at scale 1
+/// (terminals move 1 to 6 lines a notch, GTK 123 logical px).
+pub const min_notch_px = 16;
 
 pub const Reason = enum {
     /// the content stopped moving after it had moved
@@ -74,7 +84,8 @@ pub const Verdict = union(enum) {
 pub const Watch = struct {
     /// Shotlet turns the wheel (else the person scrolls)
     auto: bool,
-    /// something was appended since the capture started
+    /// something was appended since the capture started (auto: by the
+    /// wheel)
     moved: bool = false,
     /// frames in a row that did not move
     still: u32 = 0,
@@ -86,19 +97,18 @@ pub const Watch = struct {
     /// turned before it.
     pub fn feed(self: *Watch, r: stitch.Push, clicks: i32) Verdict {
         switch (r) {
-            .appended => {
+            .appended => |d| {
+                self.misses = 0;
+                if (self.auto and clicks > 0 and d < @as(u32, @intCast(clicks)) * min_notch_px) return self.stood();
                 self.moved = true;
                 self.still = 0;
-                self.misses = 0;
                 return .go;
             },
             .full => return .{ .stop = .height_limit },
             .unchanged => {
                 self.misses = 0;
                 if (!self.auto) return .go;
-                self.still += 1;
-                if (self.still < 2) return .go;
-                return .{ .stop = if (self.moved) .end_of_page else .didnt_move };
+                return self.stood();
             },
             .no_overlap => {
                 self.misses += 1;
@@ -106,6 +116,13 @@ pub const Watch = struct {
                 return if (clicks <= 1) .{ .stop = .no_match } else .slower;
             },
         }
+    }
+
+    /// A step the wheel did not move (auto): two in a row end it.
+    fn stood(self: *Watch) Verdict {
+        self.still += 1;
+        if (self.still < 2) return .go;
+        return .{ .stop = if (self.moved) .end_of_page else .didnt_move };
     }
 
     /// Continue: count afresh (what moved before still counts).
@@ -119,7 +136,7 @@ pub const Watch = struct {
 
 const testing = std.testing;
 const fw = 32;
-const fh = 60;
+const fh = 240;
 
 /// The view of a page scrolled by `off` rows; every row distinct.
 fn frameAt(buf: []u32, off: u32) stitch.Frame {
@@ -157,31 +174,52 @@ test "identical frames: the page didn't move" {
 }
 
 test "moving, then identical frames: the end of the page" {
-    try testing.expectEqual(Reason.end_of_page, (try run(&.{ 0, 20, 40, 55, 55, 55 }, true, 20_000, null)).?);
+    try testing.expectEqual(Reason.end_of_page, (try run(&.{ 0, 80, 160, 220, 220, 220 }, true, 20_000, null)).?);
     // one still frame (a slow repaint) is not the end
-    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 20, 20, 40 }, true, 20_000, null));
+    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 80, 80, 160 }, true, 20_000, null));
+}
+
+test "content moving by itself while the wheel does nothing: didn't move" {
+    // a terminal at the bottom of its scrollback, printing a line now and
+    // then: 28 or 111 px while ten notches turned
+    var w: Watch = .{ .auto = true };
+    try testing.expectEqual(Verdict.go, w.feed(.{ .appended = 28 }, 3));
+    try testing.expectEqual(Verdict{ .stop = .didnt_move }, w.feed(.{ .appended = 111 }, 10));
+    // after the wheel moved it, the same is the end of the page
+    var m: Watch = .{ .auto = true };
+    try testing.expectEqual(Verdict.go, m.feed(.{ .appended = 499 }, 3));
+    try testing.expectEqual(Verdict.go, m.feed(.{ .appended = 28 }, 10));
+    try testing.expectEqual(Verdict{ .stop = .end_of_page }, m.feed(.unchanged, 10));
+    // a short last step of a real scroll still counts as moving
+    var e: Watch = .{ .auto = true };
+    try testing.expectEqual(Verdict.go, e.feed(.{ .appended = 111 }, 4));
+    try testing.expect(e.moved);
+    // the person scrolling: whatever moved counts
+    var p: Watch = .{ .auto = false };
+    try testing.expectEqual(Verdict.go, p.feed(.{ .appended = 3 }, 0));
+    try testing.expect(p.moved);
 }
 
 test "no overlap: slower first, then couldn't match" {
-    try testing.expectEqual(Reason.no_match, (try run(&.{ 0, 500, 1000 }, true, 20_000, null)).?);
+    try testing.expectEqual(Reason.no_match, (try run(&.{ 0, 2000, 4000 }, true, 20_000, null)).?);
     // a smaller step that lines up again carries on
-    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 500, 30, 60 }, true, 20_000, null));
+    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 2000, 120, 240 }, true, 20_000, null));
 }
 
 test "the height cap stops at the limit" {
     var offs: [40]u32 = undefined;
-    for (&offs, 0..) |*o, i| o.* = @intCast(i * 30);
-    try testing.expectEqual(Reason.height_limit, (try run(&offs, true, 1000, null)).?);
+    for (&offs, 0..) |*o, i| o.* = @intCast(i * 120);
+    try testing.expectEqual(Reason.height_limit, (try run(&offs, true, 2000, null)).?);
 }
 
 test "the person scrolling: waiting is fine, no overlap only warns" {
     var warned: ?Reason = null;
-    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 0, 0, 0, 0, 25 }, false, 20_000, &warned));
+    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 0, 0, 0, 0, 100 }, false, 20_000, &warned));
     try testing.expectEqual(@as(?Reason, null), warned);
-    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 900, 950, 25, 50 }, false, 20_000, &warned));
+    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 3600, 3800, 100, 200 }, false, 20_000, &warned));
     try testing.expectEqual(Reason.no_match, warned.?);
     // and the end of the page is the person's Stop, not a guess
-    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 30, 30, 30, 30 }, false, 20_000, null));
+    try testing.expectEqual(@as(?Reason, null), try run(&.{ 0, 120, 120, 120, 120 }, false, 20_000, null));
 }
 
 test "only natural stops finish; the messages say why" {

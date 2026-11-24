@@ -6,4 +6,6 @@ comptime {
     _ = @import("offload.zig");
     _ = @import("available.zig");
     _ = @import("stop.zig");
+    _ = @import("pace.zig");
+    _ = @import("columns.zig");
 }

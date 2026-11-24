@@ -29,6 +29,7 @@ const hud_mod = @import("../../ui/scroll_hud.zig");
 const stitch = @import("stitch.zig");
 const stop = @import("stop.zig");
 const offload = @import("offload.zig");
+const pace_mod = @import("pace.zig");
 const platform_capture = @import("../../platform/api.zig").capture;
 
 /// How long a natural stop's reason stays up before the editor opens.
@@ -52,8 +53,8 @@ pub const Session = struct {
     src: ?platform_capture.ScrollSource = null,
     st: ?stitch.Stitcher = null,
     watch: stop.Watch,
-    /// wheel notches per step, adapted to land about half a view further
-    clicks: i32 = 3,
+    /// wheel notches per step, from how far a notch moved (pace.zig)
+    pace: pace_mod.Pace = .{},
     /// after Continue from no_match: the person scrolls back (no wheel)
     /// until the parts line up again
     realign: bool = false,
@@ -145,7 +146,7 @@ pub const Session = struct {
 
     /// The control's preview of the image so far, at `rect`.
     fn previewOf(st: *const stitch.Stitcher, gpa: std.mem.Allocator, rect: hud_mod.Rect) ?hud_mod.Preview {
-        return hud_mod.Preview.make(gpa, rect, .{ .ctx = st, .width = st.width, .height = st.totalHeight(), .row = rowOf });
+        return hud_mod.Preview.make(gpa, rect, .{ .ctx = st, .width = st.outWidth(), .height = st.totalHeight(), .row = rowOf });
     }
 
     /// The control for up to `ms`: drawn, its input read (an action is
@@ -165,18 +166,24 @@ pub const Session = struct {
     }
 
     /// The region once nothing moves in it any more (the picker's fade,
-    /// a repaint under load), at most about two seconds on.
+    /// a repaint under load), at most about two seconds on. A blinking
+    /// cursor or a spinner does not count as moving (stitch.still).
     fn settled(self: *Session) !png.Image {
         var a = try self.grab(0);
         for (0..12) |_| {
             try self.wait(60);
             const b = try self.grab(0);
-            const same = std.mem.eql(u32, a.pixels, b.pixels);
+            const same = a.width == b.width and a.height == b.height and
+                try stitch.still(self.c.gpa, frameOf(a), frameOf(b));
             a.deinit(self.c.gpa);
             a = b;
             if (same) break;
         }
         return a;
+    }
+
+    fn frameOf(i: png.Image) stitch.Frame {
+        return .{ .pixels = i.pixels, .width = i.width, .height = i.height };
     }
 
     /// The tall image; null when cancelled.
@@ -266,7 +273,7 @@ pub const Session = struct {
         log.info("continuing after {t}", .{why});
         self.watch.restart();
         switch (why) {
-            .didnt_move => self.clicks = 3,
+            .didnt_move => self.pace.restart(),
             .no_match => if (self.opener.auto) {
                 self.realign = true;
             },
@@ -287,7 +294,7 @@ pub const Session = struct {
 
     /// One frame: why it stops, or null to go on.
     fn step(self: *Session) !?stop.Reason {
-        const clicks: i32 = if (self.wheel()) self.clicks else 0;
+        const clicks: i32 = if (self.wheel()) self.pace.clicks else 0;
         var f = self.grab(clicks) catch |err| {
             log.warn("no frame: {t}", .{err});
             return .lost;
@@ -305,7 +312,7 @@ pub const Session = struct {
             .go => {},
             .slower => {
                 log.info("moved too far ({d} notches)", .{clicks});
-                self.clicks = @max(1, @divTrunc(clicks, 2));
+                self.pace.tooFar();
             },
             .warn => |why| if (!self.warned and !self.realign) {
                 self.warned = true;
@@ -336,12 +343,9 @@ pub const Session = struct {
         if (self.realign) {
             // lined up again: back to the wheel, carefully
             self.realign = false;
-            self.clicks = 1;
+            self.pace.clicks = 1;
             self.watch.auto = self.wheel();
-        } else if (self.wheel()) {
-            const per_click = @max(1, @divTrunc(@as(i32, @intCast(d)), self.clicks));
-            self.clicks = std.math.clamp(@divTrunc(@as(i32, @intCast(h / 2)), per_click), 1, 10);
-        }
+        } else if (self.wheel()) self.pace.moved(d, h);
         self.showRunning();
     }
 };
