@@ -14,10 +14,14 @@
 //! moved the content, else the page never moved. Content that moves by
 //! itself (a terminal's output arriving at the bottom, a few lines at a
 //! time) is stitched, but it is not the wheel's doing: a step that moved
-//! less than `min_notch_px` a notch counts as one that did not move, else
-//! a terminal at the bottom of its scrollback ended "at the end of the
+//! less than an eighth of the region (`Watch.min_move`), or less than
+//! `min_notch_px` a notch, counts as one that did not move. Else a
+//! terminal at the bottom of its scrollback ended "at the end of the
 //! page" with what it printed meanwhile, never saying the wheel did
-//! nothing. No overlap shrinks the step to one notch, and
+//! nothing. (A wheel step aims at half the region; the first, of three
+//! notches, moved a GTK page 40 % of it and Ghostty a third. A page
+//! that can scroll less than an eighth of the region pauses as "didn't
+//! move", with what it moved kept for Finish.) No overlap shrinks the step to one notch, and
 //! no overlap at one notch stops it. When the person scrolls, nothing
 //! moving is just waiting, and no overlap is a warning: scrolling back a
 //! little lines it up again by itself.
@@ -91,6 +95,9 @@ pub const Watch = struct {
     still: u32 = 0,
     /// frames in a row that lined up nowhere
     misses: u32 = 0,
+    /// rows a step must move to be the wheel's doing (auto): an eighth
+    /// of the region, set from the first frame
+    min_move: u32 = 0,
 
     /// One frame's outcome (after the session looked again at a frame
     /// that seemed not to move or not to line up). `clicks`: the notches
@@ -99,7 +106,7 @@ pub const Watch = struct {
         switch (r) {
             .appended => |d| {
                 self.misses = 0;
-                if (self.auto and clicks > 0 and d < @as(u32, @intCast(clicks)) * min_notch_px) return self.stood();
+                if (self.auto and clicks > 0 and !self.byWheel(d, clicks)) return self.stood();
                 self.moved = true;
                 self.still = 0;
                 return .go;
@@ -116,6 +123,12 @@ pub const Watch = struct {
                 return if (clicks <= 1) .{ .stop = .no_match } else .slower;
             },
         }
+    }
+
+    /// A step of `clicks` notches that moved the content `d` rows: far
+    /// enough to be the wheel's doing, not content moving by itself.
+    fn byWheel(self: *const Watch, d: u32, clicks: i32) bool {
+        return d >= self.min_move and d >= @as(u32, @intCast(clicks)) * min_notch_px;
     }
 
     /// A step the wheel did not move (auto): two in a row end it.
@@ -180,20 +193,27 @@ test "moving, then identical frames: the end of the page" {
 }
 
 test "content moving by itself while the wheel does nothing: didn't move" {
-    // a terminal at the bottom of its scrollback, printing a line now and
-    // then: 28 or 111 px while ten notches turned
-    var w: Watch = .{ .auto = true };
-    try testing.expectEqual(Verdict.go, w.feed(.{ .appended = 28 }, 3));
+    // a terminal at the bottom of its scrollback (a region 1851 px
+    // tall), printing a line or two now and then: 28 or 55 px while three
+    // notches turned, 111 px while ten did
+    var w: Watch = .{ .auto = true, .min_move = 1851 / 8 };
+    try testing.expectEqual(Verdict.go, w.feed(.{ .appended = 55 }, 3));
     try testing.expectEqual(Verdict{ .stop = .didnt_move }, w.feed(.{ .appended = 111 }, 10));
+    try testing.expect(!w.moved);
     // after the wheel moved it, the same is the end of the page
-    var m: Watch = .{ .auto = true };
+    var m: Watch = .{ .auto = true, .min_move = 1851 / 8 };
     try testing.expectEqual(Verdict.go, m.feed(.{ .appended = 499 }, 3));
     try testing.expectEqual(Verdict.go, m.feed(.{ .appended = 28 }, 10));
     try testing.expectEqual(Verdict{ .stop = .end_of_page }, m.feed(.unchanged, 10));
-    // a short last step of a real scroll still counts as moving
-    var e: Watch = .{ .auto = true };
+    // a short last step at the end of a real scroll: the end
+    var e: Watch = .{ .auto = true, .min_move = 1500 / 8 };
+    try testing.expectEqual(Verdict.go, e.feed(.{ .appended = 666 }, 4));
     try testing.expectEqual(Verdict.go, e.feed(.{ .appended = 111 }, 4));
-    try testing.expect(e.moved);
+    try testing.expectEqual(Verdict{ .stop = .end_of_page }, e.feed(.unchanged, 4));
+    // many notches that moved little each are not the wheel either
+    var n: Watch = .{ .auto = true };
+    _ = n.feed(.{ .appended = 100 }, 10);
+    try testing.expect(!n.moved);
     // the person scrolling: whatever moved counts
     var p: Watch = .{ .auto = false };
     try testing.expectEqual(Verdict.go, p.feed(.{ .appended = 3 }, 0));

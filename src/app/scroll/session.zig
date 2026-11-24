@@ -190,6 +190,7 @@ pub const Session = struct {
     pub fn collect(self: *Session) !?png.Image {
         var first = try self.settled();
         defer first.deinit(self.c.gpa);
+        self.watch.min_move = first.height / 8;
         var pv: ?hud_mod.Preview = null;
         self.st = try offload.run(self, startStitch, .{ self.c.gpa, first, self.max_height, self.hud.previewRect(), &pv });
         defer self.st.?.deinit();
