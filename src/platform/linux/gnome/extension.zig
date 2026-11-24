@@ -138,23 +138,42 @@ pub fn extensionDir(buf: []u8, home: []const u8) ![]u8 {
     return std.fmt.bufPrint(buf, "{s}/gnome-shell/extensions/{s}", .{ try env_mod.dataHome(&data, home), uuid });
 }
 
+/// Every file of the bundled extension: path inside its directory, contents.
+const bundled_files = [_][2][]const u8{
+    .{ "extension.js", ext_js },
+    .{ "metadata.json", ext_metadata },
+} ++ ext_modules ++ @import("bundle.zig").modules ++ [_][2][]const u8{
+    .{ "schemas/" ++ schema_file, ext_schema },
+    .{ "schemas/gschemas.compiled", ext_schema_compiled },
+};
+
 /// Copy the bundled extension into the user's extension directory.
 pub fn writeBundled(home: []const u8) ![]const u8 {
     const S = struct {
         var dir_buf: [1024]u8 = undefined;
     };
     const dir = try extensionDir(&S.dir_buf, home);
-    sys.mkdirAll(dir, 0o755);
-    var p: [1100]u8 = undefined;
-    try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/extension.js", .{dir}), ext_js);
-    try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/metadata.json", .{dir}), ext_metadata);
-    for (ext_modules ++ @import("bundle.zig").modules) |mod| try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, mod[0] }), mod[1]);
-    const schemas = try std.fmt.bufPrint(&p, "{s}/schemas", .{dir});
-    sys.mkdirAll(schemas, 0o755);
-    var q: [1200]u8 = undefined;
-    try sys.writeFile(try std.fmt.bufPrint(&q, "{s}/" ++ schema_file, .{schemas}), ext_schema);
-    try sys.writeFile(try std.fmt.bufPrint(&q, "{s}/gschemas.compiled", .{schemas}), ext_schema_compiled);
+    var p: [1200]u8 = undefined;
+    sys.mkdirAll(try std.fmt.bufPrint(&p, "{s}/schemas", .{dir}), 0o755);
+    for (bundled_files) |f| try sys.writeFile(try std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, f[0] }), f[1]);
     return dir;
+}
+
+/// The copy in the user's extension directory: absent, the same as this
+/// binary's bundled one, or another version.
+const OnDisk = enum { absent, same, other };
+
+fn onDisk(gpa: std.mem.Allocator, home: []const u8) OnDisk {
+    var dbuf: [1024]u8 = undefined;
+    const dir = extensionDir(&dbuf, home) catch return .absent;
+    var p: [1200]u8 = undefined;
+    for (bundled_files, 0..) |f, i| {
+        const path = std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, f[0] }) catch return .other;
+        const got = sys.readFileAlloc(gpa, path, f[1].len + 1) catch return if (i == 0) .absent else .other;
+        defer gpa.free(got);
+        if (!std.mem.eql(u8, got, f[1])) return .other;
+    }
+    return .same;
 }
 
 /// --schemadir for the extension's settings.
@@ -171,7 +190,7 @@ pub const InstallResult = enum { active, installed_relogin, failed };
 /// copy, which GNOME Shell on Wayland may only load at the next login.
 pub fn installExtension(gpa: std.mem.Allocator, env: Env, bus_opt: ?*dbus.Connection) InstallResult {
     const bus = bus_opt orelse return .failed;
-    if (extensionActive(bus)) return .active;
+    if (extensionActive(bus)) return refreshBundled(gpa, env.home);
     const state = shellState(gpa, bus);
     if (state == null) {
         log.warn("GNOME Shell is not running here", .{});
@@ -190,6 +209,22 @@ pub fn installExtension(gpa: std.mem.Allocator, env: Env, bus_opt: ?*dbus.Connec
     _ = callBool(gpa, bus, "EnableExtension", 5000) catch |err|
         log.warn("could not enable the extension: {t}", .{err});
     if (waitActive(bus)) return .active;
+    return .installed_relogin;
+}
+
+/// Already active: bring the copy in the user's directory up to this
+/// binary's. GNOME Shell on Wayland loads the new files at the next login;
+/// a copy installed elsewhere (system-wide, by a package) is left alone.
+fn refreshBundled(gpa: std.mem.Allocator, home: []const u8) InstallResult {
+    switch (onDisk(gpa, home)) {
+        .absent, .same => return .active,
+        .other => {},
+    }
+    const dir = writeBundled(home) catch |err| {
+        log.warn("could not update the extension: {t}", .{err});
+        return .failed;
+    };
+    log.info("updated the GNOME Shell extension in {s}", .{dir});
     return .installed_relogin;
 }
 
