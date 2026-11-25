@@ -2,7 +2,7 @@
 //! reads, in one table (name, what it does, who reads it). main reads
 //! them once at startup (`init`); everyone else asks `get()`, core and
 //! backend alike, so no module reads the environment on its own. The
-//! README's "Debugging and test switches" section lists the same table.
+//! docs/CONTRIBUTING.md's "Debugging and test switches" section lists the same table.
 //!
 //! The locale categories ride along (`locale()`): they are not switches,
 //! but the code that needs them (OCR languages, the compose table) has
@@ -42,7 +42,7 @@ pub const Entry = struct {
 };
 
 /// Every switch. Adding one: a field above, a row here, a line in the
-/// README; the test below keeps the first two in step.
+/// docs/CONTRIBUTING.md; the test below keeps the first two in step.
 pub const table = [_]Entry{
     .{ .name = "SHOTLET_NO_DIRECT", .field = "no_direct", .doc = "never capture straight from the compositor (ext-image-copy / wlr-screencopy): portal or GNOME integration only", .consumer = "platform/linux/capture.zig, capture/perms/now.zig, capture/scroll_support.zig" },
     .{ .name = "SHOTLET_NO_LAYER_SHELL", .field = "no_layer_shell", .doc = "ignore wlr-layer-shell: floating windows become plain toplevels", .consumer = "platform/linux/window/registry.zig" },

@@ -14,4 +14,4 @@ bin=${2:-zig-out/bin/shotlet}
 
 mkdir -p "$dir"
 cp "$bin" "$dir/shotlet"
-cp -r io.github.midnattsol.Shotlet.desktop assets install.sh uninstall.sh README.md LICENSE "$dir/"
+cp -r io.github.midnattsol.Shotlet.desktop assets install.sh uninstall.sh README.md docs LICENSE "$dir/"
