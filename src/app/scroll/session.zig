@@ -12,11 +12,10 @@
 //!   parts line up, or starts the frame source over.
 //!
 //! A frame takes a while (the shell paints and encodes the region, then
-//! it is decoded: half a second for a 4K region), and stitching it and
-//! shrinking the image for the control's preview take tens of
-//! milliseconds more: all of it runs on a worker thread (offload.zig)
-//! while the control keeps answering its input and the compositor's
-//! pings (else GNOME offers to force quit Shotlet).
+//! it is decoded), and stitching it takes a while more: all of it runs on
+//! a worker thread (offload.zig) while the control keeps answering its
+//! input and the compositor's pings (else GNOME offers to force quit
+//! Shotlet), and makes its preview of the image beside the next frame.
 
 const std = @import("std");
 const log = std.log.scoped(.scrolling_capture);
@@ -59,6 +58,8 @@ pub const Session = struct {
     warned: bool = false,
     /// what the person asked for on the control while a frame came
     asked: ?hud_mod.Action = null,
+    /// the image grew since the control's preview was made
+    preview_due: bool = false,
     /// why it ended by itself, for the editor to say
     note: stop.Note = .{},
 
@@ -121,37 +122,32 @@ pub const Session = struct {
         return src.grab(c.gpa, c.env, c.bus, clicks);
     }
 
-    /// The stitcher from the first frame, and the control's first preview.
-    fn startStitch(gpa: std.mem.Allocator, first: png.Image, max_height: u32, rect: hud_mod.Rect, pv: *?hud_mod.Preview) !stitch.Stitcher {
-        const st = try stitch.Stitcher.init(gpa, .{ .pixels = first.pixels, .width = first.width, .height = first.height }, max_height);
-        pv.* = previewOf(&st, gpa, rect);
-        return st;
+    fn startStitch(gpa: std.mem.Allocator, first: png.Image, max_height: u32) !stitch.Stitcher {
+        return stitch.Stitcher.init(gpa, frameOf(first), max_height);
     }
 
-    /// Stitch frame `f` in on a worker thread, and the control's new
-    /// preview when the image grew.
+    /// Stitch frame `f` in on a worker thread; the control's preview is
+    /// due when the image grew.
     fn push(self: *Session, f: png.Image) !stitch.Push {
-        var pv: ?hud_mod.Preview = null;
-        const r = try offload.run(self, pushFrame, .{ &self.st.?, f, self.c.gpa, self.hud.previewRect(), &pv });
-        if (pv) |p| self.hud.setPreview(p);
+        self.preview_due = false;
+        const r = try offload.run(self, stitch.Stitcher.push, .{ &self.st.?, frameOf(f) });
+        self.preview_due = r == .appended or r == .full;
         return r;
     }
 
-    fn pushFrame(st: *stitch.Stitcher, f: png.Image, gpa: std.mem.Allocator, rect: hud_mod.Rect, pv: *?hud_mod.Preview) !stitch.Push {
-        const r = try st.push(.{ .pixels = f.pixels, .width = f.width, .height = f.height });
-        if (r == .appended or r == .full) pv.* = previewOf(st, gpa, rect);
-        return r;
-    }
-
-    /// The control's preview of the image so far, at `rect`.
-    fn previewOf(st: *const stitch.Stitcher, gpa: std.mem.Allocator, rect: hud_mod.Rect) ?hud_mod.Preview {
-        return hud_mod.Preview.make(gpa, rect, .{ .ctx = st, .width = st.outWidth(), .height = st.totalHeight(), .row = rowOf });
+    /// The control's preview of the image so far, when it is due.
+    fn updatePreview(self: *Session) void {
+        if (!self.preview_due) return;
+        self.preview_due = false;
+        const st = &self.st.?;
+        if (hud_mod.Preview.make(self.c.gpa, self.hud.previewRect(), .{ .ctx = st, .width = st.outWidth(), .height = st.totalHeight(), .row = rowOf })) |p| self.hud.setPreview(p);
     }
 
     /// The control for up to `ms`: drawn, its input read (an action is
-    /// kept for the capture loop). Called beside the worker: it touches
-    /// the control only, never the stitcher.
+    /// kept for the capture loop). Called beside the worker: a due preview
+    /// reads the stitcher, which no worker has then (push clears it).
     pub fn pump(self: *Session, ms: i32) !void {
+        self.updatePreview();
         try self.hud.draw();
         if (try self.hud.poll(ms)) |a| {
             if (self.asked == null) self.asked = a;
@@ -196,10 +192,9 @@ pub const Session = struct {
         var first = try self.settled();
         defer first.deinit(self.c.gpa);
         self.watch.min_move = first.height / 8;
-        var pv: ?hud_mod.Preview = null;
-        self.st = try offload.run(self, startStitch, .{ self.c.gpa, first, self.max_height, self.hud.previewRect(), &pv });
+        self.st = try offload.run(self, startStitch, .{ self.c.gpa, first, self.max_height });
         defer self.st.?.deinit();
-        if (pv) |p| self.hud.setPreview(p);
+        self.preview_due = true;
         self.showRunning();
         _ = (try self.until()) orelse return null;
         const out = try self.st.?.result();
@@ -244,7 +239,7 @@ pub const Session = struct {
             try self.hud.draw();
             const asked = self.asked;
             self.asked = null;
-            if (asked orelse try self.hud.poll(if (self.wheel()) 10 else 120)) |a| switch (a) {
+            if (asked orelse try self.hud.poll(if (self.wheel()) 1 else 120)) |a| switch (a) {
                 .finish => return .user_stopped,
                 .cancel => return null,
                 .@"continue" => {},
