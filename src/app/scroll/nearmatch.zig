@@ -64,9 +64,9 @@ fn cost(prev: []const u16, cur: []const u16, rows: usize, d: usize) f64 {
 }
 
 /// The distance d at which `cur`'s rows lie nearly as `prev`'s shifted
-/// up by d (profiles of `rows` rows each); null when none fits, 0 when
-/// nearly nothing moved. Among near-equal costs (repeated content), the
-/// one nearest `expected`.
+/// up by d (profiles of `rows` rows each); null when none fits or the
+/// best is the farthest one looked at, 0 when nearly nothing moved. Among
+/// near-equal costs (repeated content), the one nearest `expected`.
 pub fn findOffset(gpa: std.mem.Allocator, prev: []const u16, cur: []const u16, rows: usize, expected: ?u32) !?u32 {
     const min_overlap = @max(4, rows / 10);
     if (rows <= min_overlap + 1) return null;
@@ -88,11 +88,14 @@ pub fn findOffset(gpa: std.mem.Allocator, prev: []const u16, cur: []const u16, r
     const still = cost(prev, cur, rows, 0);
     if (fits(still, median) and still <= best_cost + @max(2.0, still * 0.25)) return 0;
     if (!fits(best_cost, median)) return null;
+    // the least cost at the search's limit: the content may have moved
+    // farther, the cost still falling towards it
+    if (best == last) return null;
     const tol = @max(2.0, best_cost * 0.25);
     const e = expected orelse return @intCast(best);
     // as near the previous step as a cost about as low allows
     var pick = best;
-    for (1..last + 1) |d| {
+    for (1..last) |d| {
         if (costs[d - 1] > best_cost + tol) continue;
         if (@abs(@as(i64, @intCast(d)) - e) < @abs(@as(i64, @intCast(pick)) - e)) pick = d;
     }
@@ -157,6 +160,25 @@ test "a scroll of half a pixel more or less lines up by profile" {
     defer gpa.free(pb);
     const d = (try findOffset(gpa, pa, pb, h, null)).?;
     try testing.expect(d == 61 or d == 62);
+}
+
+test "a move past the farthest distance looked at does not match there" {
+    const gpa = testing.allocator;
+    const rows = 200;
+    const last = rows - rows / 10;
+    const moved = last + 10;
+    const pa = try gpa.alloc(u16, rows * blocks);
+    defer gpa.free(pa);
+    const pb = try gpa.alloc(u16, rows * blocks);
+    defer gpa.free(pb);
+    // rows unlike each other, but for a slow shade across the overlap:
+    // the nearer to `moved`, the less it costs
+    for (pa, 0..) |*v, i| v.* = @intCast(std.hash.Wyhash.hash(1, std.mem.asBytes(&i)) % 3000);
+    for (pb, 0..) |*v, i| v.* = @intCast(std.hash.Wyhash.hash(2, std.mem.asBytes(&i)) % 3000);
+    for (pa[(last - 10) * blocks ..], 0..) |*v, i| v.* = @intCast(1000 + (last - 10) + i / blocks);
+    for (pb[0 .. 30 * blocks], 0..) |*v, i| v.* = @intCast(1000 + moved + i / blocks);
+    try testing.expectEqual(@as(?u32, null), try findOffset(gpa, pa, pb, rows, null));
+    try testing.expectEqual(@as(?u32, null), try findOffset(gpa, pa, pb, rows, last));
 }
 
 test "a page that changed altogether, or a blank one, does not line up" {
