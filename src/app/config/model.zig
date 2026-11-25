@@ -46,30 +46,12 @@ pub const Loupe = enum {
             .never => "Never",
         };
     }
-
-    /// The setting a config value names; older files' values read as hold.
-    pub fn parse(value: []const u8) ?Loupe {
-        if (isLegacy(value)) return .hold;
-        return std.meta.stringToEnum(Loupe, value);
-    }
-
-    /// What older files called the settings that are hold now: only while
-    /// dragging (selecting), when the pointer slows down (auto).
-    pub fn isLegacy(value: []const u8) bool {
-        for ([_][]const u8{ "selecting", "auto" }) |v| if (std.mem.eql(u8, value, v)) return true;
-        return false;
-    }
 };
 
 /// The magnifier's zoom levels: screen pixels per captured pixel, at
 /// scale 1 (the lens keeps its size: more zoom shows fewer pixels).
 pub const loupe_zooms = [_]u8{ 4, 8, 12, 16 };
 pub const loupe_zoom_default: u8 = 8;
-
-/// The zoom level nearest `v`.
-pub fn nearestZoom(v: i64) u8 {
-    return @intCast(keys.nearest(&zoom_choices, v));
-}
 
 pub const Config = struct {
     /// desktop notification after saving, when no thumbnail says so
@@ -96,10 +78,6 @@ pub const Config = struct {
     beautify_padding: u2 = 2,
     beautify_corners: bool = true,
     beautify_shadow: bool = true,
-    /// the editor's first-run hint was shown: only read from older
-    /// files, and turned into the state flag by config.load
-    /// (stateflag.zig)
-    hint_shown: bool = false,
     /// the floating thumbnail with more actions: after which results
     thumbnail: Thumbnail = .after_save,
     /// how long the thumbnail stays (it stays while hovered)
@@ -170,19 +148,12 @@ const core_keys = [_]keys.Key{
     .{ .name = "default_thickness", .field = "default_thickness", .kind = .{ .int = .{ .min = 1, .max = 32 } } },
     .{ .name = "default_color", .field = "default_color", .kind = .{ .int = .{ .min = 0, .max = 7 } } },
     .{ .name = "save_dir", .field = "save_dir", .kind = .{ .text = "save_dir_len" } },
-    // tokens from before multi-monitor capture ("screencast_token") restore
-    // a single-monitor selection forever, so they are not read any more
     .{ .name = "screencast_restore_token", .field = "sc_token", .kind = .{ .text = "sc_token_len" } },
-    // "beautify" (the last capture's frame carried over to the next) is
-    // not read any more: the frame is per capture unless "always"
     .{ .name = "beautify_always", .field = "beautify_always", .kind = .flag },
     .{ .name = "beautify_background", .field = "beautify_background", .kind = .{ .int = .{ .min = 0, .max = 255 } } },
     .{ .name = "beautify_padding", .field = "beautify_padding", .kind = .{ .names = &padding_names } },
     .{ .name = "beautify_corners", .field = "beautify_corners", .kind = .flag },
     .{ .name = "beautify_shadow", .field = "beautify_shadow", .kind = .flag },
-    // the first-run hint is a state flag now (stateflag.zig)
-    .{ .name = "hint_shown", .field = "hint_shown", .kind = .flag, .read_only = true },
-    // "quick_access=false" from before still reads as never (parse.zig)
     .{ .name = "thumbnail", .field = "thumbnail", .kind = .tag },
     .{ .name = "quick_access_seconds", .field = "quick_access_seconds", .kind = .{ .int = .{ .min = 1, .max = 3600 } } },
     .{ .name = "history", .field = "history", .kind = .flag },
@@ -214,11 +185,6 @@ pub fn keyName(k: usize) []const u8 {
     unreachable;
 }
 
-/// Whether save() writes key `k` (superseded keys are only read).
-pub fn writable(k: usize) bool {
-    return k >= n_fixed_keys or Fixed.writable(k);
-}
-
 /// Serialized value of key `k` in `cfg`.
 pub fn formatValue(cfg: *const Config, k: usize, buf: []u8) []const u8 {
     if (k < n_fixed_keys) return Fixed.format(cfg, k, buf);
@@ -246,13 +212,6 @@ test "the keys' numbering" {
     try std.testing.expectEqualStrings("loupe", keyName(Fixed.index("loupe")));
     try std.testing.expectEqualStrings("record_dir", keyName(Fixed.index("record_dir")));
     try std.testing.expectEqualStrings("shortcut_pen", keyName(n_fixed_keys + @as(usize, @backingInt(Action.pen))));
-    try std.testing.expect(!writable(Fixed.index("hint_shown")) and writable(Fixed.index("notify")));
     // every key has its own name
     for (0..n_keys) |a| for (a + 1..n_keys) |b| try std.testing.expect(!std.mem.eql(u8, keyName(a), keyName(b)));
-}
-
-test "the magnifier's zoom snaps to a level" {
-    try std.testing.expectEqual(@as(u8, 8), nearestZoom(9));
-    try std.testing.expectEqual(@as(u8, 4), nearestZoom(-3));
-    try std.testing.expectEqual(@as(u8, 16), nearestZoom(400));
 }

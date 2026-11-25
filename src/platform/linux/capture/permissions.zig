@@ -56,11 +56,9 @@ fn storeStatus(arena: std.mem.Allocator, bus: *dbus.Connection) void {
     printCount("screenshot:   ", store.count(entries, .screenshot), "permission");
 }
 
-fn printCount(label: []const u8, c: store.Count, noun: []const u8) void {
-    if (c.current == 0 and c.older == 0) return out("{s} none\n", .{label});
-    out("{s} {d} {s}{s} for {s}", .{ label, c.current, noun, if (c.current == 1) "" else "s", app_id });
-    if (c.older > 0) out(", {d} from older versions (shotlet, cliptux)", .{c.older});
-    out("\n", .{});
+fn printCount(label: []const u8, n: usize, noun: []const u8) void {
+    if (n == 0) return out("{s} none\n", .{label});
+    out("{s} {d} {s}{s} for {s}\n", .{ label, n, noun, if (n == 1) "" else "s", app_id });
 }
 
 /// The extension that would make the portal unnecessary is installed
@@ -77,12 +75,10 @@ fn gnomeHint(gpa: std.mem.Allocator, env: Env, bus: *dbus.Connection) void {
 fn printReset(o: reset.Outcome, dry: bool) void {
     const verb = if (dry) "Would remove" else "Removed";
     if (o.token) out("{s} the stored restore token.\n", .{verb});
-    for (o.entries) |e| {
-        if (e.pick.whole) {
-            const app = e.pick.apps[0];
-            out("{s} a {s} permission of {s}{s}.\n", .{ verb, tableName(e.table), app, if (e.older()) " (an older version)" else "" });
-        } else for (e.pick.apps) |a| out("{s} {s} from the {s} permission.\n", .{ verb, a, tableName(e.table) });
-    }
+    for (o.entries) |e| switch (e.pick) {
+        .whole => out("{s} a {s} permission of {s}.\n", .{ verb, tableName(e.table), app_id }),
+        .part => out("{s} {s} from the {s} permission.\n", .{ verb, app_id, tableName(e.table) }),
+    };
     if (o.store_error) |err| cli_out.warn("could not read the portal permission store ({t})", .{err});
     if (o.failed > 0) cli_out.warn("could not remove {d} of them (see the messages above)", .{o.failed});
     if (o.nothing() and o.store_error == null) out("Nothing to remove.\n", .{});

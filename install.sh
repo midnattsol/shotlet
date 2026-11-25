@@ -29,10 +29,6 @@ bash_completion=$data/bash-completion/completions/shotlet
 zsh_completion=$data/zsh/site-functions/_shotlet
 fish_completion=$config/fish/completions/shotlet.fish
 autostart_file=$config/autostart/$app_id.desktop
-# files of versions before the app id, replaced by the ones above
-legacy_desktop=$data/applications/shotlet.desktop
-legacy_icon=$data/icons/hicolor/scalable/apps/shotlet.svg
-legacy_autostart=$config/autostart/shotlet.desktop
 # what `shotlet gnome-integration install` adds
 extension_dir=$data/gnome-shell/extensions/$ext_uuid
 
@@ -40,7 +36,7 @@ extension_dir=$data/gnome-shell/extensions/$ext_uuid
 manifest() {
     echo "bin $bin"
     for f in "$desktop" "$icon" "$icon_symbolic" "$man" "$bash_completion" "$zsh_completion" \
-        "$fish_completion" "$autostart_file" "$legacy_desktop" "$legacy_icon" "$legacy_autostart"; do
+        "$fish_completion" "$autostart_file"; do
         echo "file $f"
     done
     echo "extension $extension_dir"
@@ -85,11 +81,6 @@ sed "s|^Exec=shotlet|Exec=$bin|" "$here/$app_id.desktop" >"$desktop"
 chmod 644 "$desktop"
 install -Dm644 "$here/assets/icon.svg" "$icon"
 install -Dm644 "$here/assets/icon-symbolic.svg" "$icon_symbolic"
-rm -f "$legacy_desktop" "$legacy_icon"
-if [ -f "$legacy_autostart" ]; then
-    rm -f "$legacy_autostart"
-    autostart=yes
-fi
 refresh_caches
 echo "installed $bin, $app_id.desktop and its icon"
 

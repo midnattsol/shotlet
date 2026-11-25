@@ -75,7 +75,7 @@ pub fn summary(o: Outcome, buf: []u8) []const u8 {
 
 test "the Settings line says what a reset did" {
     var buf: [128]u8 = undefined;
-    const e: store.Entry = .{ .table = .screencast, .id = "x", .pick = .{ .whole = true, .apps = &.{"shotlet"} } };
+    const e: store.Entry = .{ .table = .screencast, .id = "x", .pick = .whole };
     try std.testing.expectEqualStrings("Nothing was remembered", summary(.{}, &buf));
     try std.testing.expectEqualStrings("Forgot the screens and 1 permission", summary(.{ .token = true, .entries = &.{e} }, &buf));
     try std.testing.expectEqualStrings("Forgot 2 permissions", summary(.{ .entries = &.{ e, e } }, &buf));

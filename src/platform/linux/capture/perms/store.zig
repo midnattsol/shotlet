@@ -8,6 +8,7 @@ const std = @import("std");
 const dbus = @import("../../dbus.zig");
 const permstore = @import("../../permstore.zig");
 const select = @import("select.zig");
+const app_id = @import("../../../../app_id.zig").app_id;
 
 pub const Table = enum {
     screencast,
@@ -19,18 +20,12 @@ pub const Table = enum {
     }
 };
 
-/// One entry with Shotlet's apps in it. Its id is a restore token for
+/// One entry with Shotlet in it. Its id is a restore token for
 /// screen casts: never printed.
 pub const Entry = struct {
     table: Table,
     id: []const u8,
     pick: select.Pick,
-
-    /// Shotlet's id in it is an older version's.
-    pub fn older(e: Entry) bool {
-        for (e.pick.apps) |a| if (select.origin(a) == .current) return false;
-        return true;
-    }
 };
 
 /// Every entry of Shotlet's in both tables.
@@ -44,44 +39,31 @@ pub fn find(arena: std.mem.Allocator, bus: *dbus.Connection) ![]const Entry {
 fn findIn(arena: std.mem.Allocator, bus: *dbus.Connection, table: Table, ids: []const []const u8, out: *std.ArrayList(Entry)) !void {
     for (ids) |id| {
         const perms = (try permstore.lookup(arena, bus, @tagName(table), id)) orelse continue;
-        const p = (try select.pick(arena, perms, table.wholeOk())) orelse continue;
+        const p = select.pick(perms, table.wholeOk()) orelse continue;
         try out.append(arena, .{ .table = table, .id = id, .pick = p });
     }
 }
 
 /// Remove Shotlet's part of `e`: the whole entry when it is all
-/// Shotlet's, else each of its apps' permissions.
+/// Shotlet's, else its own permission in it.
 pub fn remove(bus: *dbus.Connection, e: Entry) !void {
-    if (e.pick.whole) return permstore.delete(bus, @tagName(e.table), e.id);
-    for (e.pick.apps) |app| try permstore.deletePermission(bus, @tagName(e.table), e.id, app);
+    if (e.pick == .whole) return permstore.delete(bus, @tagName(e.table), e.id);
+    try permstore.deletePermission(bus, @tagName(e.table), e.id, app_id);
 }
 
-/// How many of `entries` are in `table`: Shotlet's own, and older
-/// versions'.
-pub const Count = struct { current: usize = 0, older: usize = 0 };
-
-pub fn count(entries: []const Entry, table: Table) Count {
-    var c: Count = .{};
-    for (entries) |e| {
-        if (e.table != table) continue;
-        if (e.older()) c.older += 1 else c.current += 1;
-    }
-    return c;
+/// How many of `entries` are in `table`.
+pub fn count(entries: []const Entry, table: Table) usize {
+    var n: usize = 0;
+    for (entries) |e| n += @intFromBool(e.table == table);
+    return n;
 }
 
-test "entries are counted per table, older versions apart" {
-    const cur: select.Pick = .{ .whole = true, .apps = &.{"io.github.midnattsol.Shotlet"} };
-    const old: select.Pick = .{ .whole = true, .apps = &.{"cliptux"} };
+test "entries are counted per table" {
     const entries = [_]Entry{
-        .{ .table = .screencast, .id = "a", .pick = cur },
-        .{ .table = .screencast, .id = "b", .pick = old },
-        .{ .table = .screencast, .id = "c", .pick = old },
-        .{ .table = .screenshot, .id = "screenshot", .pick = .{ .whole = false, .apps = &.{ "shotlet", "io.github.midnattsol.Shotlet" } } },
+        .{ .table = .screencast, .id = "a", .pick = .whole },
+        .{ .table = .screencast, .id = "b", .pick = .part },
+        .{ .table = .screenshot, .id = "screenshot", .pick = .part },
     };
-    const sc = count(&entries, .screencast);
-    try std.testing.expectEqual(@as(usize, 1), sc.current);
-    try std.testing.expectEqual(@as(usize, 2), sc.older);
-    const ss = count(&entries, .screenshot);
-    try std.testing.expectEqual(@as(usize, 1), ss.current);
-    try std.testing.expectEqual(@as(usize, 0), ss.older);
+    try std.testing.expectEqual(@as(usize, 2), count(&entries, .screencast));
+    try std.testing.expectEqual(@as(usize, 1), count(&entries, .screenshot));
 }

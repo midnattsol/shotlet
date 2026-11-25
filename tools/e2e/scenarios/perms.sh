@@ -18,7 +18,7 @@ scenario_perms() {
     check "permissions: the last capture went through the portal" grep -q "^last capture:  through the screen-sharing portal" "$OUT/status.txt"
     check "  ... a restore token is stored" grep -q "^restore token: stored" "$OUT/status.txt"
     check "  ... but not shown" no_log "$(sed -n 's/^screencast_restore_token=//p' "$(cfg_path)")" "$OUT/status.txt"
-    check "  ... one screen-cast grant, one from older versions" grep -q "^screen cast:   1 permission for $APP_ID, 1 from older versions" "$OUT/status.txt"
+    check "  ... one screen-cast grant" grep -q "^screen cast:   1 permission for $APP_ID\$" "$OUT/status.txt"
     check "  ... and the screenshot permission" grep -q "^screenshot:    1 permission for $APP_ID" "$OUT/status.txt"
     perms_dry_run
     perms_reset
@@ -28,12 +28,11 @@ scenario_perms() {
     keys esc
 }
 
-# other apps' entries, an older version's grant and Shotlet's "yes" for
+# other apps' entries and Shotlet's "yes" for
 # the Screenshot portal, next to the real grant
 perms_seed() {
     perm SetPermission screencast true e2e-other org.example.Other "['yes']" >/dev/null
     perm SetPermission screencast true e2e-anon "" "['yes']" >/dev/null
-    perm SetPermission screencast true e2e-old cliptux "['yes']" >/dev/null
     perm SetPermission screenshot true screenshot org.example.Other "['yes']" >/dev/null
     perm SetPermission screenshot true screenshot "$APP_ID" "['yes']" >/dev/null
 }
@@ -41,13 +40,13 @@ perms_seed() {
 perms_dry_run() {
     "$BIN" permissions reset --dry-run >"$OUT/dry.txt" 2>&1
     check "reset --dry-run lists what would go" grep -q "Would remove a screen-cast permission of $APP_ID" "$OUT/dry.txt"
-    check "  ... and changes nothing" eq "$(perm_apps screencast | tr '\n' ' ')" " cliptux $APP_ID org.example.Other "
+    check "  ... and changes nothing" eq "$(perm_apps screencast | tr '\n' ' ')" " $APP_ID org.example.Other "
     check "  ... not even the token" grep -q "^screencast_restore_token=." "$(cfg_path)"
 }
 
 perms_reset() {
     "$BIN" permissions reset >"$OUT/reset.txt" 2>&1
-    check "reset removes Shotlet's grants (current and older)" eq "$(perm_apps screencast | tr '\n' ' ')" " org.example.Other "
+    check "reset removes Shotlet's grants " eq "$(perm_apps screencast | tr '\n' ' ')" " org.example.Other "
     check "  ... and its screenshot permission only" eq "$(perm_apps screenshot | tr '\n' ' ')" "org.example.Other "
     check "  ... and the token" no_log "^screencast_restore_token=." "$(cfg_path)"
     check "  ... saying so" grep -q "Removed the stored restore token" "$OUT/reset.txt"

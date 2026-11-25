@@ -11,9 +11,7 @@ const std = @import("std");
 pub const Kind = union(enum) {
     /// true or false, see parseBool
     flag,
-    /// one of the field's enum tags; an enum that declares
-    /// `parse(value) ?E` and `isLegacy(value) bool` also reads older
-    /// spellings (which the next save writes anew)
+    /// one of the field's enum tags
     tag,
     /// an integer clamped to [min, max]
     int: struct { min: i64, max: i64 },
@@ -32,11 +30,7 @@ pub const Key = struct {
     name: []const u8,
     field: []const u8,
     kind: Kind,
-    /// read from older files but never written (superseded)
-    read_only: bool = false,
 };
-
-pub const Applied = enum { unknown, applied, migrated };
 
 pub const Line = struct { key: []const u8, value: []const u8 };
 
@@ -72,22 +66,16 @@ pub fn Section(comptime T: type, comptime keys: []const Key) type {
     return struct {
         pub const len = keys.len;
 
-        /// Set the field `key` names from `value`.
-        pub fn apply(s: *T, key: []const u8, value: []const u8) Applied {
-            const i = find(key) orelse return .unknown;
-            return applyAt(s, i, value);
+        /// Set the field `key` names from `value`; false when none does.
+        pub fn apply(s: *T, key: []const u8, value: []const u8) bool {
+            const i = find(key) orelse return false;
+            inline for (keys, 0..) |k, j| if (i == j) applyKey(k, s, value);
+            return true;
         }
 
-        /// The number of the key named `key`.
-        pub fn find(key: []const u8) ?usize {
+        fn find(key: []const u8) ?usize {
             for (names, 0..) |n, i| if (std.mem.eql(u8, n, key)) return i;
             return null;
-        }
-
-        /// Set key `i`'s field from `value`.
-        pub fn applyAt(s: *T, i: usize, value: []const u8) Applied {
-            inline for (keys, 0..) |k, j| if (i == j) return applyKey(k, s, value);
-            unreachable;
         }
 
         const names = blk: {
@@ -106,11 +94,6 @@ pub fn Section(comptime T: type, comptime keys: []const Key) type {
 
         pub fn name(i: usize) []const u8 {
             return names[i];
-        }
-
-        pub fn writable(i: usize) bool {
-            inline for (keys, 0..) |k, j| if (i == j) return !k.read_only;
-            unreachable;
         }
 
         /// Key `i`'s value in `s` as the file spells it.
@@ -151,27 +134,22 @@ fn fieldPtr(s: anytype, comptime path: []const u8) FieldPtr(@TypeOf(s), path) {
     return &@field(s, path);
 }
 
-fn applyKey(comptime k: Key, s: anytype, v: []const u8) Applied {
+fn applyKey(comptime k: Key, s: anytype, v: []const u8) void {
     const f = fieldPtr(s, k.field);
     const F = @TypeOf(f.*);
     switch (k.kind) {
         .flag => f.* = parseBool(v) orelse f.*,
-        .tag => {
-            if (@hasDecl(F, "parse")) {
-                f.* = F.parse(v) orelse f.*;
-                if (F.isLegacy(v)) return .migrated;
-            } else f.* = std.meta.stringToEnum(F, v) orelse f.*;
-        },
+        .tag => f.* = std.meta.stringToEnum(F, v) orelse f.*,
         .int => |r| {
-            const n = std.fmt.parseInt(i64, v, 10) catch return .applied;
+            const n = std.fmt.parseInt(i64, v, 10) catch return;
             f.* = @intCast(std.math.clamp(n, r.min, r.max));
         },
         .one_of => |choices| {
-            const n = std.fmt.parseInt(i64, v, 10) catch return .applied;
+            const n = std.fmt.parseInt(i64, v, 10) catch return;
             if (std.mem.indexOfScalar(i64, choices, n) != null) f.* = @intCast(n);
         },
         .nearest => |choices| {
-            const n = std.fmt.parseInt(i64, v, 10) catch return .applied;
+            const n = std.fmt.parseInt(i64, v, 10) catch return;
             f.* = @intCast(nearest(choices, n));
         },
         .names => |names| {
@@ -185,7 +163,6 @@ fn applyKey(comptime k: Key, s: anytype, v: []const u8) Applied {
             fieldPtr(s, len_field).* = n;
         },
     }
-    return .applied;
 }
 
 fn formatKey(comptime k: Key, s: anytype, buf: []u8) []const u8 {
@@ -252,9 +229,9 @@ test "a section reads and writes its keys, keeping values it cannot read" {
     for ([_][2][]const u8{
         .{ "on", "maybe" }, .{ "n", "x" },     .{ "pick", "4" },  .{ "snap", "zz" },
         .{ "mode", "c" },   .{ "size", "xl" }, .{ "off", "nah" },
-    }) |kv| try std.testing.expectEqual(Applied.applied, Sec.apply(&s, kv[0], kv[1]));
+    }) |kv| try std.testing.expect(Sec.apply(&s, kv[0], kv[1]));
     try std.testing.expectEqual(S{}, s);
-    try std.testing.expectEqual(Applied.unknown, Sec.apply(&s, "nope", "1"));
+    try std.testing.expect(!Sec.apply(&s, "nope", "1"));
     for ([_][2][]const u8{
         .{ "on", "no" },  .{ "n", "99" },   .{ "pick", "5" },     .{ "snap", "13" },
         .{ "mode", "b" }, .{ "size", "l" }, .{ "txt", "abcdef" }, .{ "off", "yes" },

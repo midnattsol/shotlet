@@ -202,22 +202,8 @@ tools_loupe_keys() {
     check "  ... the zoom is kept for the next capture" cfg_has loupe_zoom=4
 }
 
-# older loupe=selecting and loupe=auto read as while holding Ctrl,
-# loupe=never shows none even then
+# loupe=never shows none, Ctrl or not
 tools_loupe_settings() {
-    local old
-    for old in selecting auto; do
-        cfg_set "loupe=$old"
-        run_shotlet "magnifier-$old" shot --from "$IMG"
-        wait_editor 10
-        approach 0 1000 400
-        check "  ... loupe=$old reads as while holding Ctrl: none at rest" eval '! lens_here'
-        drv key ctrl down && drv sleep 400
-        shot 0 "magnifier-$old"
-        check "  ... but with Ctrl" lens_here
-        drv key ctrl up && drv sleep 100
-        edit_close
-    done
     cfg_set loupe=never
     run_shotlet magnifier-never shot --from "$IMG"
     wait_editor 10
@@ -284,7 +270,7 @@ tools_loupe_hint_once() {
 # --- beautify is per capture: an old beautify=true is not carried over;
 # the panel's pin ("Apply to every capture") keeps it on for new ones
 tools_beautify() {
-    cfg_write quick_access=false beautify=true
+    cfg_write thumbnail=never beautify=true
     edit_on beautify-new
     keys enter
     check "a new capture starts without the beautify frame" clip_is bnew 1300x700
@@ -295,7 +281,7 @@ tools_beautify() {
     keys enter
     sleep 1 # (any other size passes: wait for the copy)
     check "  ... and then every new capture starts with it" test "$(clip_png "$OUT/balways.png" && png_size "$OUT/balways.png")" != 1300x700
-    cfg_write quick_access=false
+    cfg_write thumbnail=never
 }
 
 # --- a PNG file dragged onto the editor opens in it

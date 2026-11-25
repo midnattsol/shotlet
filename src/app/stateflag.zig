@@ -7,7 +7,7 @@ const log = std.log.scoped(.state);
 const statefile = @import("statefile.zig");
 
 pub const Flag = enum {
-    /// the editor's first-run hint (older versions: config hint_shown=true)
+    /// the editor's first-run hint
     editor_hint,
     /// the magnifier's "Hold Ctrl to zoom" hint (ui/editor_ui/loupe_hint.zig)
     zoom_hint,

@@ -5,16 +5,10 @@
 const std = @import("std");
 const sys = @import("../../platform/api.zig").sys;
 const env = @import("../env.zig");
-const parse = @import("parse.zig");
 const keys = @import("keys.zig");
 const location = @import("location.zig");
-const model = @import("model.zig");
-const Config = model.Config;
 
 pub const Change = struct { key: []const u8, value: []const u8 };
-
-/// Keys that are no longer used and are dropped when the file is written.
-const legacy_keys = [_][]const u8{"screencast_token"};
 
 /// Set `changes` in `dir`'s config file, leaving every other line as it is.
 pub fn updateDir(gpa: std.mem.Allocator, dir: []const u8, changes: []const Change) !void {
@@ -50,7 +44,6 @@ pub fn mergeContent(gpa: std.mem.Allocator, old: []const u8, changes: []const Ch
     while (lines.next()) |line| {
         if (lines.index == null and line.len == 0) break; // trailing newline
         if (keys.parseLine(line)) |kv| {
-            if (isLegacyKey(kv.key) or replaced(kv.key, changes)) continue;
             if (findChange(changes, kv.key)) |ci| {
                 if (!done[ci]) {
                     try appendKv(gpa, &out, changes[ci]);
@@ -66,26 +59,6 @@ pub fn mergeContent(gpa: std.mem.Allocator, old: []const u8, changes: []const Ch
         if (!done[ci] and findChange(changes[0..ci], ch.key) == null) try appendKv(gpa, &out, ch);
     }
     return out.toOwnedSlice(gpa);
-}
-
-fn isLegacyKey(key: []const u8) bool {
-    for (legacy_keys) |k| if (std.mem.eql(u8, k, key)) return true;
-    return false;
-}
-
-/// An older file's key whose replacement is being written: a
-/// `bind_<action>` for `shortcut_<action>` (config/parse.zig reads the old
-/// one only without the new), a parse.superseded key for its new one.
-fn replaced(key: []const u8, changes: []const Change) bool {
-    for (parse.superseded) |s| {
-        if (std.mem.eql(u8, key, s.old) and findChange(changes, s.new) != null) return true;
-    }
-    if (!std.mem.startsWith(u8, key, parse.legacy_prefix)) return false;
-    const action = key[parse.legacy_prefix.len..];
-    for (changes) |ch| {
-        if (std.mem.startsWith(u8, ch.key, model.bind_prefix) and std.mem.eql(u8, ch.key[model.bind_prefix.len..], action)) return true;
-    }
-    return false;
 }
 
 fn findChange(changes: []const Change, key: []const u8) ?usize {
@@ -116,34 +89,4 @@ test "merge keeps comments, replaces in place, drops duplicates" {
     });
     defer gpa.free(out);
     try std.testing.expectEqualStrings("# c\nnotify=false\nx=1\nsave_dir=/ab\n", out);
-}
-
-test "single-monitor restore tokens are dropped" {
-    const gpa = std.testing.allocator;
-    const out = try mergeContent(gpa, "screencast_token=old\nnotify=true\n", &.{
-        .{ .key = "screencast_restore_token", .value = "new" },
-    });
-    defer gpa.free(out);
-    try std.testing.expectEqualStrings("notify=true\nscreencast_restore_token=new\n", out);
-    var cfg = Config{};
-    parse.applyValue(&cfg, "screencast_token", "old");
-    try std.testing.expect(cfg.scToken() == null);
-}
-
-test "a thumbnail written anew drops the quick_access switch it replaced" {
-    const gpa = std.testing.allocator;
-    const out = try mergeContent(gpa, "quick_access=false\nnotify=true\n", &.{
-        .{ .key = "thumbnail", .value = "never" },
-    });
-    defer gpa.free(out);
-    try std.testing.expectEqualStrings("notify=true\nthumbnail=never\n", out);
-}
-
-test "a bind written anew drops the older file's line for it" {
-    const gpa = std.testing.allocator;
-    const out = try mergeContent(gpa, "bind_pen=33\nbind_line=38\nnotify=true\n", &.{
-        .{ .key = "shortcut_pen", .value = "Ctrl+F" },
-    });
-    defer gpa.free(out);
-    try std.testing.expectEqualStrings("bind_line=38\nnotify=true\nshortcut_pen=Ctrl+F\n", out);
 }

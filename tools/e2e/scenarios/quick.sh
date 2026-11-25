@@ -162,9 +162,6 @@ open_settings() {
 scenario_settings() {
     drv_ready Meta-0
     settings_reset
-    cfg_set loupe=auto
-    open_settings 4
-    check "an older magnifier choice is written as while holding Ctrl" cfg_has loupe=hold
     open_settings 4 space
     check "the magnifier choice goes to always" cfg_has loupe=always
     open_settings 5 space

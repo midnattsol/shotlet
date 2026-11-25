@@ -1,6 +1,5 @@
 //! The one config file end to end: defaults, a round trip of every key,
-//! the cliptux move on every loader, the per-section setters writing only
-//! their key, and every older spelling a user's file can still hold.
+//! the per-section setters writing only their key.
 
 const std = @import("std");
 const config = @import("../config.zig");
@@ -94,11 +93,10 @@ test "every key round-trips through the file" {
         \\shortcut_pen=Ctrl+F
         \\
     );
-    // every fixed key differs from its default (hint_shown aside: never written)
+    // every fixed key differs from its default
     var b1: [64]u8 = undefined;
     var b2: [64]u8 = undefined;
     for (0..model.n_fixed_keys) |k| {
-        if (!model.writable(k)) continue;
         try testing.expect(!std.mem.eql(u8, model.formatValue(&cfg, k, &b1), model.formatValue(&Config{}, k, &b2)));
     }
     try config.save(testing.allocator, h.path, &cfg);
@@ -131,20 +129,9 @@ test "a changed field writes its key alone, through the one save" {
     try testing.expectEqual(@as(u8, 5), config.load(testing.allocator, h.path).modes.timer_s);
 }
 
-test "loading carries a cliptux configuration over, every section" {
-    var h = try TmpDir.home();
-    defer h.deinit();
-    try h.write(".config/cliptux/config", "timer_seconds=3\nrecord_fps=60\nnotify=false\n");
-    const cfg = config.load(testing.allocator, h.path);
-    try testing.expect(!cfg.notify);
-    try testing.expectEqual(@as(u8, 3), cfg.modes.timer_s);
-    try testing.expectEqual(@as(u32, 60), cfg.record.fps);
-    try expectFile(&h, "timer_seconds=3\nrecord_fps=60\nnotify=false\n");
-}
-
-test "older files: the bools Shotlet wrote, for every bool key" {
+test "true and false, for every bool key" {
     inline for (model.fixed_keys) |k| {
-        if (k.kind == .flag and !k.read_only) {
+        if (k.kind == .flag) {
             var buf: [64]u8 = undefined;
             for ([_]bool{ true, false }) |v| {
                 const line = try std.fmt.bufPrint(&buf, "{s}={s}\n", .{ k.name, if (v) "true" else "false" });
@@ -156,53 +143,17 @@ test "older files: the bools Shotlet wrote, for every bool key" {
     }
 }
 
-test "older files: a value no bool spells keeps the default" {
-    // each model once had its own rule: default-off keys took only "true",
-    // default-on keys anything but "false"; both read the same now
+test "a value no bool spells keeps the default" {
     const cfg = read("copy_on_save=on-ish\nhistory=enabled\nrecord_mic=TRUE\nwindow_shadow=0\nbeautify_corners=no\n");
     try testing.expect(!cfg.copy_on_save and cfg.history and cfg.record.mic);
     try testing.expect(!cfg.modes.window_shadow and !cfg.beautify_corners);
 }
 
-test "older files: superseded keys and spellings" {
-    // the first-run hint: still read, never written
-    var cfg = read("hint_shown=true\n");
-    try testing.expect(cfg.hint_shown);
-    cfg = read("hint_shown=false\n");
-    try testing.expect(!cfg.hint_shown);
-    // the quick-access switch: off is never, on the default
-    cfg = read("quick_access=false\n");
-    try testing.expectEqual(config.Thumbnail.never, cfg.thumbnail);
-    cfg = read("quick_access=true\n");
-    try testing.expectEqual(config.Thumbnail.after_save, cfg.thumbnail);
-    // a later thumbnail line wins
-    cfg = read("quick_access=false\nthumbnail=after_copy_and_save\n");
-    try testing.expectEqual(config.Thumbnail.after_copy_and_save, cfg.thumbnail);
-    // single-monitor tokens and the carried-over beautify are not read
-    cfg = read("screencast_token=old\nbeautify=true\n");
-    try testing.expect(cfg.scToken() == null and !cfg.beautify_always);
-    // malformed numbers keep the default; out-of-range ones are clamped
-    cfg = read("default_color=x\ndefault_thickness=99\nhistory_max=0\nrecord_countdown=60\nrecord_gif_width=99999\n");
+test "malformed numbers keep the default; out-of-range ones are clamped" {
+    const cfg = read("default_color=x\ndefault_thickness=99\nhistory_max=0\nrecord_countdown=60\nrecord_gif_width=99999\n");
     try testing.expectEqual(@as(u3, 0), cfg.default_color);
     try testing.expectEqual(@as(i32, 32), cfg.default_thickness);
     try testing.expectEqual(@as(u16, 1), cfg.history_max);
     try testing.expectEqual(@as(u32, 10), cfg.record.countdown);
     try testing.expectEqual(@as(u32, 8192), cfg.record.gif_width);
-}
-
-test "older files: quick_access is written anew as thumbnail, hint_shown left alone" {
-    var h = try TmpDir.home();
-    defer h.deinit();
-    try h.write(".config/shotlet/config", "quick_access=false\nhint_shown=true\nscreencast_token=x\nbeautify=true\n");
-    const stateflag = @import("../stateflag.zig");
-    try testing.expect(!stateflag.isSet(h.path, .editor_hint));
-    var cfg = config.load(testing.allocator, h.path);
-    // the hint shown becomes the state flag
-    try testing.expect(stateflag.isSet(h.path, .editor_hint));
-    try testing.expectEqual(config.Thumbnail.never, cfg.thumbnail);
-    cfg.notify = false;
-    try config.save(testing.allocator, h.path, &cfg);
-    try expectFile(&h, "hint_shown=true\nbeautify=true\nnotify=false\nthumbnail=never\n");
-    const back = config.load(testing.allocator, h.path);
-    try testing.expect(back.hint_shown and back.thumbnail == .never);
 }
