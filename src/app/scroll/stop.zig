@@ -5,6 +5,7 @@
 //!   Reason                 every way a capture ends or pauses
 //!   Reason.natural()       the capture is complete: finish
 //!   Reason.message(buf, max_height)  the plain words shown in the control
+//!   Note                   those words, kept for the editor to show
 //!   Watch.feed(push, clicks)  fold one frame in: go on, scroll slower,
 //!                          warn (and go on), or stop for a reason
 //!   Watch.restart()        after Continue: count afresh
@@ -75,6 +76,22 @@ fn limitMessage(buf: []u8, max_height: u32) []const u8 {
     const n = grouped(&nbuf, max_height);
     return std.fmt.bufPrint(buf, "Stopped at the {s} px limit", .{n}) catch "Stopped at the height limit";
 }
+
+/// Why a capture ended by itself, for the editor that opens on it (empty:
+/// nothing to say, the person ended it).
+pub const Note = struct {
+    buf: [96]u8 = undefined,
+    len: usize = 0,
+
+    pub fn set(self: *Note, msg: []const u8) void {
+        self.len = @min(msg.len, self.buf.len);
+        @memcpy(self.buf[0..self.len], msg[0..self.len]);
+    }
+
+    pub fn text(self: *const Note) []const u8 {
+        return self.buf[0..self.len];
+    }
+};
 
 pub const Verdict = union(enum) {
     go,

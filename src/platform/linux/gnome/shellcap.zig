@@ -285,6 +285,25 @@ fn loadWithin(gpa: std.mem.Allocator, runtime_dir: []const u8, args: Args, wait:
     return build(gpa, monitors, pieces, images[0..pieces.len]);
 }
 
+/// A frame of a scrolling capture: capture `id` of `rect` (logical), in
+/// `pieces` (the layout ScrollBegin gave; "" from an extension older than
+/// Version 6, whose frames are one PNG).
+pub fn loadRegion(gpa: std.mem.Allocator, runtime_dir: []const u8, id: []const u8, rect: geom.Rect, pieces: []const u8) !png.Image {
+    if (pieces.len == 0) {
+        var pbuf: [1200]u8 = undefined;
+        const data = try readAndRemove(gpa, try piecePath(&pbuf, runtime_dir, id, 0));
+        defer gpa.free(data);
+        return png.decode(gpa, data);
+    }
+    var buf: [max_pieces]LogicalMonitor = undefined;
+    const scale = (try parseLayout(pieces, &buf))[0].scale;
+    var abuf: [128]u8 = undefined;
+    const area = try std.fmt.bufPrint(&abuf, "{d},{d},{d},{d},{d}", .{ rect.x, rect.y, rect.w, rect.h, scale });
+    const cap = try load(gpa, runtime_dir, .{ .id = id, .monitors = area, .pieces = pieces });
+    gpa.free(cap.monitors);
+    return cap.image;
+}
+
 /// Every slot's run, a thread each (the first on this one).
 fn runAll(gpa: std.mem.Allocator, slots: []Slot) void {
     var threads: [max_pieces]?std.Thread = @splat(null);

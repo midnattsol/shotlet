@@ -49,6 +49,8 @@ pub const Edit = struct {
     /// where the windows were at capture (image pixels, topmost first;
     /// the caller's), to click one
     windows: []const @import("../../ui/shapes.zig").Rect = &.{},
+    /// said once it is open (why a scrolling capture ended)
+    note: scroll.Note = .{},
     /// taken by the GNOME extension (a recording picked from the editor
     /// gets its overlays)
     from_shell: bool = false,
@@ -178,9 +180,9 @@ fn scrolling(c: Ctx, cap: *capture.Capture) !Outcome {
         log.warn("scrolling capture failed ({t})", .{err});
         return .done;
     }) orelse return .done;
-    errdefer tall.deinit(c.gpa);
-    const single = try capture.Capture.single(c.gpa, tall);
+    errdefer tall.image.deinit(c.gpa);
+    const single = try capture.Capture.single(c.gpa, tall.image);
     cap.deinit(c.gpa);
     cap.* = single;
-    return .{ .edit = .{} };
+    return .{ .edit = .{ .note = tall.note } };
 }

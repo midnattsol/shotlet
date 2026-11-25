@@ -4,7 +4,6 @@
 //!
 //!   running, warning   Stop                         Enter; Esc cancels
 //!   paused             Cancel  Finish  Continue     Esc, Enter, C or Space
-//!   done               Finish (the editor opens by itself)
 //!   failed             Close                        Enter or Esc
 //!
 //! Light or dark with the desktop (ui/theme.zig). It changes in place:
@@ -47,8 +46,6 @@ pub const Phase = enum {
     warning,
     /// stopped short: Continue, Finish or Cancel
     paused,
-    /// complete; the editor opens in a moment
-    done,
     /// it could not start (no frame of the region): why, and Close
     failed,
 };
@@ -189,6 +186,11 @@ pub const Hud = struct {
         try floatwin.presentStraight(self.win, px);
     }
 
+    /// The compositor has shown what it last drew.
+    pub fn onScreen(self: *const Hud) bool {
+        return self.win.width > 0 and !self.dirty and !self.win.frame_pending;
+    }
+
     fn radiusPx(self: *const Hud) f64 {
         return @floatFromInt(self.sc(radius));
     }
@@ -227,7 +229,6 @@ pub const Hud = struct {
         const b = &self.buttons_buf;
         if (self.phase != .paused) {
             b[0] = .{ .r = .{ .x = x0, .y = y, .w = inner, .h = bh }, .action = .finish, .label = switch (self.phase) {
-                .done => "Finish",
                 .failed => "Close",
                 else => "Stop",
             }, .primary = true };

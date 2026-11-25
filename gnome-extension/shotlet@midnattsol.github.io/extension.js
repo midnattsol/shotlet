@@ -59,6 +59,7 @@ import {MODES, ModeShortcuts, countdown, modeArgs} from './modes.js';
 import {captureWindow, pickWindow, windowRects} from './windowpick.js';
 import {ScrollSessions} from './scroll.js';
 import {Freeze, NO_INPUT} from './freeze.js';
+import {discard, layout, shoot, strips} from './shoot.js';
 import {spawnWatched} from './spawn.js';
 import {APP_ID, CaptureError, fileId, monotonicMs, normalizeAccel, roleOf} from './util.js';
 import {ShotletWindows} from './windows.js';
@@ -87,6 +88,7 @@ const IFACE = `<node>
       <arg type="i" name="height" direction="in"/>
       <arg type="b" name="auto" direction="in"/>
       <arg type="s" name="session" direction="out"/>
+      <arg type="s" name="pieces" direction="out"/>
     </method>
     <method name="ScrollStep">
       <arg type="s" name="session" direction="in"/>
@@ -127,11 +129,8 @@ const BUS_INTERVAL_MS = 1000;
 // capture files nobody picked up are deleted after this
 const STALE_MS = 60 * 1000;
 const DESKTOP_ID = `${APP_ID}.desktop`;
-// strips of a monitor: about this many pixels each, at most MAX_STRIPS
-// (the shell encodes on a pool of 10 threads: two monitors in 8 strips
-// each measured fastest on two 4K monitors)
+// strips of a monitor: about this many pixels each (shoot.js)
 const PIXELS_PER_PIECE = 1000 * 1000;
-const MAX_STRIPS = 8;
 // captures that open the editor: the shell shows their frozen frame
 const FREEZE_MODES = new Set(['area', 'previous']);
 
@@ -191,7 +190,7 @@ export default class ShotletExtension extends Extension {
     }
 
     get Version() {
-        return 5;
+        return 6;
     }
 
     // Unfreeze(id): the Shotlet started on capture `id` shows it now (or
@@ -288,11 +287,11 @@ export default class ShotletExtension extends Extension {
     }
 
     async ScrollBeginAsync([x, y, w, h, auto], invocation) {
-        await this._reply(invocation, 's', () => this._scroll.begin(invocation.get_sender(), x, y, w, h, auto));
+        await this._reply(invocation, 'ss', () => this._scroll.begin(invocation.get_sender(), x, y, w, h, auto));
     }
 
     async ScrollStepAsync([id, clicks], invocation) {
-        await this._reply(invocation, 's', () => this._scroll.step(invocation.get_sender(), id, clicks));
+        await this._reply(invocation, 's', async () => [await this._scroll.step(invocation.get_sender(), id, clicks)]);
     }
 
     async ScrollEndAsync([id], invocation) {
@@ -307,16 +306,17 @@ export default class ShotletExtension extends Extension {
             await this._checkCaller(invocation.get_sender());
             const f = this._frozen;
             if (!f || f.id !== id || monotonicMs() - f.at > STALE_MS)
-                return [];
+                return [[]];
             this._frozen = null;
-            return f.rects;
+            return [f.rects];
         });
     }
 
+    // answer with the values fn gives, of these D-Bus types
     async _reply(invocation, type, fn) {
         try {
             const v = await fn();
-            invocation.return_value(type ? new GLib.Variant(`(${type})`, [v]) : null);
+            invocation.return_value(type ? new GLib.Variant(`(${type})`, v) : null);
         } catch (e) {
             invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
         }
@@ -384,18 +384,14 @@ export default class ShotletExtension extends Extension {
         }
     }
 
-    // The areas to grab: each monitor in a few strips, so the PNG
-    // encoding (Shell.Screenshot does it on a worker thread per call) runs
-    // in parallel. A strip's edges lie on whole pixels of its monitor
-    // (multiples of stripStep logical pixels), else the monitor stays whole.
+    // The areas to grab: each monitor in a few strips.
     _plan() {
         const monitors = Main.layoutManager.monitors.map(m => ({
             x: m.x, y: m.y, w: m.width, h: m.height,
             scale: global.display.get_monitor_scale(m.index),
         }));
-        const pieces = monitors.flatMap(m => strips(m));
-        const fmt = list => list.map(r => [r.x, r.y, r.w, r.h, r.scale].join(',')).join(';');
-        return {list: monitors, monitors: fmt(monitors), pieces, piecesArg: fmt(pieces)};
+        const pieces = monitors.flatMap(m => strips(m, PIXELS_PER_PIECE));
+        return {list: monitors, monitors: layout(monitors), pieces, piecesArg: layout(pieces)};
     }
 
     // Take the screenshot (of every monitor, or of the window picked) and
@@ -422,11 +418,7 @@ export default class ShotletExtension extends Extension {
                 await this._captureScreens(t0, exe, mode, extra, files);
         } finally {
             this._busy = false;
-            for (const f of files) {
-                try {
-                    f.delete(null);
-                } catch {}
-            }
+            discard(files);
         }
     }
 
@@ -452,7 +444,7 @@ export default class ShotletExtension extends Extension {
             }
             // every area is painted now, in this one main loop iteration
             // (the same frame); the PNGs are written on worker threads
-            shots = plan.pieces.map((p, k) => this._shoot(p, dir, `shot-${id}-${k}`, files));
+            shots = shoot(plan.pieces, dir, id, files);
         } catch (e) {
             failed = e;
         }
@@ -477,29 +469,6 @@ export default class ShotletExtension extends Extension {
         files.length = 0;
     }
 
-    // Paint the area `p` now and write it as a PNG to a new file
-    // `name`.part in `dir` on a worker thread, renamed to `name`.png once
-    // complete (both added to `files`); resolves once renamed.
-    _shoot(p, dir, name, files) {
-        const part = Gio.File.new_for_path(GLib.build_filenamev([dir, `${name}.part`]));
-        const done = Gio.File.new_for_path(GLib.build_filenamev([dir, `${name}.png`]));
-        // O_EXCL, mode 0600
-        const stream = part.create(Gio.FileCreateFlags.PRIVATE, null);
-        files.push(part, done);
-        return new Promise((resolve, reject) => {
-            new Shell.Screenshot().screenshot_area(p.x, p.y, p.w, p.h, stream, (obj, res) => {
-                try {
-                    obj.screenshot_area_finish(res);
-                    stream.close(null);
-                    part.move(done, Gio.FileCopyFlags.NOFOLLOW_SYMLINKS, null, null);
-                    resolve();
-                } catch (e) {
-                    reject(e);
-                }
-            });
-        });
-    }
-
     // Pick a window and capture just that window (windowpick.js).
     async _captureWindow(t0, exe, files) {
         const win = await pickWindow(w => roleOf(w) !== null);
@@ -509,8 +478,8 @@ export default class ShotletExtension extends Extension {
         const file = Gio.File.new_for_path(GLib.build_filenamev([this._captureDir(), `shot-${id}-0.png`]));
         files.push(file);
         const r = await captureWindow(win, file);
-        const layout = [r.x, r.y, r.w, r.h, r.scale].join(',');
-        Util.trySpawn([exe, '--from-shell', id, '--monitors', layout, '--pieces', layout,
+        const area = layout([r]);
+        Util.trySpawn([exe, '--from-shell', id, '--monitors', area, '--pieces', area,
             '--t0', `${t0}`, '--mode', 'window']);
         console.log(`Shotlet: captured a ${r.pw}x${r.ph} window, started shotlet`);
         files.length = 0;
@@ -540,33 +509,4 @@ export default class ShotletExtension extends Extension {
     Place(title, x, y) {
         return this._windows.place(title, x, y);
     }
-}
-
-// The smallest number of logical pixels that is a whole number of
-// physical pixels at `scale` (2 at 1.5, 4 at 1.25, 3 at 4/3), as
-// geom.pixelStep in Shotlet; 0 when there is none up to 16.
-export function stripStep(scale) {
-    for (let n = 1; n <= 16; n++) {
-        if (Math.abs(n * scale - Math.round(n * scale)) < 1e-3)
-            return n;
-    }
-    return 0;
-}
-
-// Monitor `m` in horizontal strips of about PIXELS_PER_PIECE physical
-// pixels (at most MAX_STRIPS), their edges on whole physical pixels.
-export function strips(m) {
-    const step = stripStep(m.scale);
-    const px = m.w * m.h * m.scale * m.scale;
-    const rows = step ? Math.floor(m.h / step) : 0;
-    const n = Math.min(MAX_STRIPS, rows, Math.max(1, Math.ceil(px / PIXELS_PER_PIECE)));
-    if (n <= 1)
-        return [{...m}];
-    const out = [];
-    for (let i = 0; i < n; i++) {
-        const y0 = m.y + Math.floor(i * rows / n) * step;
-        const y1 = i === n - 1 ? m.y + m.h : m.y + Math.floor((i + 1) * rows / n) * step;
-        out.push({x: m.x, y: y0, w: m.w, h: y1 - y0, scale: m.scale});
-    }
-    return out;
 }

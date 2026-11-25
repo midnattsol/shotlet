@@ -90,8 +90,10 @@ pub fn rect(ed: *const Editor) ?Rect {
     const pw = ed.sc(14) + ed.sc(icon_box) + ed.sc(10) + tw + ed.sc(18);
     const ph = ed.sc(44);
     const low: Rect = .{ .x = @divTrunc(w - pw, 2), .y = h - ph - ed.sc(28), .w = pw, .h = ph };
-    // at the top when the toolbar (or what it opened) is down there
-    for ([_]Rect{ ed.toolbar_rect, ed.panel_rect, ed.pop_rect }) |c| {
+    // at the top when the toolbar (or what it opened), or the first run's
+    // hint, is down there
+    const hint: Rect = if (ed.show_hint) ui.hintRect(ed) else .ofSize(0, 0);
+    for ([_]Rect{ ed.toolbar_rect, ed.panel_rect, ed.pop_rect, hint }) |c| {
         if (!c.isEmpty() and Rect.intersect(c.expand(ed.sc(12)), low) != null) return .{ .x = low.x, .y = ed.sc(28), .w = pw, .h = ph };
     }
     return low;

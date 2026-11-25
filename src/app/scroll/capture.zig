@@ -21,9 +21,12 @@ const region_pick = @import("../../ui/region_pick.zig");
 const hud_mod = @import("../../ui/scroll_hud.zig");
 const theme = @import("../../ui/theme.zig");
 const Session = @import("session.zig").Session;
+pub const Note = @import("stop.zig").Note;
+
+pub const Tall = struct { image: png.Image, note: Note };
 
 /// Null when cancelled.
-pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png.Image {
+pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?Tall {
     // the picker and the control follow the desktop's appearance
     const th = theme.of(theme.readPrefs(c.bus, 800));
     log.info("pick a region", .{});
@@ -37,16 +40,23 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?png
     defer c.win.closeWindow();
     defer hud.deinit();
     try showHud(c, &hud, cap, region, shell);
-    var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| return failed(c, &hud, err);
+    var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| {
+        try failed(c, &hud, err);
+        return null;
+    };
     defer session.deinit();
-    return session.collect() catch |err| failed(c, &hud, err);
+    const image = (session.collect() catch |err| {
+        try failed(c, &hud, err);
+        return null;
+    }) orelse return null;
+    return .{ .image = image, .note = session.note };
 }
 
 /// No frame of the region came (the source would not start, or gave
 /// nothing): the control says so until it is closed, instead of
 /// vanishing; when the integration refused this Shotlet, that (said
-/// once a run on a card and stderr: refused.zig). Null: nothing to edit.
-fn failed(c: flow.Ctx, hud: *hud_mod.Hud, err: anyerror) !?png.Image {
+/// once a run on a card and stderr: refused.zig).
+fn failed(c: flow.Ctx, hud: *hud_mod.Hud, err: anyerror) !void {
     if (refused.tell(c.gpa, c.env, c.bus)) {
         log.warn("stopped: the desktop integration answers only the installed Shotlet", .{});
         hud.show(.failed, refused.short_title, refused.short_hint, 0);
@@ -56,21 +66,25 @@ fn failed(c: flow.Ctx, hud: *hud_mod.Hud, err: anyerror) !?png.Image {
     }
     while (true) {
         try hud.draw();
-        if (try hud.poll(100)) |_| return null;
+        if (try hud.poll(100)) |_| return;
     }
 }
 
-/// Map the control, beside the region on GNOME, and let the overlay go.
+/// Map the control, beside the region on GNOME. The picker's surfaces are
+/// gone by now; elsewhere the compositor gets half a second to drop them
+/// (the first frame is taken once the region is still anyway).
 fn showHud(c: flow.Ctx, hud: *hud_mod.Hud, cap: *const capture.Capture, region: geom.Rect, shell: bool) !void {
-    const deadline = sys.monoMs() + 1500;
+    const start = sys.monoMs();
+    const least: i64 = if (shell) 0 else 500;
     var placed = !shell;
-    while (sys.monoMs() < deadline) {
+    while (sys.monoMs() - start < 1500) {
         try hud.draw();
-        _ = try hud.poll(50);
-        if (!placed) if (besideRegion(cap, region)) |p| {
+        _ = try hud.poll(10);
+        // (mutter places a window as it maps: moved after that)
+        if (!placed and hud.onScreen()) if (besideRegion(cap, region)) |p| {
             placed = shell_seam.place(c.gpa, c.bus, hud_mod.title, p[0], p[1]);
         };
-        if (placed and sys.monoMs() + 1000 > deadline) break;
+        if (placed and sys.monoMs() - start >= least) break;
     }
 }
 

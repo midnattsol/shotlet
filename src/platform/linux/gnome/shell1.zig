@@ -201,6 +201,14 @@ pub const Scroll = struct {
     bus: *dbus.Connection,
     id_buf: [32]u8 = undefined,
     id_len: usize = 0,
+    rect: geom.Rect,
+    pieces_buf: [1024]u8 = undefined,
+    pieces_len: usize = 0,
+
+    /// The strips its frames come in (shellcap.loadRegion).
+    pub fn pieces(self: *const Scroll) []const u8 {
+        return self.pieces_buf[0..self.pieces_len];
+    }
 
     fn id(self: *const Scroll) []const u8 {
         return self.id_buf[0..self.id_len];
@@ -215,13 +223,19 @@ pub const Scroll = struct {
         try m.putBool(auto);
         var reply = try call(bus, "ScrollBegin", "iiiib", m.buf.items, 5000);
         defer reply.deinit(bus.alloc);
-        var self: Scroll = .{ .gpa = gpa, .bus = bus };
-        self.id_len = (try readStringInto(&reply, &self.id_buf)).len;
+        var self: Scroll = .{ .gpa = gpa, .bus = bus, .rect = rect };
+        var r = reply.reader();
+        self.id_len = (try readStringInto(&r, &self.id_buf)).len;
+        // (none before Version 6)
+        self.pieces_len = if (readStringInto(&r, &self.pieces_buf)) |p| p.len else |err| switch (err) {
+            error.ShortRead => 0,
+            else => return err,
+        };
         return self;
     }
 
-    /// Scroll `clicks` wheel notches (0: none), then grab the region. The
-    /// capture id of its PNG goes into `out`.
+    /// Scroll `clicks` wheel notches (0: none), then grab the region. Its
+    /// capture id goes into `out`.
     pub fn step(self: *Scroll, clicks: i32, out: []u8) ![]u8 {
         var m = dbus.Marshal.init(self.gpa);
         defer m.deinit();
@@ -229,7 +243,8 @@ pub const Scroll = struct {
         try m.putI32(clicks);
         var reply = try call(self.bus, "ScrollStep", "si", m.buf.items, 5000);
         defer reply.deinit(self.bus.alloc);
-        return readStringInto(&reply, out);
+        var r = reply.reader();
+        return readStringInto(&r, out);
     }
 
     pub fn end(self: *Scroll) void {
@@ -241,9 +256,8 @@ pub const Scroll = struct {
     }
 };
 
-/// A reply's first string, copied into `out`.
-fn readStringInto(reply: *const dbus.Message, out: []u8) ![]u8 {
-    var r = reply.reader();
+/// A reply's next string, copied into `out`.
+fn readStringInto(r: *dbus.Reader, out: []u8) ![]u8 {
     const s = try r.readString();
     if (s.len > out.len) return error.BadReply;
     @memcpy(out[0..s.len], s);

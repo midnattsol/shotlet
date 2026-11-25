@@ -249,6 +249,7 @@ fn editOnce(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, cfg: *config.Co
     ed.presetSelection(preset_sel);
     if (edit.sel) |r| ed.doc.sel = .{ .x = r.x, .y = r.y, .w = r.w, .h = r.h };
     ed.keep_alpha = edit.keep_alpha;
+    if (edit.note.len > 0) ed.tools.toast.show(.done, edit.note.text(), 3000);
     ed.opening.timeline = edit.timeline;
     ed.opening.on_screen = edit.on_screen;
     const ctx: mode_flow.Ctx = .{ .gpa = gpa, .env = env, .bus = bus, .cfg = cfg, .win = win };

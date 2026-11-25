@@ -32,9 +32,6 @@ const offload = @import("offload.zig");
 const pace_mod = @import("pace.zig");
 const platform_capture = @import("../../platform/api.zig").capture;
 
-/// How long a natural stop's reason stays up before the editor opens.
-const done_hold_ms = 900;
-
 const sleepMs = sys.sleepMs;
 
 /// What (re)opens the frame source.
@@ -62,6 +59,8 @@ pub const Session = struct {
     warned: bool = false,
     /// what the person asked for on the control while a frame came
     asked: ?hud_mod.Action = null,
+    /// why it ended by itself, for the editor to say
+    note: stop.Note = .{},
 
     pub fn init(c: flow.Ctx, hud: *hud_mod.Hud, opener: Opener, max_height: u32) !Session {
         var self: Session = .{ .c = c, .hud = hud, .opener = opener, .max_height = max_height, .watch = .{ .auto = false } };
@@ -211,7 +210,10 @@ pub const Session = struct {
             const msg = why.message(&buf, self.max_height);
             log.info("stopped: {t} ({s}) at {d} px", .{ why, msg, self.total() });
             if (why.natural()) {
-                if (why != .user_stopped and !(try self.hold(msg))) return cancelled();
+                if (why != .user_stopped) {
+                    if (try self.cancelAsked()) return cancelled();
+                    self.note.set(msg);
+                }
                 return why;
             }
             switch (try self.paused(msg)) {
@@ -256,17 +258,11 @@ pub const Session = struct {
         }
     }
 
-    /// A natural stop: its reason for a moment (Finish skips the wait).
-    /// False when cancelled meanwhile.
-    fn hold(self: *Session, msg: []const u8) !bool {
-        self.hud.showMessage(.done, msg, self.total());
-        if (self.asked) |a| return a != .cancel;
-        const until_ms = sys.monoMs() + done_hold_ms;
-        while (sys.monoMs() < until_ms) {
-            try self.hud.draw();
-            if (try self.hud.poll(30)) |a| return a != .cancel;
-        }
-        return true;
+    /// A natural stop opens the editor at once, which says why (`note`):
+    /// only what was already asked of the control can still cancel.
+    fn cancelAsked(self: *Session) !bool {
+        const a = self.asked orelse (try self.hud.poll(1)) orelse return false;
+        return a == .cancel;
     }
 
     /// Continue after a short stop, keeping what is stitched.

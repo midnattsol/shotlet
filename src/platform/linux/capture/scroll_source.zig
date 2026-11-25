@@ -50,10 +50,7 @@ pub const Source = union(enum) {
 fn shellFrame(gpa: std.mem.Allocator, env: env_mod.Env, session: *shell1.Scroll, clicks: i32) !png.Image {
     var idbuf: [64]u8 = undefined;
     const id = try session.step(clicks, &idbuf);
-    var pbuf: [1200]u8 = undefined;
-    const data = try shellcap.readAndRemove(gpa, try shellcap.piecePath(&pbuf, env.runtime_dir, id, 0));
-    defer gpa.free(data);
-    return png.decode(gpa, data);
+    return shellcap.loadRegion(gpa, env.runtime_dir, id, session.rect, session.pieces());
 }
 
 fn directFrame(gpa: std.mem.Allocator, env: env_mod.Env, bus: *dbus.Connection, region: geom.Rect, logical: geom.Rect, wheel: ?*inject.Wheel, clicks: i32) !png.Image {

@@ -448,7 +448,7 @@ path. A scrolling capture is a session the shotlet binary opens with
 `ScrollBegin` on one region of one monitor; only that bus connection may
 step or end it, one session at a time, never on the lock screen, and only
 while Shotlet's scrolling control is on screen. Each step returns the id
-of a fresh 0600 capture file of that region, nothing else. To scroll,
+of fresh 0600 capture files of that region, nothing else. To scroll,
 the extension creates a virtual pointer for that session only: it puts
 the pointer in the middle of the region, turns the wheel there (at most
 10 notches a step, 25 steps a second) and puts the pointer back at the
