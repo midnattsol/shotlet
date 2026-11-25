@@ -3,6 +3,7 @@
 //! fades and whether animations still need frames.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
 const motion = @import("../motion.zig");
@@ -73,7 +74,7 @@ pub fn sliderValue(self: *const Editor, m: Point) i32 {
 
 /// Are animations running that need more frames?
 pub fn animating(self: *const Editor) bool {
-    const t = motion.now();
+    const t = sys.monoMs();
     if (loupe.busy(self) or strip.busy(self) or (self.hov.busy(t) and !self.capmode.rect.isEmpty())) return true;
     if (self.toolbar_rect.isEmpty()) return false;
     return self.tb_x.busy(t) or self.tb_y.busy(t) or self.tb_alpha.busy(t) or self.act_x.busy(t) or
@@ -82,7 +83,7 @@ pub fn animating(self: *const Editor) bool {
 
 /// Hover highlight strength of button `bi` (fades in and out).
 pub fn hoverAmount(self: *const Editor, bi: usize) f64 {
-    const t = motion.now();
+    const t = sys.monoMs();
     const k = self.hov.at(t);
     if (self.hover_btn >= 0 and bi == @as(usize, @intCast(self.hover_btn))) return k;
     if (self.hover_prev >= 0 and bi == @as(usize, @intCast(self.hover_prev))) return 1 - k;

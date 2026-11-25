@@ -25,6 +25,7 @@
 //! capture fitted (View.fit).
 
 const std = @import("std");
+const sys = @import("../platform/api.zig").sys;
 const log = std.log.scoped(.area_picker);
 const geom = @import("../geom.zig");
 const window = @import("../platform/api.zig").window;
@@ -294,7 +295,7 @@ pub const Picker = struct {
     }
 
     fn draw(self: *Picker, mode: anytype) !void {
-        const now = motion.now();
+        const now = sys.monoMs();
         if (self.life.busy(now)) self.dirty = true;
         if (!self.dirty) return;
         const surfs = self.win.surfaceList();
@@ -450,9 +451,9 @@ pub const Picker = struct {
         // every monitor's part at once, a thread each (two 4K monitors)
         for (self.win.surfaceList()[0..self.n], 0..) |s, i| if (s.alive) try self.place(i, s.width, s.height);
         try pane_mod.fillAll(self.gpa, self.frozen, self.panes[0..self.n], self.keep);
-        while (self.result == null or self.life.busy(motion.now())) {
-            if (self.result != null) self.life.leave(motion.now());
-            const wait = self.win.pollTimeoutMs(if (self.life.busy(motion.now())) 8 else 100);
+        while (self.result == null or self.life.busy(sys.monoMs())) {
+            if (self.result != null) self.life.leave(sys.monoMs());
+            const wait = self.win.pollTimeoutMs(if (self.life.busy(sys.monoMs())) 8 else 100);
             if (try self.win.nextEventTimeout(wait)) |ev| {
                 if (self.result == null) try self.onEvent(mode, ev);
                 while (self.win.queue.items.len > 0) {

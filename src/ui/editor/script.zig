@@ -5,6 +5,7 @@
 //! surface, render, dump, export, quit).
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
@@ -122,7 +123,7 @@ fn dragPath(ed: *Editor, arg: []const u8) !void {
 /// motion, and log the time per frame.
 fn scribble(ed: *Editor, arg: []const u8) !void {
     const v = try parseInts(4, arg);
-    const t0 = session.nowMs();
+    const t0 = sys.monoMs();
     const n: usize = @intCast(v[3]);
     for (0..n + 1) |i| {
         const a = @as(f64, @floatFromInt(i)) * 0.05;
@@ -133,9 +134,9 @@ fn scribble(ed: *Editor, arg: []const u8) !void {
         if (i == 0) try buttonXY(ed, .left, true, x, y);
         try render.renderFrame(ed);
     }
-    const t1 = session.nowMs();
+    const t1 = sys.monoMs();
     try buttonXY(ed, .left, false, 0, 0);
-    log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, session.nowMs() - t1 });
+    log.info("scribble: {d} frames in {d} ms, commit {d} ms", .{ n, t1 - t0, sys.monoMs() - t1 });
 }
 
 /// scroll V, or scroll v120:N for a high-resolution wheel.

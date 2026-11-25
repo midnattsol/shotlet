@@ -4,6 +4,7 @@
 //! like the "discard changes?" prompt of macOS editors, without a dialog.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const commands = @import("commands.zig");
@@ -18,7 +19,7 @@ pub const message = "Unsaved annotations \u{00B7} Esc again to discard";
 
 /// Close the editor, or ask first when that would lose annotations.
 pub fn close(ed: *Editor) void {
-    const now = session.nowMs();
+    const now = sys.monoMs();
     if (!unsaved(ed) or now < ed.discard_until_ms) return commands.finish(ed, .cancel);
     ed.discard_until_ms = now + confirm_ms;
     ed.tools.toast.show(.problem, message, confirm_ms);

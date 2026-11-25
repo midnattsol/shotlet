@@ -94,8 +94,8 @@ shell_early() {
 # anyone else asking over the bus is refused
 shell_refused() {
     gdbus call --session --dest dev.shotlet.Shell1 --object-path /dev/shotlet/Shell1 \
-        --method dev.shotlet.Shell1.Capture >"$OUT/gdbus.txt" 2>&1
-    check "Capture() from another program is refused" grep -q "AccessDenied" "$OUT/gdbus.txt"
+        --method dev.shotlet.Shell1.CaptureMode area 0 >"$OUT/gdbus.txt" 2>&1
+    check "CaptureMode() from another program is refused" grep -q "AccessDenied" "$OUT/gdbus.txt"
     sleep 1
     check "  ... and takes no screenshot" eq "$(shell_count "startup: capture=")" 3
     check "  ... nor leaves a file" capture_dir_empty
@@ -173,7 +173,7 @@ scenario_shell_mixed() {
 }
 
 scenario_shell_tray() {
-    # the tray's Take screenshot asks the extension (Capture()), which
+    # the tray's Take screenshot asks the extension (CaptureMode()), which
     # takes the shot and starts the editor; no prompt, no child capture
     drv_ready Meta-0
     drv move 0 800 450

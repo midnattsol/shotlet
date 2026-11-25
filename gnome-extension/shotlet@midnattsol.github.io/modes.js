@@ -23,6 +23,7 @@ import Shell from 'gi://Shell';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as Util from 'resource:///org/gnome/shell/misc/util.js';
+import {monotonicMs} from './util.js';
 
 export const MODES = ['area', 'fullscreen', 'screens', 'previous', 'window', 'scroll'];
 
@@ -82,7 +83,7 @@ export class ModeShortcuts {
                         this._thumbnail();
                         return;
                     }
-                    const t0 = Math.floor(GLib.get_monotonic_time() / 1000);
+                    const t0 = monotonicMs();
                     const delay = timer ? this._settings.get_uint('timer-seconds') : 0;
                     this._capture(mode, delay, t0).catch(e =>
                         console.warn(`Shotlet: ${mode} capture failed: ${e.message}`));

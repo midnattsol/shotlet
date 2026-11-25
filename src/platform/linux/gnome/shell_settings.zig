@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const gsettings = @import("gsettings.zig");
+const contains = @import("custom.zig").contains;
 const Env = @import("../../../app/env.zig").Env;
 const uuid = @import("extension.zig").uuid;
 
@@ -15,11 +16,6 @@ const schema = "org.gnome.shell";
 fn readList(arena: std.mem.Allocator, env: Env, key: []const u8) ![]const []const u8 {
     const items = try gsettings.parseStrv(arena, try gsettings.get(arena, env, null, schema, key));
     return items;
-}
-
-fn contains(list: []const []const u8, item: []const u8) bool {
-    for (list) |s| if (std.mem.eql(u8, s, item)) return true;
-    return false;
 }
 
 /// `list` with `item` at the end; null when it is there already.

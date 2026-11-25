@@ -39,7 +39,7 @@ var refused_caller = std.atomic.Value(bool).init(false);
 /// AccessDenied for other reasons: another caller's session, the control
 /// not on screen.)
 fn checksCaller(member: []const u8) bool {
-    const checked = [_][]const u8{ "Capture", "CaptureMode", "CaptureWindows", "ScrollBegin", "StartRecording", "RecordSelect" };
+    const checked = [_][]const u8{ "CaptureMode", "CaptureWindows", "ScrollBegin", "StartRecording", "RecordSelect" };
     for (checked) |m| if (std.mem.eql(u8, m, member)) return true;
     return false;
 }
@@ -58,36 +58,11 @@ fn replyYes(bus: *dbus.Connection, reply: *dbus.Message) bool {
 
 // --- captures
 
-pub const CaptureRequest = enum {
-    /// the extension took the screenshot and started the editor
-    started,
-    /// a capture is already under way, or the screen is locked: nothing
-    /// else should capture now
-    declined,
-    /// not possible (an older extension, a failure): capture another way
-    unavailable,
-};
-
-/// Ask the extension to take a screenshot and start Shotlet's editor on
-/// it (Capture: no pixels come back over the bus).
-pub fn capture(bus: *dbus.Connection) CaptureRequest {
-    var reply = call(bus, "Capture", "", "", 5000) catch |err| return switch (err) {
-        error.Busy => .declined,
-        else => .unavailable,
-    };
-    return if (replyYes(bus, &reply)) .started else .unavailable;
-}
-
 pub const Handoff = @import("../../api/shell.zig").Handoff;
 
-/// Ask the extension to capture in this mode (after its countdown).
-/// An area capture with no delay uses Capture().
+/// Ask the extension to capture in this mode (after its countdown) and
+/// start Shotlet on it (no pixels come back over the bus).
 pub fn captureMode(bus: *dbus.Connection, req: mode.Request) Handoff {
-    if (req.mode == .area and req.delay_s == 0) return switch (capture(bus)) {
-        .started => .started,
-        .declined => .declined,
-        .unavailable => .unavailable,
-    };
     var m = dbus.Marshal.init(bus.alloc);
     defer m.deinit();
     m.putString(@tagName(req.mode)) catch return .unavailable;
@@ -114,8 +89,8 @@ pub fn captureWindows(bus: *dbus.Connection, id: []const u8, out: []i32) []const
 
 /// Unfreeze(id): Shotlet shows capture `id` (or never will): the
 /// extension's frozen frame of it goes, and the reply says what the
-/// pointer and keyboard did meanwhile (null from an older extension, or
-/// when it does not answer soon).
+/// pointer and keyboard did meanwhile (null when it does not answer
+/// soon).
 pub fn unfreeze(bus: *dbus.Connection, id: []const u8) ?FrozenInput {
     var m = dbus.Marshal.init(bus.alloc);
     defer m.deinit();
@@ -149,18 +124,6 @@ fn readInts(r: *dbus.Reader, out: []i32) ![]const i32 {
     return out[0..n];
 }
 
-/// Move one of Shotlet's tagged windows (Place): false when the extension
-/// does not know it (yet).
-pub fn place(gpa: std.mem.Allocator, bus: *dbus.Connection, title: []const u8, x: i32, y: i32) bool {
-    var m = dbus.Marshal.init(gpa);
-    defer m.deinit();
-    m.putString(title) catch return false;
-    m.putI32(x) catch return false;
-    m.putI32(y) catch return false;
-    var reply = call(bus, "Place", "sii", m.buf.items, 2000) catch return false;
-    return replyYes(bus, &reply);
-}
-
 /// A scrolling capture session in the extension.
 pub const Scroll = struct {
     gpa: std.mem.Allocator,
@@ -192,11 +155,7 @@ pub const Scroll = struct {
         var self: Scroll = .{ .gpa = gpa, .bus = bus, .rect = rect };
         var r = reply.reader();
         self.id_len = (try readStringInto(&r, &self.id_buf)).len;
-        // (none from an older extension)
-        self.pieces_len = if (readStringInto(&r, &self.pieces_buf)) |p| p.len else |err| switch (err) {
-            error.ShortRead => 0,
-            else => return err,
-        };
+        self.pieces_len = (try readStringInto(&r, &self.pieces_buf)).len;
         return self;
     }
 
@@ -284,8 +243,8 @@ pub fn isStopRequest(msg: *const dbus.Message) bool {
 }
 
 test "only the calls that check the caller tell of a refusal" {
-    try std.testing.expect(checksCaller("Capture") and checksCaller("ScrollBegin") and checksCaller("StartRecording"));
-    try std.testing.expect(!checksCaller("ScrollStep") and !checksCaller("ScrollEnd") and !checksCaller("Place"));
+    try std.testing.expect(checksCaller("CaptureMode") and checksCaller("ScrollBegin") and checksCaller("StartRecording"));
+    try std.testing.expect(!checksCaller("ScrollStep") and !checksCaller("ScrollEnd"));
 }
 
 test "CaptureWindows' ai keeps whole rectangles" {

@@ -66,19 +66,7 @@ pub fn shape(
     comptime advance: fn (@TypeOf(advance_ctx), u16) i32,
 ) !bool {
     if (script.joins() and !common.hasScript(t.gsub, script)) return false;
-    const gdef = common.Gdef.init(t.gdef);
-    for (buf.items) |*g| g.class = common.glyphClass(gdef, g.gid, g.umark);
-    const n0 = buf.items.len;
-    var ctx: Ctx = .{
-        .alloc = gpa,
-        .buf = buf,
-        .gdef = gdef,
-        .table = t.gsub,
-        .is_gsub = true,
-        .rtl = rtl,
-        .budget = @intCast(@min(4_000_000, 2000 + n0 * 400)),
-        .limit = @min(n0 * 8 + 64, max_growth + n0),
-    };
+    var ctx = substitution(gpa, t, rtl, buf);
     if (rd16(t.gsub, 0) == 1) try runStages(&ctx, script, if (script.joins()) &joining_stages else &plain_stages);
     resetPositions(buf.items, advance_ctx, advance);
     if (rd16(t.gpos, 0) == 1 and common.hasScript(t.gpos, script)) try position(&ctx, t.gpos, script);
@@ -91,20 +79,25 @@ pub fn shape(
 /// positioning. For optional features such as tabular figures ("tnum").
 pub fn substitute(gpa: std.mem.Allocator, t: Tables, script: Script, features: []const *const [4]u8, buf: *std.ArrayList(Glyph)) !void {
     if (rd16(t.gsub, 0) != 1) return;
+    var ctx = substitution(gpa, t, false, buf);
+    try runStages(&ctx, script, &.{.{ .features = features }});
+}
+
+/// The GSUB pass over `buf`, its glyphs classed by GDEF.
+fn substitution(gpa: std.mem.Allocator, t: Tables, rtl: bool, buf: *std.ArrayList(Glyph)) Ctx {
     const gdef = common.Gdef.init(t.gdef);
     for (buf.items) |*g| g.class = common.glyphClass(gdef, g.gid, g.umark);
     const n0 = buf.items.len;
-    var ctx: Ctx = .{
+    return .{
         .alloc = gpa,
         .buf = buf,
         .gdef = gdef,
         .table = t.gsub,
         .is_gsub = true,
-        .rtl = false,
+        .rtl = rtl,
         .budget = @intCast(@min(4_000_000, 2000 + n0 * 400)),
         .limit = @min(n0 * 8 + 64, max_growth + n0),
     };
-    try runStages(&ctx, script, &.{.{ .features = features }});
 }
 
 /// Nominal advances (none for ignorables) and no offsets or attachments.

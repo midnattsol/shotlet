@@ -171,6 +171,14 @@ fn createToplevel(w: *Window, s: *Surface, title: []const u8, opts: OpenOptions,
     try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
 }
 
+/// A frame callback with the surface's next commit, unless one is due.
+pub fn requestFrame(c: *wl.Connection, s: *Surface) !void {
+    if (s.frame_pending) return;
+    s.frame_cb = c.newId();
+    try c.request(s.wl_surface, wl.wl_surface.frame, &.{.{ .new_id = s.frame_cb }});
+    s.frame_pending = true;
+}
+
 /// Destroy one surface's protocol objects and buffers.
 pub fn destroy(w: *Window, idx: u8) void {
     const c = &w.conn;

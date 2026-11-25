@@ -35,10 +35,6 @@ fn warmupCapture() void {
     platform.capture.warmup();
 }
 
-pub fn nowMs() i64 {
-    return sys.monoMs();
-}
-
 /// Dev sources that skip the portal.
 pub const From = struct {
     /// one PNG as the whole capture
@@ -167,7 +163,7 @@ fn handedToShell(gpa: std.mem.Allocator, env: Env, bus: *desktop.Bus, req: modes
     launch.handOff(env);
     switch (shell.requestCapture(gpa, bus, req)) {
         .started => {
-            log.info("capture handed to the GNOME integration ({d}ms)", .{nowMs() - t0});
+            log.info("capture handed to the GNOME integration ({d}ms)", .{sys.monoMs() - t0});
             return true;
         },
         .declined => return true,
@@ -295,7 +291,7 @@ fn configureEditor(ed: *editor_mod.Editor, bus: *desktop.Bus, cfg: *const config
     // (ui/editor/opening.zig): the first frames show nothing it colours
     theme.watch(bus) catch {};
     ed.bus = bus;
-    if (smoke_ms > 0) ed.smoke_deadline_ms = nowMs() + smoke_ms;
+    if (smoke_ms > 0) ed.smoke_deadline_ms = sys.monoMs() + smoke_ms;
     ed.cfg_thickness = cfg.default_thickness;
     ed.color_idx = cfg.default_color;
     ed.binds = cfg.binds;
@@ -410,6 +406,17 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     };
     defer cap.deinit(gpa);
 
+    log.info("editing {s} again", .{id});
+    var kept: keep_mod.Kept = .{ .id = history.Id.fromSlice(id).? };
+    if (root.len > kept.root_buf.len) return error.PathTooLong;
+    @memcpy(kept.root_buf[0..root.len], root);
+    kept.root_len = root.len;
+    try editGiven(gpa, env, &cap, .{ .kept = kept, .doc = &doc });
+}
+
+/// The editor on a picture that is not a capture of this run (a file, a
+/// kept capture): a session of its own, on the monitor the compositor picks.
+pub fn editGiven(gpa: std.mem.Allocator, env: Env, cap: *capture.Capture, reopen: ?Reopen) !void {
     var bus = try desktop.connect(gpa, env);
     defer bus.deinit();
     var cfg = config.load(gpa, env.home);
@@ -419,12 +426,7 @@ pub fn runEdit(gpa: std.mem.Allocator, env: Env, root: []const u8, id: []const u
     var win = try window.Window.init(gpa, env);
     defer win.deinit();
     try win.open("Shotlet", .{ .fullscreen = true });
-    log.info("editing {s} again", .{id});
-    var kept: keep_mod.Kept = .{ .id = history.Id.fromSlice(id).? };
-    if (root.len > kept.root_buf.len) return error.PathTooLong;
-    @memcpy(kept.root_buf[0..root.len], root);
-    kept.root_len = root.len;
-    try editAndFinish(gpa, env, &bus, &cfg, &win, &cap, null, 0, .{ .kept = kept, .doc = &doc }, .{});
+    try editAndFinish(gpa, env, &bus, &cfg, &win, cap, null, 0, reopen, .{});
 }
 
 /// Get the image to edit. Null means the person cancelled a dialog: the

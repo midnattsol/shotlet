@@ -57,11 +57,6 @@ pub fn requestCapture(gpa: std.mem.Allocator, bus: *desktop.Bus, req: mode.Reque
     _ = .{ gpa, bus, req };
     return .unavailable;
 }
-/// Put our window titled `title` at x, y (logical); false when it cannot.
-pub fn place(gpa: std.mem.Allocator, bus: *desktop.Bus, title: []const u8, x: i32, y: i32) bool {
-    _ = .{ gpa, bus, title, x, y };
-    return false;
-}
 /// It refused this Shotlet at least once in this run: it answers only
 /// the installed one.
 pub fn refusedCaller() bool {

@@ -177,10 +177,6 @@ pub const Cff = struct {
         return out;
     }
 
-    pub fn numGlyphs(self: *const Cff) u32 {
-        return self.charstrings.count;
-    }
-
     fn fdFor(self: *const Cff, gid: u32) Error!u32 {
         const s = self.fd_select;
         const format = try rd8(s, 0);

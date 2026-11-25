@@ -24,6 +24,7 @@ const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const shapes = @import("shapes.zig");
 const theme = @import("theme.zig");
+const px = @import("scale.zig").px;
 const Cursor = @import("../platform/api.zig").window.Cursor;
 
 const Canvas = render.Canvas;
@@ -35,10 +36,6 @@ const Theme = theme.Theme;
 pub const handle_radius: f64 = 5;
 /// the size pill's text: medium weight, figures that do not jiggle
 pub const size_style = text.Style.medium.num();
-
-fn px(v: f64, f: f64) i32 {
-    return @intFromFloat(@round(v * f));
-}
 
 /// Two tones: the light line shows on dark captures, the dark one around
 /// it on light ones.

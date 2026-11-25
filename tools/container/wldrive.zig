@@ -24,7 +24,6 @@ const std = @import("std");
 const kit = @import("shotlet");
 const wl = kit.wayland;
 const dbus = kit.dbus;
-const sys = kit.sys;
 const common = @import("driver_common");
 const loop = common.loop;
 const proto = @import("wldrive/proto.zig");

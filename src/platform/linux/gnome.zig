@@ -14,7 +14,7 @@
 //! the setup runs once it is loaded (gnome/next_login, pending_setup).
 //!
 //! The extension also captures without prompts (see its extension.js):
-//! its own shortcut, and dev.shotlet.Shell1.Capture() for Shotlet's tray
+//! its own shortcut, and dev.shotlet.Shell1.CaptureMode() for Shotlet's tray
 //! and a `shotlet` run from a terminal. Once it is active, install points
 //! it at this binary and offers to move custom shortcuts that run shotlet
 //! to the extension's shortcut (uninstall puts them back).

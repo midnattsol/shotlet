@@ -2,7 +2,6 @@
 //! can hit, their on-screen regions and the window's mutable UI state.
 
 const std = @import("std");
-const desktop = @import("../../platform/api.zig").desktop;
 const config = @import("../../app/config.zig");
 const theme_mod = @import("../theme.zig");
 const env_mod = @import("../../app/env.zig");

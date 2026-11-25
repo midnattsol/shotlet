@@ -268,10 +268,6 @@ pub const Db = struct {
         return fc.match(self.alloc, "sans-serif", cp);
     }
 
-    pub fn hasFontconfig(self: *Db) bool {
-        return self.fontconfig() != null;
-    }
-
     /// The `i`-th wide-coverage fallback face found on disk, or null when
     /// the list is exhausted.
     pub fn fallback(self: *Db, i: usize) ?Face {

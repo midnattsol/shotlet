@@ -4,7 +4,7 @@
 // screencast of an area (org.gnome.Mutter.ScreenCast, RecordArea with
 // is-recording, so GNOME shows its recording indicator) and answers with
 // the PipeWire node; Shotlet reads the pictures from that node and
-// encodes them itself. StopRecording() ends it. Like Capture(), both are
+// encodes them itself. StopRecording() ends it. Like CaptureMode(), both are
 // honoured only for a caller running the shotlet binary the extension
 // starts (ShotletExtension._checkCaller), one recording at a time, never
 // on the lock screen; and the screencast ends as soon as that caller
@@ -27,6 +27,7 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {CallError, monotonicMs, reply} from './util.js';
 
 const MUTTER = 'org.gnome.Mutter.ScreenCast';
 const RECORD_KEY = 'record-shortcut';
@@ -103,7 +104,7 @@ export class Recorder {
             this.requestStop();
             return;
         }
-        const t0 = Math.floor(GLib.get_monotonic_time() / 1000);
+        const t0 = monotonicMs();
         this._ext._capture(t0, false, 'area', 0, ['--then', 'record']).catch(e =>
             console.warn(`Shotlet: record failed: ${e.message}`));
     }
@@ -113,59 +114,44 @@ export class Recorder {
     }
 
     // StartRecording(a{sv} options) -> (u node)
-    async startCall(params, invocation) {
-        try {
+    async startCall([opts], invocation) {
+        await reply(invocation, 'u', async () => {
             const sender = invocation.get_sender();
             await this._ext._checkCaller(sender);
             if (this._rec)
-                throw this._error('Busy', 'a recording is under way');
+                throw new CallError('Busy', 'a recording is under way');
             if (Main.sessionMode.isLocked)
-                throw this._error('Locked', 'the screen is locked');
-            const [opts] = params;
+                throw new CallError('Locked', 'the screen is locked');
             const o = {};
             for (const [k, v] of Object.entries(opts))
                 o[k] = v.deepUnpack();
-            const node = await this._start(sender, o);
-            invocation.return_value(new GLib.Variant('(u)', [node]));
-        } catch (e) {
-            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
-        }
+            return [await this._start(sender, o)];
+        });
     }
 
     // RecordSelect(): the picker in record mode, on a capture taken here
     async selectCall(_params, invocation) {
-        try {
+        const t0 = monotonicMs();
+        await reply(invocation, 'b', async () => {
             await this._ext._checkCaller(invocation.get_sender());
             if (this._rec)
-                throw this._error('Busy', 'a recording is under way');
-            const t0 = Math.floor(GLib.get_monotonic_time() / 1000);
+                throw new CallError('Busy', 'a recording is under way');
             await this._ext._capture(t0, true, 'area', 0, ['--then', 'record']);
-            invocation.return_value(new GLib.Variant('(b)', [true]));
-        } catch (e) {
-            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
-        }
+            return [true];
+        });
     }
 
     async stopCall(_params, invocation) {
-        try {
+        await reply(invocation, null, async () => {
             await this._ext._checkCaller(invocation.get_sender());
             this._stop();
-            invocation.return_value(null);
-        } catch (e) {
-            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
-        }
-    }
-
-    _error(name, message) {
-        const e = new Error(message);
-        e.dbusName = `dev.shotlet.Shell1.Error.${name}`;
-        return e;
+        });
     }
 
     async _start(sender, o) {
         const area = {x: o.x | 0, y: o.y | 0, w: o.w | 0, h: o.h | 0};
         if (area.w <= 0 || area.h <= 0)
-            throw this._error('Invalid', 'empty area');
+            throw new CallError('Invalid', 'empty area');
         const rec = {sender, area, session: null, watch: 0, actors: [], eventId: 0, indicator: null};
         this._rec = rec;
         try {

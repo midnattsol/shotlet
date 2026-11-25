@@ -30,7 +30,6 @@ const Editor = editor_mod.Editor;
 const Env = @import("../../app/env.zig").Env;
 const Shape = shapes.Shape;
 const Point = shapes.Point;
-const Rect = shapes.Rect;
 const Tool = shapes.Tool;
 
 /// Modes that take the pointer instead of the current tool.

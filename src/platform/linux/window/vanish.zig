@@ -87,11 +87,7 @@ fn commitClear(w: *Window, s: *Surface, clear: *Clear, i: usize) !void {
     try c.request(s.wl_surface, wl.wl_surface.set_opaque_region, &.{.{ .object = 0 }});
     try c.request(s.wl_surface, wl.wl_surface.attach, &.{ .{ .object = clear.buffer[i] }, .{ .int = 0 }, .{ .int = 0 } });
     try c.request(s.wl_surface, wl.wl_surface.damage_buffer, &.{ .{ .int = 0 }, .{ .int = 0 }, .{ .int = @intCast(s.width) }, .{ .int = @intCast(s.height) } });
-    if (!s.frame_pending) {
-        s.frame_cb = c.newId();
-        try c.request(s.wl_surface, wl.wl_surface.frame, &.{.{ .new_id = s.frame_cb }});
-        s.frame_pending = true;
-    }
+    try surface.requestFrame(c, s);
     try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
 }
 

@@ -3,6 +3,7 @@
 //! and the fragments' adler32 checksums are combined for one zlib stream.
 
 const std = @import("std");
+const parallel = @import("../../parallel.zig");
 const flate = std.compress.flate;
 const filters = @import("filters.zig");
 const pad = filters.pad;
@@ -192,13 +193,10 @@ fn toBytes(src: []const u32, dst: []u8, bpp: u8) void {
 /// threads (or here when a thread cannot be spawned). Returns the first
 /// band error. At most 64 bands.
 pub fn compressAll(bands: []Band) !void {
-    var threads: [64]?std.Thread = @splat(null);
-    for (bands[1..], 1..) |*b, i| {
-        threads[i] = std.Thread.spawn(.{}, Band.run, .{b}) catch null;
-        if (threads[i] == null) b.run(); // no thread: do it here
-    }
+    var g: parallel.Group(63) = .{};
+    for (bands[1..]) |*b| g.go(Band.run, .{b});
     bands[0].run();
-    for (threads[1..bands.len]) |t| if (t) |th| th.join();
+    g.wait();
     for (bands) |*b| if (b.err) |e| return e;
 }
 

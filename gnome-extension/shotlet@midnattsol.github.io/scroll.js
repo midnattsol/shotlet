@@ -29,6 +29,7 @@ import GLib from 'gi://GLib';
 import System from 'system';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {discard, layout, shoot, strips} from './shoot.js';
+import {CallError, monotonicMs} from './util.js';
 
 const IDLE_MS = 30 * 1000;
 const MAX_MS = 5 * 60 * 1000;
@@ -39,13 +40,6 @@ const SETTLE_MS = 160;
 // strips of the region: about this many pixels each (shoot.js): a region
 // is the one thing encoding, so finer than a capture of every monitor
 const PIXELS_PER_PIECE = 400 * 1000;
-
-class ScrollError extends Error {
-    constructor(name, message) {
-        super(message);
-        this.dbusName = `dev.shotlet.Shell1.Error.${name}`;
-    }
-}
 
 function wait(ms) {
     return new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => resolve() ?? GLib.SOURCE_REMOVE));
@@ -75,16 +69,16 @@ export class ScrollSessions {
     async begin(sender, x, y, w, h, auto) {
         await this._checkCaller(sender);
         if (Main.sessionMode.isLocked)
-            throw new ScrollError('Locked', 'the screen is locked');
+            throw new CallError('Locked', 'the screen is locked');
         if (this._session)
-            throw new ScrollError('Busy', 'a scrolling capture is under way');
+            throw new CallError('Busy', 'a scrolling capture is under way');
         const monitor = this._monitorOf(x, y, w, h);
         if (w < 16 || h < 16 || !monitor)
-            throw new ScrollError('Failed', 'the region must lie on one monitor');
+            throw new CallError('Failed', 'the region must lie on one monitor');
         const id = GLib.uuid_string_random().replace(/-/g, '').slice(0, 16);
         const scale = global.display.get_monitor_scale(monitor.index);
         const pieces = strips({x, y, w, h, scale}, PIXELS_PER_PIECE);
-        const s = {id, sender, x, y, w, h, pieces, n: 0, last: 0, dev: null, pointer: null, born: Date.now()};
+        const s = {id, sender, x, y, w, h, pieces, n: 0, last: 0, dev: null, pointer: null, born: monotonicMs()};
         if (auto) {
             const seat = Clutter.get_default_backend().get_default_seat();
             s.dev = seat.create_virtual_device(Clutter.InputDeviceType.POINTER_DEVICE);
@@ -93,7 +87,7 @@ export class ScrollSessions {
         s.watch = Gio.bus_watch_name_on_connection(Gio.DBus.session, sender,
             Gio.BusNameWatcherFlags.NONE, null, () => this._end());
         s.timer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
-            const now = Date.now();
+            const now = monotonicMs();
             if (now - s.born > MAX_MS || now - (s.last || s.born) > IDLE_MS || Main.sessionMode.isLocked) {
                 s.timer = 0;
                 this._end();
@@ -109,28 +103,28 @@ export class ScrollSessions {
     _own(sender, id) {
         const s = this._session;
         if (!s || s.id !== id || s.sender !== sender)
-            throw new ScrollError('AccessDenied', 'not this caller\'s scrolling capture');
+            throw new CallError('AccessDenied', 'not this caller\'s scrolling capture');
         return s;
     }
 
     async step(sender, id, clicks) {
         const s = this._own(sender, id);
         if (!this._hudShown())
-            throw new ScrollError('AccessDenied', 'Shotlet\'s scrolling control is not on screen');
+            throw new CallError('AccessDenied', 'Shotlet\'s scrolling control is not on screen');
         // too soon after the last one: it waits its turn
-        const now = Date.now();
+        const now = monotonicMs();
         const at = Math.max(now, s.last + MIN_STEP_MS);
         s.last = at;
         if (at > now)
             await wait(at - now);
         if (this._session !== s)
-            throw new ScrollError('Failed', 'the scrolling capture ended');
+            throw new CallError('Failed', 'the scrolling capture ended');
         if (clicks > 0 && s.dev) {
             this._wheel(s, Math.min(clicks, MAX_CLICKS));
             await wait(SETTLE_MS);
         }
         if (this._session !== s)
-            throw new ScrollError('Failed', 'the scrolling capture ended');
+            throw new CallError('Failed', 'the scrolling capture ended');
         return this._grab(s);
     }
 

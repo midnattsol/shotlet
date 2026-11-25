@@ -4,6 +4,7 @@
 //! (its look) says so for a couple of seconds, fading in and out.
 
 const render = @import("../../gfx/render.zig");
+const sys = @import("../../platform/api.zig").sys;
 const text_mod = @import("../../gfx/text.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
@@ -38,7 +39,7 @@ pub fn edgeDragged(ed: *Editor) void {
     if (!h.due or ed.loupe.mode != .hold) return;
     h.due = false;
     h.seen = true;
-    h.until_ms = motion.now() + show_ms;
+    h.until_ms = sys.monoMs() + show_ms;
     ed.needs_render = true;
 }
 
@@ -56,13 +57,13 @@ pub fn dueMs(ed: *const Editor) i64 {
 
 /// Still fading.
 pub fn busy(ed: *const Editor) bool {
-    return ed.loupe.hint.shown.busy(motion.now());
+    return ed.loupe.hint.shown.busy(sys.monoMs());
 }
 
 /// Where it goes beside the size pill `pill`, on the pane showing that
 /// (null: not on).
 pub fn rect(ed: *const Editor, pill: Rect) ?Rect {
-    if (!ed.isTbPane() or ed.loupe.hint.shown.at(motion.now()) <= 0) return null;
+    if (!ed.isTbPane() or ed.loupe.hint.shown.at(sys.monoMs()) <= 0) return null;
     const w = text_mod.widthStyled(theme.font_small * ed.uf(), selchrome.size_style, hint_text) + ed.sc(20);
     const gap = ed.sc(6);
     const edge = 6;
@@ -73,7 +74,7 @@ pub fn rect(ed: *const Editor, pill: Rect) ?Rect {
 
 pub fn draw(ed: *Editor, canvas: *Canvas, pill: Rect) void {
     const r = rect(ed, pill) orelse return;
-    const a = ed.loupe.hint.shown.at(motion.now());
+    const a = ed.loupe.hint.shown.at(sys.monoMs());
     const snap = if (a < 1) material.Snapshot.take(ed.alloc, canvas, r.expand(1)) else null;
     selchrome.sizePill(canvas, r, ed.uf(), ed.theme, hint_text);
     if (snap) |s| s.restore(ed.alloc, canvas, a);

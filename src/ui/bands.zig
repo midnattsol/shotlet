@@ -5,6 +5,7 @@
 //! thread.
 
 const std = @import("std");
+const parallel = @import("../parallel.zig");
 const Rect = @import("../geom.zig").Rect;
 
 /// Below this many pixels one thread does it.
@@ -16,13 +17,10 @@ pub fn run(r: Rect, ctx: anytype, comptime f: fn (@TypeOf(ctx), Rect) void) void
     if (r.isEmpty()) return;
     const cpus = std.Thread.getCpuCount() catch 1;
     const n: usize = if (r.area() < min_area) 1 else @min(max_threads, cpus, @as(usize, @intCast(r.h)));
-    var threads: [max_threads]?std.Thread = @splat(null);
-    for (0..n) |i| {
-        const band = bandOf(r, i, n);
-        if (i + 1 < n) threads[i] = std.Thread.spawn(.{}, f, .{ ctx, band }) catch null;
-        if (threads[i] == null) f(ctx, band);
-    }
-    for (threads[0..n]) |t| if (t) |th| th.join();
+    var g: parallel.Group(max_threads) = .{};
+    for (1..n) |i| g.go(f, .{ ctx, bandOf(r, i, n) });
+    f(ctx, bandOf(r, 0, n));
+    g.wait();
 }
 
 /// Band `i` of `n` of `r`.

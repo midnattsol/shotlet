@@ -4,6 +4,7 @@
 const std = @import("std");
 const geom = @import("../../geom.zig");
 const textbox = @import("../textbox.zig");
+const stroke = @import("../../gfx/render/stroke.zig");
 const ruler = @import("../tools/ruler.zig");
 const spotlight = @import("../tools/spotlight.zig");
 
@@ -176,7 +177,7 @@ pub const Shape = struct {
                 const w = if (self.tool == .highlight) half * 3.0 else half;
                 return hitPolyline(self.points.items, p, w + tol);
             },
-            .line, .arrow, .ruler => return segDist(p, self.p0, self.p1) <= half + tol,
+            .line, .arrow, .ruler => return hitPolyline(&.{ self.p0, self.p1 }, p, half + tol),
             .spotlight => return spotlight.hitTest(self, p, tol),
             .rect => return self.hitRect(p, tol),
             .ellipse => return self.hitEllipse(p, half, tol),
@@ -264,13 +265,7 @@ fn pointsFrame(pts: []const Point) Rect {
 
 /// Is `p` within `reach` of any segment of the polyline `pts`?
 fn hitPolyline(pts: []const Point, p: Point, reach: f64) bool {
-    if (pts.len == 0) return false;
-    if (pts.len == 1) return segDist(p, pts[0], pts[0]) <= reach;
-    var i: usize = 0;
-    while (i + 1 < pts.len) : (i += 1) {
-        if (segDist(p, pts[i], pts[i + 1]) <= reach) return true;
-    }
-    return false;
+    return pts.len > 0 and stroke.polylineDist(@floatFromInt(p.x), @floatFromInt(p.y), pts, reach + 1) <= reach;
 }
 
 fn scaleOffset(v: i32, from: i32, to: i32) i32 {
@@ -280,20 +275,6 @@ fn scaleOffset(v: i32, from: i32, to: i32) i32 {
 
 pub fn textFontPx(thickness: i32) f64 {
     return @as(f64, @floatFromInt(@max(1, thickness))) * 7.0 + 12.0;
-}
-
-fn segDist(p: Point, a: Point, b: Point) f64 {
-    const px: f64 = @floatFromInt(p.x);
-    const py: f64 = @floatFromInt(p.y);
-    const ax: f64 = @floatFromInt(a.x);
-    const ay: f64 = @floatFromInt(a.y);
-    const abx = @as(f64, @floatFromInt(b.x)) - ax;
-    const aby = @as(f64, @floatFromInt(b.y)) - ay;
-    const ab2 = abx * abx + aby * aby;
-    const t = if (ab2 == 0) 0.0 else std.math.clamp(((px - ax) * abx + (py - ay) * aby) / ab2, 0.0, 1.0);
-    const dx = px - (ax + abx * t);
-    const dy = py - (ay + aby * t);
-    return @sqrt(dx * dx + dy * dy);
 }
 
 /// Annotation colours. The first eight are the 1-8 keys (and the config's

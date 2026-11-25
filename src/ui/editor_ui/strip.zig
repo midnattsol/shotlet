@@ -6,6 +6,7 @@
 //! toolbar.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const render = @import("../../gfx/render.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
@@ -82,7 +83,7 @@ fn monitorBuf(self: *const Editor) Rect {
 /// buttons while it is wanted.
 pub fn layout(self: *Editor) !void {
     const st = &self.capmode;
-    const now = motion.now();
+    const now = sys.monoMs();
     const want = capmode.wanted(self);
     if (!st.shown_once and want) {
         st.shown_once = true;
@@ -119,7 +120,7 @@ fn slideChosen(self: *Editor, now: i64) void {
 
 /// Still fading in or out, or the accent gliding.
 pub fn busy(self: *const Editor) bool {
-    const t = motion.now();
+    const t = sys.monoMs();
     return self.capmode.alpha.busy(t) or self.capmode.act_x.busy(t);
 }
 
@@ -140,11 +141,11 @@ pub fn draw(self: *Editor, canvas: *Canvas) void {
     if (r.isEmpty()) return;
     const th = self.theme;
     const f = self.uf();
-    const alpha = self.capmode.alpha.at(motion.now());
+    const alpha = self.capmode.alpha.at(sys.monoMs());
     const snap = if (alpha < 1) material.Snapshot.take(self.alloc, canvas, material.shadowFootprint(self, r, th.bar_shadow)) else null;
     material.drawMaterial(self, canvas, .strip, r, theme.bar_radius * f, th.bar_shadow);
     const btn = self.sc(theme.button);
-    const ax = r.x + @as(i32, @intFromFloat(@round(self.capmode.act_x.at(motion.now()))));
+    const ax = r.x + @as(i32, @intFromFloat(@round(self.capmode.act_x.at(sys.monoMs()))));
     canvas.fillRoundRectAA(ax, r.y + self.sc(theme.bar_pad), btn, btn, theme.button_radius * f, th.accent_fill);
     for (capmode.order, 0..) |m, k| {
         const it = itemRect(self, r, k);

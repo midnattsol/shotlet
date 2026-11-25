@@ -3,6 +3,7 @@
 //! end of that drag on release.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const editor = @import("../editor.zig");
 const shapes_mod = @import("../shapes.zig");
 const textbox = @import("../textbox.zig");
@@ -48,7 +49,7 @@ pub fn onMotion(ed: *Editor) !void {
 fn hover(ed: *Editor, m: Point) !void {
     const over: i32 = if (ui.buttonAt(ed, m)) |bi| @intCast(bi) else -1;
     if (over != ed.hover_btn) {
-        const t = motion.now();
+        const t = sys.monoMs();
         ed.hover_prev = ed.hover_btn;
         ed.hover_btn = over;
         ed.hover_since_ms = t;

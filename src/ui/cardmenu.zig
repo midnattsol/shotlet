@@ -8,7 +8,6 @@ const fui = @import("floatui.zig");
 const text = @import("../gfx/text.zig");
 const theme = @import("theme.zig");
 const scale = @import("scale.zig");
-const Rect = @import("shapes.zig").Rect;
 const Canvas = fui.Canvas;
 
 /// a row's height

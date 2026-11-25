@@ -1,5 +1,4 @@
 const std = @import("std");
-const capture = @import("platform/api.zig").capture;
 const front = @import("cli/front.zig");
 const out = @import("cli/out.zig");
 const env_mod = @import("app/env.zig");
@@ -81,6 +80,7 @@ test {
     _ = @import("redact/tests.zig");
     _ = @import("ui/tests.zig");
     _ = @import("sync.zig");
+    _ = @import("parallel.zig");
     _ = @import("uri.zig");
     _ = @import("geom.zig");
     _ = @import("optlib.zig");

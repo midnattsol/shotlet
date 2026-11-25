@@ -87,9 +87,6 @@ pub fn requestCapture(_: std.mem.Allocator, bus: *dbus.Connection, req: mode.Req
     return shell1.captureMode(bus, req);
 }
 
-/// Put our window titled `title` at x, y (logical); false when it cannot.
-pub const place = shell1.place;
-
 /// It refused this Shotlet at least once in this run: it answers only
 /// the binary it would start itself, and this is another copy
 /// (zig-out/bin/shotlet, say).

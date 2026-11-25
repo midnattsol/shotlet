@@ -2,6 +2,7 @@
 //! slider, segmented controls) and the More menu.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const render = @import("../../gfx/render.zig");
 const text_mod = @import("../../gfx/text.zig");
 const shapes_mod = @import("../shapes.zig");
@@ -33,7 +34,7 @@ fn focusRing(self: *const Editor, canvas: *Canvas, r: Rect, radius: f64) void {
 const Troughs = [4]i32;
 
 pub fn drawPopover(self: *Editor, canvas: *Canvas) void {
-    const now = motion.now();
+    const now = sys.monoMs();
     const p = self.pop_open.at(now);
     const th = self.theme;
     const f = self.uf();

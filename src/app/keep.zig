@@ -10,7 +10,6 @@ const annot = @import("annot.zig");
 const png = @import("../gfx/png.zig");
 const resample = @import("../gfx/resample.zig");
 const sys = @import("../platform/api.zig").sys;
-const proc = @import("../platform/api.zig").proc;
 const shapes = @import("../ui/shapes.zig");
 const doc_mod = @import("../ui/doc.zig");
 const relaunch = @import("relaunch.zig");

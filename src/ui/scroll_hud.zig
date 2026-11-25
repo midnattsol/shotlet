@@ -10,9 +10,9 @@
 //! the layout is the same in every phase, only words and buttons change,
 //! and nothing animates (so reduced motion has nothing to reduce).
 //!
-//! Its window is titled "shotlet:scroll": the GNOME extension keeps it
-//! above other windows and only steps a scrolling capture while it is on
-//! screen. With layer shell it is an overlay in the top-right corner.
+//! Its window is titled "shotlet:scroll:X:Y": the GNOME extension puts it
+//! there, keeps it above other windows and only steps a scrolling capture
+//! while it is on screen. With layer shell it is an overlay in the top-right corner.
 
 const std = @import("std");
 const sys = @import("../platform/api.zig").sys;
@@ -29,7 +29,6 @@ const resample = @import("../gfx/resample.zig");
 const window = @import("../platform/api.zig").window;
 pub const Rect = @import("shapes.zig").Rect;
 
-pub const title = "shotlet:scroll";
 /// logical size
 pub const width = 264;
 pub const height = 356;
@@ -132,9 +131,13 @@ pub const Hud = struct {
     /// the preview of the image so far (setPreview)
     pv_cache: Preview = .{},
 
-    pub fn open(win: *window.Window, th: theme.Theme) !Hud {
+    /// `at`: where it goes (logical) on GNOME, whose extension reads it
+    /// from the title.
+    pub fn open(win: *window.Window, th: theme.Theme, at: ?[2]i32) !Hud {
+        var tbuf: [48]u8 = undefined;
+        const plain = "shotlet:scroll";
         _ = try floatwin.open(win, .{
-            .title = title,
+            .title = if (at) |p| std.fmt.bufPrint(&tbuf, plain ++ ":{d}:{d}", .{ p[0], p[1] }) catch plain else plain,
             .namespace = "shotlet-scroll",
             .size = .{ width, height },
             .anchor = .{ .top = true, .right = true },

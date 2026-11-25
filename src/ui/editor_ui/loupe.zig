@@ -11,6 +11,7 @@
 //! (editor/loupe_input.zig, which also feeds it Ctrl).
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const render = @import("../../gfx/render.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
@@ -123,7 +124,7 @@ fn visible(ed: *const Editor, now: i64) bool {
 
 /// Ctrl held shows it: the wheel and - = zoom it then, Ctrl down.
 pub fn held(ed: *const Editor) bool {
-    return ed.loupe.mode == .hold and ed.loupe.hold.shown(motion.now());
+    return ed.loupe.mode == .hold and ed.loupe.hold.shown(sys.monoMs());
 }
 
 /// The pointer moved or was pressed: it looks at the pointer (or the
@@ -146,7 +147,7 @@ pub fn sync(ed: *Editor) void {
     defer ed.pane_i = saved;
     ed.pane_i = ed.mouse_pane;
     const st = &ed.loupe;
-    const now = motion.now();
+    const now = sys.monoMs();
     const nudge = nudging(ed);
     const want = nudge or wanted(ed);
     if (want) {
@@ -200,14 +201,14 @@ fn labelled(ed: *const Editor) bool {
 
 /// The colour was just copied: the label says so for a moment.
 pub fn copied(ed: *Editor) void {
-    ed.loupe.copied_until_ms = motion.now() + copied_ms;
+    ed.loupe.copied_until_ms = sys.monoMs() + copied_ms;
     ed.loupe.copied_at = ed.loupe.look.at;
     ed.needs_render = true;
 }
 
 /// Still fading, or its hint.
 pub fn busy(ed: *const Editor) bool {
-    return ed.loupe.shown.busy(motion.now()) or hint.busy(ed);
+    return ed.loupe.shown.busy(sys.monoMs()) or hint.busy(ed);
 }
 
 /// When it next changes by itself (0: never): Ctrl has been held long
@@ -228,7 +229,7 @@ fn cellSize(ed: *const Editor) i32 {
 
 /// Where it goes on this pane (null: not here, or gone).
 fn placement(ed: *const Editor) ?place.Placement {
-    if (ed.pane_i != ed.loupe.pane or ed.loupe.shown.at(motion.now()) <= 0) return null;
+    if (ed.pane_i != ed.loupe.pane or ed.loupe.shown.at(sys.monoMs()) <= 0) return null;
     const p = ed.pn().view.toBuf(ed.loupe.look.at);
     var s: place.Size = .{ .lens = ed.sc(lens_side), .off = ed.sc(18), .margin = ed.sc(6) };
     if (labelled(ed)) {
@@ -258,7 +259,7 @@ pub fn footprint(ed: *const Editor) ?Rect {
 
 pub fn draw(ed: *Editor, canvas: *Canvas) void {
     const pl = placement(ed) orelse return;
-    const a = ed.loupe.shown.at(motion.now());
+    const a = ed.loupe.shown.at(sys.monoMs());
     const snap = if (a < 1) material.Snapshot.take(ed.alloc, canvas, footprint(ed).?) else null;
     const k = grow_from + (1 - grow_from) * a;
     const lr = grown(pl.lens, pl.anchor, k);

@@ -14,6 +14,7 @@
 //! or wheel notch before it shows does too.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const window = @import("../../platform/api.zig").window;
@@ -29,7 +30,7 @@ const Editor = editor.Editor;
 pub fn track(ed: *Editor, k: window.Key) void {
     const h = &ed.loupe.hold;
     switch (k.code) {
-        .ctrl_left, .ctrl_right => if (k.pressed) h.press(motion.now()) else h.release(),
+        .ctrl_left, .ctrl_right => if (k.pressed) h.press(sys.monoMs()) else h.release(),
         .none => return,
         else => {
             if (!k.pressed or !h.down) return;

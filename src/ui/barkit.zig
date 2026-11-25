@@ -15,8 +15,7 @@
 //!                                    (primary, secondary, destructive) and
 //!                                    windows (Settings: list, tab)
 //!   faceWidth(f, look, face), labelFont(f, look, face)   its content's size
-//!   textButtonWidth(f, label), textButton(canvas, r, f, th, look, hover,
-//!                                    label)   a centred label alone
+//!   textButton(canvas, r, f, th, look, hover, label)   a centred label alone
 //!   focusRing(canvas, r, radius, f, accent)   the keyboard focus ring
 //!                                    around a control with corner `radius`
 //!   focusRingRound(canvas, cx, cy, radius, f, accent)   around a disc
@@ -25,6 +24,7 @@ const std = @import("std");
 const render = @import("../gfx/render.zig");
 const text = @import("../gfx/text.zig");
 const theme = @import("theme.zig");
+const scale = @import("scale.zig");
 const icons = @import("icons.zig");
 const shapes = @import("shapes.zig");
 const Rect = shapes.Rect;
@@ -75,14 +75,14 @@ const lead_px = 16;
 
 /// The width of a prominent button with `label`.
 pub fn primaryWidth(f: f64, label: []const u8) i32 {
-    return sc(10 + lead_px + 6, f) + text.widthStyled(theme.font_label * f, .semibold, label) + sc(14, f);
+    return scale.px(10 + lead_px + 6, f) + text.widthStyled(theme.font_label * f, .semibold, label) + scale.px(14, f);
 }
 
 /// The prominent button: `bg` filled, `lead` and a bold `label` in `fg`.
 pub fn primary(cv: *Canvas, r: Rect, f: f64, bg: u32, fg: u32, lead: Lead, label: []const u8) void {
     cv.fillRoundRectAA(r.x, r.y, r.w, r.h, theme.button_radius * f, bg);
-    const is = sc(lead_px, f);
-    const lx = r.x + sc(10, f);
+    const is = scale.px(lead_px, f);
+    const lx = r.x + scale.px(10, f);
     switch (lead) {
         .icon => |ic| icons.draw(cv, ic, lx, r.y + @divTrunc(r.h - is, 2), is, fg),
         .dot => {
@@ -91,7 +91,7 @@ pub fn primary(cv: *Canvas, r: Rect, f: f64, bg: u32, fg: u32, lead: Lead, label
         },
     }
     const fs = theme.font_label * f;
-    text.drawStyled(cv, lx + is + sc(6, f), r.y + @divTrunc(r.h - text.heightStyled(fs, .semibold), 2), fs, fg, .semibold, label);
+    text.drawStyled(cv, lx + is + scale.px(6, f), r.y + @divTrunc(r.h - text.heightStyled(fs, .semibold), 2), fs, fg, .semibold, label);
 }
 
 /// A group separator 1 px wide at x, from y, `h` tall.
@@ -145,7 +145,6 @@ pub const Mark = struct {
     };
 };
 
-const text_pad = 14;
 /// the window looks (list, tab): corner radius and type size, and the
 /// gap between a mark and the label
 pub const window_radius = 8;
@@ -165,14 +164,9 @@ pub fn labelFont(f: f64, look: TextLook, face: Face) struct { size: f64, style: 
 pub fn faceWidth(f: f64, look: TextLook, face: Face) i32 {
     const lf = labelFont(f, look, face);
     const tw = if (face.label.len > 0) text.widthStyled(lf.size, lf.style, face.label) else 0;
-    const ms = if (face.mark) |m| sc(m.size, f) else 0;
-    const gap = if (face.mark != null and face.label.len > 0) sc(mark_gap, f) else 0;
+    const ms = if (face.mark) |m| scale.px(m.size, f) else 0;
+    const gap = if (face.mark != null and face.label.len > 0) scale.px(mark_gap, f) else 0;
     return ms + gap + tw;
-}
-
-/// The width of a text button with `label`.
-pub fn textButtonWidth(f: f64, label: []const u8) i32 {
-    return text.widthStyled(theme.font_label * f, .semibold, label) + 2 * sc(text_pad, f);
 }
 
 /// A button with a centred semibold `label`, `hover` (0..1) over it, on
@@ -212,14 +206,14 @@ fn shape(cv: *Canvas, r: Rect, radius: f64, round: bool, color: u32) void {
 /// The mark and the label, from `face.inset` or centred in `r`.
 fn drawFace(cv: *Canvas, r: Rect, f: f64, look: TextLook, face: Face, fg: u32) void {
     const lf = labelFont(f, look, face);
-    var x = if (face.inset) |i| r.x + sc(i, f) else r.x + @divTrunc(r.w - faceWidth(f, look, face), 2);
+    var x = if (face.inset) |i| r.x + scale.px(i, f) else r.x + @divTrunc(r.w - faceWidth(f, look, face), 2);
     if (face.mark) |m| {
-        const ms = sc(m.size, f);
+        const ms = scale.px(m.size, f);
         switch (m.glyph) {
             .icon => |ic| icons.drawStroke(cv, ic, x, r.y + @divTrunc(r.h - ms, 2), ms, m.stroke, fg),
-            .minus => cv.fillRoundRectAA(x + sc(2, f), r.y + @divTrunc(r.h, 2) - sc(1, f), ms - sc(4, f), @max(2, sc(2, f)), 1, fg),
+            .minus => cv.fillRoundRectAA(x + scale.px(2, f), r.y + @divTrunc(r.h, 2) - scale.px(1, f), ms - scale.px(4, f), @max(2, scale.px(2, f)), 1, fg),
         }
-        x += ms + sc(mark_gap, f);
+        x += ms + scale.px(mark_gap, f);
     }
     if (face.label.len == 0) return;
     text.drawStyled(cv, x, r.y + @divTrunc(r.h - text.heightStyled(lf.size, lf.style), 2), lf.size, fg, lf.style, face.label);
@@ -228,7 +222,7 @@ fn drawFace(cv: *Canvas, r: Rect, f: f64, look: TextLook, face: Face, fg: u32) v
 /// The keyboard focus ring: theme.focus_w wide, theme.focus_gap outside
 /// the control `r` whose corners are rounded to `radius`.
 pub fn focusRing(cv: *Canvas, r: Rect, radius: f64, f: f64, accent: u32) void {
-    const g = sc(theme.focus_gap, f);
+    const g = scale.px(theme.focus_gap, f);
     const fw = theme.focus_w * f;
     const rr = r.expand(g + @as(i32, @intFromFloat(@ceil(fw / 2))));
     shapes.roundRectRing(cv, rr, radius + @as(f64, @floatFromInt(g)) + fw / 2, fw, accent);
@@ -238,10 +232,6 @@ pub fn focusRing(cv: *Canvas, r: Rect, radius: f64, f: f64, accent: u32) void {
 pub fn focusRingRound(cv: *Canvas, cx: f64, cy: f64, radius: f64, f: f64, accent: u32) void {
     const fw = theme.focus_w * f;
     cv.ringAA(cx, cy, radius + theme.focus_gap * f + fw / 2, fw, accent);
-}
-
-fn sc(v: f64, f: f64) i32 {
-    return @intFromFloat(@round(v * f));
 }
 
 test "a prominent button fits its label and the inks read on their fills" {
@@ -263,7 +253,6 @@ test "text buttons and focus rings draw where they should" {
         try std.testing.expect(px[11 * 60 + 30] != th.window_bg);
         try std.testing.expectEqual(th.window_bg, px[0]);
     }
-    try std.testing.expect(textButtonWidth(1, "Cancel") > textButtonWidth(1, "Ok"));
     @memset(&px, 0xFF000000);
     focusRing(&cv, r, 6, 1, 0xFFFFFFFF);
     // the ring sits outside the control, not on it
@@ -307,15 +296,15 @@ test "a bar icon centred by icons.drawAt sits where integer centring put it, at 
     // theme.button, an icon of theme.icon)
     defer icons.deinit();
     for ([_]f64{ 1, 1.25, 1.5, 2 }) |f| {
-        const btn = sc(theme.button, f);
+        const btn = scale.px(theme.button, f);
         const r: Rect = .{ .x = 7, .y = 5, .w = btn, .h = btn };
         var a: [80 * 80]u32 = @splat(0xFF000000);
         var b: [80 * 80]u32 = @splat(0xFF000000);
         var ca = Canvas.init(&a, 80, 80);
         var cb = Canvas.init(&b, 80, 80);
-        const s = sc(theme.icon, f);
+        const s = scale.px(theme.icon, f);
         icons.draw(&ca, .pen, r.x + @divTrunc(r.w - s, 2), r.y + @divTrunc(r.h - s, 2), s, 0xFFFFFFFF);
-        const ff = @import("scale.zig").ff;
+        const ff = scale.ff;
         icons.drawAt(&cb, .pen, ff(r.x) + ff(r.w) / 2, ff(r.y) + ff(r.h) / 2, theme.icon * f, .{}, 0xFFFFFFFF);
         try std.testing.expectEqualSlices(u32, &a, &b);
     }

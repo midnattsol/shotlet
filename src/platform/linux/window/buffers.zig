@@ -122,11 +122,7 @@ pub fn presentDamaged(w: *Window, idx: u8, damage: ?Rect) !void {
     try c.request(s.wl_surface, wl.wl_surface.damage_buffer, &.{
         .{ .int = d.x }, .{ .int = d.y }, .{ .int = d.w }, .{ .int = d.h },
     });
-    if (!s.frame_pending) {
-        s.frame_cb = c.newId();
-        try c.request(s.wl_surface, wl.wl_surface.frame, &.{.{ .new_id = s.frame_cb }});
-        s.frame_pending = true;
-    }
+    try surface.requestFrame(c, s);
     try c.request(s.wl_surface, wl.wl_surface.commit, &.{});
     try c.flush();
     loopstats.presented();

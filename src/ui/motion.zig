@@ -11,16 +11,11 @@
 //!                      alpha, busy, gone); reduced motion: no fades
 
 const std = @import("std");
-const sys = @import("../platform/api.zig").sys;
 const theme = @import("theme.zig");
 
 /// Off when the desktop asks for reduced motion (or for scripted runs,
 /// whose frame dumps must not depend on timing).
 pub var enabled: bool = true;
-
-pub fn now() i64 {
-    return sys.monoMs();
-}
 
 /// Cubic ease-out on 0..1.
 pub fn easeOut(t: f64) f64 {
@@ -64,7 +59,7 @@ pub const Tween = struct {
 /// The opacity of something that fades in when shown and out when it
 /// leaves (a floating window, a card): eased, `theme.motion_enter` in and
 /// `theme.motion_exit` out. With motion disabled it shows at once and
-/// is gone as soon as it leaves. Times are motion.now() milliseconds;
+/// is gone as soon as it leaves. Times are sys.monoMs() milliseconds;
 /// 0 means "not yet".
 pub const Life = struct {
     in_ms: i64 = theme.motion_enter,

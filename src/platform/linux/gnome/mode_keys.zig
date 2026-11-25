@@ -75,7 +75,7 @@ pub fn list(gpa: std.mem.Allocator, env: Env, schemadir: []const u8, only: ?[]co
         if (only) |o| if (!std.mem.eql(u8, o, sc.name)) continue;
         var kbuf: [32]u8 = undefined;
         const v = gsettings.get(arena, env, schemadir, gnome.ext_schema_id, settingsKey(&kbuf, sc.name)) catch {
-            out("  {s}: (unknown: an older extension)\n", .{sc.name});
+            out("  {s}: (unknown)\n", .{sc.name});
             continue;
         };
         const items = gsettings.parseStrv(arena, v) catch &.{};

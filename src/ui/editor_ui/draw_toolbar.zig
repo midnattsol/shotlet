@@ -2,6 +2,7 @@
 //! sliding accent behind the active tool, and each button.
 
 const render = @import("../../gfx/render.zig");
+const sys = @import("../../platform/api.zig").sys;
 const text_mod = @import("../../gfx/text.zig");
 const effects = @import("../../gfx/effects.zig");
 const shapes_mod = @import("../shapes.zig");
@@ -29,7 +30,7 @@ pub fn drawIconIn(self: *const Editor, canvas: *Canvas, icon: Icon, r: Rect, siz
 
 pub fn drawToolbar(self: *Editor, canvas: *Canvas) void {
     if (self.toolbar_rect.isEmpty()) return;
-    const now = motion.now();
+    const now = sys.monoMs();
     const alpha = self.tb_alpha.at(now);
     const th = self.theme;
     const f = self.uf();

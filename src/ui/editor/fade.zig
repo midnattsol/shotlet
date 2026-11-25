@@ -14,6 +14,7 @@
 //! the resize effect instead.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const editor = @import("../editor.zig");
 const motion = @import("../motion.zig");
 const theme = @import("../theme.zig");
@@ -44,7 +45,7 @@ pub fn entering(ed: *const Editor) bool {
 /// repaint, since the blended frames left traces in them.
 pub fn enterLevel(ed: *Editor) ?u32 {
     if (ed.enter.done) return null;
-    const now = motion.now();
+    const now = sys.monoMs();
     if (ed.enter.start_ms == 0) ed.enter.start_ms = now;
     const k = level(ed.enter.start_ms, now);
     if (k < 256) return k;
@@ -142,9 +143,9 @@ pub fn out(ed: *Editor) !void {
     defer frames.deinit(ed.alloc);
     const surfs = ed.win.surfaceList();
     for (surfs, 0..) |s, i| if (s.alive) ed.win.setInputRegion(@intCast(i), &.{}) catch {};
-    const start = motion.now();
+    const start = sys.monoMs();
     while (!allShown(&frames, ed.n_panes)) {
-        const k = level(start, motion.now());
+        const k = level(start, sys.monoMs());
         try presentStep(ed, &frames, k);
         _ = try ed.win.nextEventTimeout(ed.win.pollTimeoutMs(8));
         ed.win.queue.clearRetainingCapacity();
@@ -179,13 +180,13 @@ fn allShown(frames: *const Frames, n: u8) bool {
 
 /// Until the compositor showed the last frames (or `max_ms` passed).
 fn waitPresented(ed: *Editor, max_ms: i64) !void {
-    const deadline = motion.now() + max_ms;
-    while (motion.now() < deadline) {
+    const deadline = sys.monoMs() + max_ms;
+    while (sys.monoMs() < deadline) {
         const pending = for (ed.win.surfaceList()) |s| {
             if (s.alive and s.frame_pending) break true;
         } else false;
         if (!pending) return;
-        _ = try ed.win.nextEventTimeout(ed.win.pollTimeoutMs(@intCast(@max(1, deadline - motion.now()))));
+        _ = try ed.win.nextEventTimeout(ed.win.pollTimeoutMs(@intCast(@max(1, deadline - sys.monoMs()))));
         ed.win.queue.clearRetainingCapacity();
     }
 }

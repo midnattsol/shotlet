@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const log = std.log.scoped(.edit);
-const desktop = @import("../platform/api.zig").desktop;
 const env_mod = @import("env.zig");
 const config = @import("config.zig");
 const capture = @import("capture.zig");
@@ -15,7 +14,6 @@ const report = @import("report.zig");
 const Env = env_mod.Env;
 
 pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
-    const window = @import("../platform/api.zig").window;
     var img = imgload.loadFile(gpa, path) catch |err| {
         log.warn("cannot open {s}: {t}", .{ path, err });
         report.failed(env, "Couldn\u{2019}t open the image", err);
@@ -28,15 +26,6 @@ pub fn run(gpa: std.mem.Allocator, env: Env, path: []const u8) !void {
     defer cap.deinit(gpa);
     launch.select_all = true;
 
-    var bus = try desktop.connect(gpa, env);
-    defer bus.deinit();
-    var cfg = config.load(gpa, env.home);
-    const text = @import("../gfx/text.zig");
-    text.init(gpa);
-    defer text.deinit();
-    var win = try window.Window.init(gpa, env);
-    defer win.deinit();
-    try win.open("Shotlet", .{ .fullscreen = true });
     log.info("showing {s} ({d}x{d})", .{ path, cap.image.width, cap.image.height });
-    try shot.editAndFinish(gpa, env, &bus, &cfg, &win, &cap, null, 0, null, .{});
+    try shot.editGiven(gpa, env, &cap, null);
 }

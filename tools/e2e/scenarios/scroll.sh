@@ -263,7 +263,7 @@ whole_px() {
 # loop_away TITLE: the longest the window titled TITLE last stayed away
 # from the compositor, ms (its SHOTLET_LOOP_STATS line as it closed)
 loop_away() {
-    grep -o "loop: $1: .*longest away from the socket [0-9]* ms" "$SHOTLET_E2E_SHELL_LOG" | tail -1 |
+    grep -o "loop: $1[:0-9-]*: .*longest away from the socket [0-9]* ms" "$SHOTLET_E2E_SHELL_LOG" | tail -1 |
         sed 's/.*socket \([0-9]*\) ms/\1/'
 }
 # answered TITLE MS: it never kept the compositor's pings waiting MS

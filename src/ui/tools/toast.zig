@@ -3,6 +3,7 @@
 //! Tesseract, "Copy failed"), gone after a few seconds.
 
 const render = @import("../../gfx/render.zig");
+const sys = @import("../../platform/api.zig").sys;
 const text_mod = @import("../../gfx/text.zig");
 const theme = @import("../theme.zig");
 const badge = @import("../badge.zig");
@@ -41,7 +42,7 @@ pub const Toast = struct {
         @memcpy(self.buf[0..self.len], fit[0..self.len]);
         self.kind = kind;
         self.swatch = null;
-        self.until_ms = if (ms > 0) now() + ms else 0;
+        self.until_ms = if (ms > 0) sys.monoMs() + ms else 0;
     }
 
     pub fn hide(self: *Toast) void {
@@ -58,10 +59,6 @@ pub const Toast = struct {
         return self.until_ms - t;
     }
 };
-
-fn now() i64 {
-    return @import("../../platform/api.zig").sys.monoMs();
-}
 
 const icon_box = 22;
 

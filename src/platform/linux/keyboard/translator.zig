@@ -97,10 +97,6 @@ pub const Keyboard = struct {
         self.keymap = null;
     }
 
-    pub fn hasXkb(self: *const Keyboard) bool {
-        return self.state != null;
-    }
-
     /// wl_keyboard.keymap: map the fd (read-only, private as the protocol
     /// requires) and compile it. Does not close fd.
     pub fn setKeymapFd(self: *Keyboard, format: u32, fd: i32, size: u32) void {

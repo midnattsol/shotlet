@@ -31,7 +31,7 @@ export EXT_UUID=shotlet@midnattsol.github.io APP_ID=io.github.midnattsol.Shotlet
 prepare_scenario() {
     if scenario_flag nothumb; then cfg_write thumbnail=never; fi
     # the extension's floating windows, but captures through the portal
-    # (the extension cannot start this shotlet: Capture() is refused)
+    # (the extension cannot start this shotlet: CaptureMode() is refused)
     if scenario_flag portal; then ext_gsettings set shotlet-path "'/nonexistent/shotlet'"; fi
 }
 

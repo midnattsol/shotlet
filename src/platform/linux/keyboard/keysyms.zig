@@ -6,7 +6,6 @@ const xkb = @import("xkb.zig");
 pub const XK = struct {
     pub const BackSpace: u32 = 0xff08;
     pub const Tab: u32 = 0xff09;
-    pub const ISO_Left_Tab: u32 = 0xfe20;
     pub const Return: u32 = 0xff0d;
     pub const Escape: u32 = 0xff1b;
     pub const Delete: u32 = 0xffff;

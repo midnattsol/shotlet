@@ -23,10 +23,7 @@ pub const Marshal = struct {
     pub fn putByte(self: *Marshal, v: u8) !void {
         try self.buf.append(self.alloc, v);
     }
-    pub fn putU16(self: *Marshal, v: u16) !void {
-        try self.pad(2);
-        try self.buf.appendSlice(self.alloc, std.mem.asBytes(&v));
-    }
+
     pub fn putU32(self: *Marshal, v: u32) !void {
         try self.pad(4);
         try self.buf.appendSlice(self.alloc, std.mem.asBytes(&v));

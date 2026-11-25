@@ -3,6 +3,7 @@
 //! closing the popover and menu.
 
 const editor = @import("../editor.zig");
+const sys = @import("../../platform/api.zig").sys;
 const doc_mod = @import("../doc.zig");
 const ui = @import("../editor_ui.zig");
 const motion = @import("../motion.zig");
@@ -111,7 +112,7 @@ pub fn togglePopover(ed: *Editor, which: ui.Popover) void {
     if (ed.popover == which) return closePopover(ed);
     ed.popover = which;
     ed.picker.open = false;
-    const t = motion.now();
+    const t = sys.monoMs();
     ed.pop_open.snap(0);
     ed.pop_open.to(1, t);
     // a keyboard user lands inside it

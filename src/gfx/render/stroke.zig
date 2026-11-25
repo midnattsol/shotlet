@@ -48,7 +48,7 @@ fn strokeBBox(c: *Canvas, pts: anytype, half: f64, color: u32) void {
 
 /// Distance from (px, py) to the polyline, stopping early once the point
 /// is fully covered by a stroke of half-width `half`.
-inline fn polylineDist(px: f64, py: f64, pts: anytype, half: f64) f64 {
+pub inline fn polylineDist(px: f64, py: f64, pts: anytype, half: f64) f64 {
     if (pts.len == 1) return segDist(px, py, pts[0], pts[0]);
     var best: f64 = std.math.floatMax(f64);
     var i: usize = 0;
@@ -133,6 +133,7 @@ fn blendMask(c: *Canvas, box: Box, color: u32) void {
     }
 }
 
+/// How far (px, py) is from the segment a-b (integer points).
 fn segDist(px: f64, py: f64, a: anytype, b: anytype) f64 {
     const ax: f64 = @floatFromInt(a.x);
     const ay: f64 = @floatFromInt(a.y);

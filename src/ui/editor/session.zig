@@ -3,7 +3,6 @@
 //! desktop's appearance while open.
 
 const std = @import("std");
-const log = std.log.scoped(.editor);
 const desktop = @import("../../platform/api.zig").desktop;
 const sys = @import("../../platform/api.zig").sys;
 const switches = @import("../../platform/api/switches.zig");
@@ -21,17 +20,13 @@ const opening = @import("opening.zig");
 
 const Editor = editor.Editor;
 
-pub fn nowMs() i64 {
-    return sys.monoMs();
-}
-
 /// Run the editor; returns the user's chosen action and exported PNG.
 pub fn run(ed: *Editor) !editor.Result {
     if (switches.get().editor_script) |s| ed.script.src = s;
     while (ed.running) {
         // the plain capture first, then the caches (opening.zig)
         if (try opening.step(ed)) continue;
-        const now = nowMs();
+        const now = sys.monoMs();
         if (ed.smoke_deadline_ms != 0 and now > ed.smoke_deadline_ms) {
             ed.action = .cancel;
             break;

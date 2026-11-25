@@ -11,6 +11,7 @@
 //! caches are made at once and its first frame is a full one.
 
 const std = @import("std");
+const parallel = @import("../../parallel.zig");
 const log = std.log.scoped(.editor);
 const editor = @import("../editor.zig");
 const view_mod = @import("../view.zig");
@@ -153,12 +154,9 @@ fn plainFrames(ed: *Editor) !bool {
         }
         due[i] = try ed.win.backBufferOf(@intCast(i));
     }
-    var threads: [editor.max_panes]?std.Thread = @splat(null);
-    for (due, 0..) |px, i| if (px) |b| {
-        threads[i] = std.Thread.spawn(.{}, drawPlain, .{ ed, &ed.panes[i], b }) catch null;
-        if (threads[i] == null) drawPlain(ed, &ed.panes[i], b);
-    };
-    for (threads) |t| if (t) |th| th.join();
+    var g: parallel.Group(editor.max_panes) = .{};
+    for (due, 0..) |px, i| if (px) |b| g.go(drawPlain, .{ ed, &ed.panes[i], b });
+    g.wait();
     for (due, 0..) |px, i| if (px != null) {
         try ed.win.presentSurface(@intCast(i));
         o.shown[i] = true;
@@ -210,22 +208,19 @@ fn prepareAll(ed: *Editor) void {
             };
         }
     };
-    var threads: [editor.max_panes]?std.Thread = @splat(null);
+    var g: parallel.Group(editor.max_panes) = .{};
     var errs: [editor.max_panes]?anyerror = @splat(null);
-    for (0..ed.n_panes) |i| {
-        threads[i] = std.Thread.spawn(.{}, Fill.run, .{ ed, &ed.panes[i], &errs[i] }) catch null;
-        if (threads[i] == null) Fill.run(ed, &ed.panes[i], &errs[i]);
-    }
+    for (0..ed.n_panes) |i| g.go(Fill.run, .{ ed, &ed.panes[i], &errs[i] });
     // meanwhile, the session's calls (the event loop only answers the
     // compositor till then): the caller (the shell's frozen frame goes,
     // what was pressed on it comes back), the desktop's appearance; both
     // taken up once prepared
     if (o.on_screen) |h| o.input = h.f(h.ctx);
     if (ed.bus) |b| o.prefs = theme.readPrefs(b, 1500);
-    for (threads[0..ed.n_panes], errs[0..ed.n_panes]) |t, e| {
-        if (t) |th| th.join();
-        if (e) |err| o.failed = err;
-    }
+    g.wait();
+    for (errs[0..ed.n_panes]) |e| if (e) |err| {
+        o.failed = err;
+    };
     o.prepared.store(true, .release);
 }
 

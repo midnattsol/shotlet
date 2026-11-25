@@ -97,8 +97,7 @@ fn perform(env: Env, bus: *dbus.Connection, action: tray_mod.MenuAction) void {
         // the GNOME integration captures inside the shell (no prompt)
         // and starts the editor itself; else a capture child as usual
         .capture => {
-            const how: shell1.CaptureRequest = if (gnome.integrationActive(bus)) shell1.capture(bus) else .unavailable;
-            if (how == .unavailable) spawnChild(env, "shot");
+            if (!gnome.integrationActive(bus) or shell1.captureMode(bus, .{ .mode = .area }) == .unavailable) spawnChild(env, "shot");
         },
         // `shotlet record` stops the recording under way, if any
         .record => spawnChild(env, "record"),
@@ -156,7 +155,6 @@ const LogFile = struct {
     fn reopen(self: *LogFile) void {
         if (!self.enabled) return;
         const log_fd = sys.openAppend(self.path()) catch return;
-        sys.fchmod(log_fd, 0o600); // older versions created it 0644
         sys.dup2(log_fd, 1);
         sys.dup2(log_fd, 2);
         if (log_fd > 2) sys.close(log_fd);

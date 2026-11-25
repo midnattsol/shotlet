@@ -2,6 +2,7 @@
 //! the selection and animated there, plus the beautify panel beside it.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const text_mod = @import("../../gfx/text.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
@@ -82,7 +83,7 @@ fn flow(self: *const Editor, items: []const Item, max_w: i32, out: *Flow) void {
 pub fn layoutToolbar(self: *Editor) !void {
     self.buttons.clearRetainingCapacity();
     self.n_seps = 0;
-    const now = motion.now();
+    const now = sys.monoMs();
     const sel_b = self.selBuf();
     const dragging = switch (self.drag) {
         .none, .picking, .size_slider => false,

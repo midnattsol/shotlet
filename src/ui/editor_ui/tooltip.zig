@@ -2,6 +2,7 @@
 //! shown after a short hover or for the keyboard-focused control.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const render = @import("../../gfx/render.zig");
 const shapes_mod = @import("../shapes.zig");
 const editor_mod = @import("../editor.zig");
@@ -24,7 +25,7 @@ fn tooltipButton(self: *const Editor) ?Button {
         }
     }
     if (self.mouse_pane == self.tb_pane and self.hover_btn >= 0 and self.hover_btn < self.buttons.items.len) {
-        if (motion.now() - self.hover_since_ms < theme.tooltip_delay) return null;
+        if (sys.monoMs() - self.hover_since_ms < theme.tooltip_delay) return null;
         const b = self.buttons.items[@intCast(self.hover_btn)];
         if (!hasTip(self, b) or b.kind == .seg or b.kind == .thickness) return null;
         return b;

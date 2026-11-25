@@ -17,6 +17,7 @@
 //! and stitches the pieces as the portal path does (capture.stitch).
 
 const std = @import("std");
+const parallel = @import("../../../parallel.zig");
 const capture = @import("../../../app/capture.zig");
 const geom = @import("../../../geom.zig");
 const png = @import("../../../gfx/png.zig");
@@ -286,15 +287,8 @@ fn loadWithin(gpa: std.mem.Allocator, runtime_dir: []const u8, args: Args, wait:
 }
 
 /// A frame of a scrolling capture: capture `id` of `rect` (logical), in
-/// `pieces` (the layout ScrollBegin gave; "" from an older extension,
-/// whose frames are one PNG).
+/// `pieces` (the layout ScrollBegin gave).
 pub fn loadRegion(gpa: std.mem.Allocator, runtime_dir: []const u8, id: []const u8, rect: geom.Rect, pieces: []const u8) !png.Image {
-    if (pieces.len == 0) {
-        var pbuf: [1200]u8 = undefined;
-        const data = try readAndRemove(gpa, try piecePath(&pbuf, runtime_dir, id, 0));
-        defer gpa.free(data);
-        return png.decode(gpa, data);
-    }
     var buf: [max_pieces]LogicalMonitor = undefined;
     const scale = (try parseLayout(pieces, &buf))[0].scale;
     var abuf: [128]u8 = undefined;
@@ -306,13 +300,10 @@ pub fn loadRegion(gpa: std.mem.Allocator, runtime_dir: []const u8, id: []const u
 
 /// Every slot's run, a thread each (the first on this one).
 fn runAll(gpa: std.mem.Allocator, slots: []Slot) void {
-    var threads: [max_pieces]?std.Thread = @splat(null);
-    for (slots[1..], 1..) |*sl, i| {
-        threads[i] = std.Thread.spawn(.{}, Slot.run, .{ sl, gpa }) catch null;
-        if (threads[i] == null) sl.run(gpa);
-    }
+    var g: parallel.Group(max_pieces) = .{};
+    for (slots[1..]) |*sl| g.go(Slot.run, .{ sl, gpa });
     slots[0].run(gpa);
-    for (threads[1..slots.len]) |t| if (t) |th| th.join();
+    g.wait();
 }
 
 /// Delete whatever is left of capture `id`'s pieces.

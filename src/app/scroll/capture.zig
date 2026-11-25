@@ -36,10 +36,10 @@ pub fn run(c: flow.Ctx, cap: *const capture.Capture, s: settings.Settings) !?Tal
     };
     log.info("region {d}x{d} at {d},{d}", .{ region.w, region.h, region.x, region.y });
     const shell = shell_seam.applies() and shell_seam.active(c.bus);
-    var hud = try hud_mod.Hud.open(c.win, th);
+    var hud = try hud_mod.Hud.open(c.win, th, besideRegion(cap, region));
     defer c.win.closeWindow();
     defer hud.deinit();
-    try showHud(c, &hud, cap, region, shell);
+    try showHud(&hud, shell);
     var session = Session.init(c, &hud, .{ .cap = cap, .region = region, .shell = shell, .auto = s.scroll_auto }, s.scroll_max_height) catch |err| {
         try failed(c, &hud, err);
         return null;
@@ -70,21 +70,17 @@ fn failed(c: flow.Ctx, hud: *hud_mod.Hud, err: anyerror) !void {
     }
 }
 
-/// Map the control, beside the region on GNOME. The picker's surfaces are
-/// gone by now; elsewhere the compositor gets half a second to drop them
-/// (the first frame is taken once the region is still anyway).
-fn showHud(c: flow.Ctx, hud: *hud_mod.Hud, cap: *const capture.Capture, region: geom.Rect, shell: bool) !void {
+/// Map the control (on GNOME the extension puts it beside the region, as
+/// its title says). The picker's surfaces are gone by now; elsewhere the
+/// compositor gets half a second to drop them (the first frame is taken
+/// once the region is still anyway).
+fn showHud(hud: *hud_mod.Hud, shell: bool) !void {
     const start = sys.monoMs();
     const least: i64 = if (shell) 0 else 500;
-    var placed = !shell;
     while (sys.monoMs() - start < 1500) {
         try hud.draw();
         _ = try hud.poll(10);
-        // (mutter places a window as it maps: moved after that)
-        if (!placed and hud.onScreen()) if (besideRegion(cap, region)) |p| {
-            placed = shell_seam.place(c.gpa, c.bus, hud_mod.title, p[0], p[1]);
-        };
-        if (placed and sys.monoMs() - start >= least) break;
+        if (hud.onScreen() and sys.monoMs() - start >= least) break;
     }
 }
 

@@ -4,6 +4,7 @@
 //! back to 0.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const editor_mod = @import("../editor.zig");
 const shapes_mod = @import("../shapes.zig");
 const render = @import("../../gfx/render.zig");
@@ -43,7 +44,7 @@ pub fn begin(ed: *Editor) void {
         @memcpy(px[yy * rw ..][0..rw], p.last_frame[off..][0..rw]);
     }
     ed.pop_closing = .{ .px = px, .rect = r, .pane = ed.tb_pane };
-    ed.pop_open.to(0, motion.now());
+    ed.pop_open.to(0, sys.monoMs());
 }
 
 /// Still fading out.
@@ -61,7 +62,7 @@ pub fn draw(ed: *Editor, canvas: *Canvas) void {
     if (!busy(ed) or ed.pane_i != ed.pop_closing.pane) return;
     // a popover opening again takes over
     if (ed.popover != .none) return ed.pop_closing.release(ed.alloc);
-    const a = ed.pop_open.at(motion.now());
+    const a = ed.pop_open.at(sys.monoMs());
     if (a <= 0.001) return ed.pop_closing.release(ed.alloc);
     const c = &ed.pop_closing;
     const k: u32 = @intFromFloat(@round(a * 256));

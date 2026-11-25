@@ -4,6 +4,7 @@
 //! tool), and usually starts a drag (see drag.zig).
 
 const editor = @import("../editor.zig");
+const sys = @import("../../platform/api.zig").sys;
 const shapes_mod = @import("../shapes.zig");
 const text_mod = @import("../../gfx/text.zig");
 const ui = @import("../editor_ui.zig");
@@ -90,7 +91,7 @@ fn pressChrome(ed: *Editor, m: Point) !void {
 
 /// Record a click at `m`; true when it completes a double click.
 fn countClick(ed: *Editor, m: Point) bool {
-    const now = session.nowMs();
+    const now = sys.monoMs();
     const last = ed.last_click;
     const double = now - last.ms < 400 and @abs(m.x - last.at.x) < 5 and @abs(m.y - last.at.y) < 5;
     ed.last_click = .{ .ms = now, .at = m };

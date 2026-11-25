@@ -3,6 +3,7 @@
 //! style, applied with undo that coalesces quick repeats.
 
 const std = @import("std");
+const sys = @import("../../platform/api.zig").sys;
 const editor = @import("../editor.zig");
 const shapes_mod = @import("../shapes.zig");
 const ui = @import("../editor_ui.zig");
@@ -25,7 +26,7 @@ pub fn editTarget(ed: *Editor, kind: u8, comptime op: anytype, arg: anytype) !vo
         return;
     }
     const i = ed.selected orelse return;
-    const now = session.nowMs();
+    const now = sys.monoMs();
     if (!(ed.coalesce.kind == kind and now - ed.coalesce.ms < 1200)) try ed.doc.checkpoint();
     ed.coalesce = .{ .kind = kind, .ms = now };
     const before = ed.doc.shapes.items[i].bounds();

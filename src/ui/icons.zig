@@ -7,7 +7,6 @@
 //!   Icon                   the catalogue (paths below)
 //!   draw(canvas, icon, x, y, size_px, color)        default stroke
 //!   drawStroke(canvas, icon, x, y, size_px, stroke_units, color)
-//!   drawCentered(canvas, icon, cx, cy, size_px, color)   centre in px
 //!   drawAt(canvas, icon, cx, cy, size, opts, color)  centred on a
 //!                          fractional point, `size` rounded; opts.stroke
 //!                          overrides the default stroke
@@ -208,11 +207,6 @@ pub fn deinit() void {
 /// Draw `icon` with its top-left corner at (x, y), `size_px` square.
 pub fn draw(canvas: *render.Canvas, icon: Icon, x: i32, y: i32, size_px: i32, color: u32) void {
     drawStroke(canvas, icon, x, y, size_px, defaultStroke(icon), color);
-}
-
-/// Draw `icon` centred on (cx, cy).
-pub fn drawCentered(canvas: *render.Canvas, icon: Icon, cx: i32, cy: i32, size_px: i32, color: u32) void {
-    draw(canvas, icon, cx - @divFloor(size_px, 2), cy - @divFloor(size_px, 2), size_px, color);
 }
 
 pub fn drawStroke(canvas: *render.Canvas, icon: Icon, x: i32, y: i32, size_px: i32, stroke_units: f64, color: u32) void {

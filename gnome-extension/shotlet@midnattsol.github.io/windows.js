@@ -13,6 +13,7 @@
 //                       workspace (it may take the focus when clicked);
 //                       with X:Y it first shows there (where the capture was)
 //   shotlet:rec:X:Y     a recording's control, where Shotlet wants it
+//   shotlet:scroll:X:Y  a scrolling capture's control, likewise
 //
 // The editor and the recording picker (fullscreen, titled "Shotlet") show
 // a frozen frame of the desktop and fade their own dim in and out: they
@@ -32,7 +33,7 @@ import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
-import {APP_ID, roleOf} from './util.js';
+import {APP_ID, monotonicMs, roleOf} from './util.js';
 
 // gap between the thumbnail window and the work area's edges (its own
 // transparent margin adds to it)
@@ -40,6 +41,8 @@ const EDGE = 8;
 // a focus change this soon after the thumbnail appears is mutter's
 // focus-on-map, not the person clicking it
 const FOCUS_ON_MAP_MS = 1000;
+// roles whose windows stay where their title says
+const PLACED_ROLES = new Set(['rec', 'scroll']);
 // the editor's and the recording picker's title
 const FULLSCREEN_TITLE = 'Shotlet';
 
@@ -115,17 +118,6 @@ export class ShotletWindows {
         return [...this._windows].filter(([, st]) => st.role === role).map(([w]) => w);
     }
 
-    // Move the tagged window titled `title` to x, y; whether there is one.
-    place(title, x, y) {
-        for (const win of this._windows.keys()) {
-            if (roleOf(win) && win.get_title() === title) {
-                win.move_frame(true, x, y);
-                return true;
-            }
-        }
-        return false;
-    }
-
     _watch(win) {
         // a new Wayland window has no app id yet: decide once it has one
         const cls = win?.get_wm_class();
@@ -136,7 +128,7 @@ export class ShotletWindows {
             role: null,
             monitor: global.display.get_current_monitor(),
             handed_back: false,
-            born: GLib.get_monotonic_time() / 1000,
+            born: monotonicMs(),
         };
         this._windows.set(win, st);
         // the title can arrive after the window: wait for the tag
@@ -201,17 +193,16 @@ export class ShotletWindows {
 
     _place(win) {
         const st = this._windows.get(win);
-        if (!st || (st.role !== 'quick' && st.role !== 'rec' && !this._placedPin(win, st)))
+        if (!st || !(st.role === 'quick' || PLACED_ROLES.has(st.role) || this._placedPin(win, st)))
             return;
         const r = win.get_frame_rect();
         if (r.width === 0 || r.height === 0)
             return;
-        const monitors = global.display.get_n_monitors();
-        const area = win.get_work_area_for_monitor(Math.min(st.monitor, monitors - 1));
-        // a recording's control or a pin: "shotlet:ROLE:X:Y", where Shotlet wants it
+        const area = win.get_work_area_for_monitor(Math.min(st.monitor, global.display.get_n_monitors() - 1));
+        // "shotlet:ROLE:X:Y", where Shotlet wants it
         const [x, y] = st.role !== 'quick' ? win.get_title().split(':').slice(2, 4).map(Number)
             : [area.x + EDGE, area.y + area.height - r.height - EDGE];
-        if (r.x !== x || r.y !== y)
+        if (Number.isInteger(x) && Number.isInteger(y) && (r.x !== x || r.y !== y))
             win.move_frame(true, x, y);
     }
 
@@ -225,7 +216,7 @@ export class ShotletWindows {
         const st = this._windows.get(win);
         if (!st || (st.role !== 'quick' && st.role !== 'rec'))
             return;
-        const now = GLib.get_monotonic_time() / 1000;
+        const now = monotonicMs();
         if (st.handed_back || now - st.born > FOCUS_ON_MAP_MS)
             return;
         st.handed_back = true;

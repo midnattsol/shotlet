@@ -4,7 +4,6 @@
 //! geom.toFramePixels maps it onto a stream's pixels.
 
 const std = @import("std");
-const Rect = @import("../geom.zig").Rect;
 
 /// H.264 4:2:0 wants even sizes: drop the odd last row or column.
 pub fn evenSize(w: u32, h: u32) [2]u32 {

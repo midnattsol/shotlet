@@ -31,8 +31,6 @@ const offload = @import("offload.zig");
 const pace_mod = @import("pace.zig");
 const platform_capture = @import("../../platform/api.zig").capture;
 
-const sleepMs = sys.sleepMs;
-
 /// What (re)opens the frame source.
 pub const Opener = struct {
     cap: *const capture.Capture,

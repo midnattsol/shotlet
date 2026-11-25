@@ -8,7 +8,7 @@
 // windows and out of Alt+Tab.
 //
 // It also owns dev.shotlet.Shell1 on the session bus, so Shotlet can tell
-// that it is active, with Place(title, x, y) to move one of these windows.
+// that it is active.
 // No polling: everything hangs off window and settings signals, and
 // disable() undoes it.
 //
@@ -18,7 +18,7 @@
 //   - its own keybinding (capture-shortcut in its GSettings schema,
 //     default Print), left unbound while one of GNOME's own screenshot
 //     shortcuts holds the same key: it never fights GNOME for a key
-//   - Capture() on the bus, for Shotlet's tray menu and a `shotlet` run
+//   - CaptureMode() on the bus, for Shotlet's tray menu and a `shotlet` run
 //     from a terminal: only honoured for a caller running the shotlet
 //     binary, one at a time and at most once a second, never on the lock
 //     screen; it replies only whether a capture was started
@@ -44,7 +44,7 @@
 //
 // Where the windows were in that same frame (their frames, never their
 // contents or titles) is kept for the shotlet started on it, which asks
-// once with CaptureWindows(ID) (Shotlet's callers only, like Capture())
+// once with CaptureWindows(ID) (Shotlet's callers only, like CaptureMode())
 // so a click on a window can select it; forgotten after a minute.
 
 import Gio from 'gi://Gio';
@@ -61,7 +61,7 @@ import {ScrollSessions} from './scroll.js';
 import {Freeze, NO_INPUT} from './freeze.js';
 import {discard, layout, shoot, strips} from './shoot.js';
 import {spawnWatched} from './spawn.js';
-import {APP_ID, CaptureError, fileId, monotonicMs, normalizeAccel, roleOf} from './util.js';
+import {APP_ID, CallError, fileId, monotonicMs, normalizeAccel, reply, roleOf} from './util.js';
 import {ShotletWindows} from './windows.js';
 
 const BUS_NAME = 'dev.shotlet.Shell1';
@@ -72,9 +72,6 @@ const IFACE = `<node>
     <property name="Shortcuts" type="as" access="read"/>
     <property name="BlockedShortcuts" type="as" access="read"/>
     <property name="ModeShortcuts" type="as" access="read"/>
-    <method name="Capture">
-      <arg type="b" name="started" direction="out"/>
-    </method>
     ${RECORDER_IFACE}
     <method name="CaptureMode">
       <arg type="s" name="mode" direction="in"/>
@@ -112,19 +109,13 @@ const IFACE = `<node>
       <arg type="i" name="ry" direction="out"/>
       <arg type="b" name="escaped" direction="out"/>
     </method>
-    <method name="Place">
-      <arg type="s" name="title" direction="in"/>
-      <arg type="i" name="x" direction="in"/>
-      <arg type="i" name="y" direction="in"/>
-      <arg type="b" name="found" direction="out"/>
-    </method>
   </interface>
 </node>`;
 
 const SHORTCUT_KEY = 'capture-shortcut';
 // GNOME's own screenshot shortcuts: a key one of these holds stays GNOME's
 const GNOME_KEYS = ['show-screenshot-ui', 'screenshot', 'screenshot-window', 'show-screen-recording-ui'];
-// Capture() over the bus: at most this often
+// CaptureMode() over the bus: at most this often
 const BUS_INTERVAL_MS = 1000;
 // capture files nobody picked up are deleted after this
 const STALE_MS = 60 * 1000;
@@ -248,61 +239,45 @@ export default class ShotletExtension extends Extension {
         this._bound = false;
     }
 
-    // Capture() from the bus: the reply says whether a capture started.
-    async CaptureAsync(_params, invocation) {
-        const t0 = monotonicMs();
-        try {
-            await this._checkCaller(invocation.get_sender());
-            const now = monotonicMs();
-            if (this._busy || now - this._lastBusCapture < BUS_INTERVAL_MS)
-                throw new CaptureError('Busy', 'one capture at a time, at most one a second');
-            this._lastBusCapture = now;
-            await this._capture(t0, true);
-            invocation.return_value(new GLib.Variant('(b)', [true]));
-        } catch (e) {
-            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
-        }
-    }
-
-    // CaptureMode(mode, delay): Capture() for one of the capture modes,
-    // after a countdown of `delay` seconds (at most 60).
+    // CaptureMode(mode, delay) from the bus: a capture in this mode, after a
+    // countdown of `delay` seconds (at most 60). The reply says whether it
+    // started: at once when a countdown or the window picker comes first.
     async CaptureModeAsync([mode, delay], invocation) {
         const t0 = monotonicMs();
-        try {
+        await reply(invocation, 'b', async () => {
             await this._checkCaller(invocation.get_sender());
             if (!MODES.includes(mode) || delay > 60)
-                throw new CaptureError('Failed', 'no such capture mode');
+                throw new CallError('Failed', 'no such capture mode');
             const now = monotonicMs();
             if (this._busy || now - this._lastBusCapture < BUS_INTERVAL_MS)
-                throw new CaptureError('Busy', 'one capture at a time, at most one a second');
+                throw new CallError('Busy', 'one capture at a time, at most one a second');
             this._lastBusCapture = now;
-            // the reply goes out once the capture (or the countdown, or the
-            // window picker) is under way
             const started = this._capture(t0, true, mode, delay);
-            started.catch(e => console.warn(`Shotlet: ${mode} capture failed: ${e.message}`));
-            invocation.return_value(new GLib.Variant('(b)', [true]));
-        } catch (e) {
-            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
-        }
+            if (delay === 0 && mode !== 'window')
+                await started;
+            else
+                started.catch(e => console.warn(`Shotlet: ${mode} capture failed: ${e.message}`));
+            return [true];
+        });
     }
 
     async ScrollBeginAsync([x, y, w, h, auto], invocation) {
-        await this._reply(invocation, 'ss', () => this._scroll.begin(invocation.get_sender(), x, y, w, h, auto));
+        await reply(invocation, 'ss', () => this._scroll.begin(invocation.get_sender(), x, y, w, h, auto));
     }
 
     async ScrollStepAsync([id, clicks], invocation) {
-        await this._reply(invocation, 's', async () => [await this._scroll.step(invocation.get_sender(), id, clicks)]);
+        await reply(invocation, 's', async () => [await this._scroll.step(invocation.get_sender(), id, clicks)]);
     }
 
     async ScrollEndAsync([id], invocation) {
-        await this._reply(invocation, null, () => this._scroll.end(invocation.get_sender(), id));
+        await reply(invocation, null, () => this._scroll.end(invocation.get_sender(), id));
     }
 
     // CaptureWindows(id): where the windows were when capture `id` was
     // taken, topmost first, as [x, y, width, height, ...] in logical
     // pixels; empty for any other capture, or asked again, or stale.
     async CaptureWindowsAsync([id], invocation) {
-        await this._reply(invocation, 'ai', async () => {
+        await reply(invocation, 'ai', async () => {
             await this._checkCaller(invocation.get_sender());
             const f = this._frozen;
             if (!f || f.id !== id || monotonicMs() - f.at > STALE_MS)
@@ -310,16 +285,6 @@ export default class ShotletExtension extends Extension {
             this._frozen = null;
             return [f.rects];
         });
-    }
-
-    // answer with the values fn gives, of these D-Bus types
-    async _reply(invocation, type, fn) {
-        try {
-            const v = await fn();
-            invocation.return_value(type ? new GLib.Variant(`(${type})`, v) : null);
-        } catch (e) {
-            invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
-        }
     }
 
     // Only the shotlet program itself may ask: the caller's executable
@@ -340,7 +305,7 @@ export default class ShotletExtension extends Extension {
         const caller = fileId(`/proc/${pid}/exe`);
         const ours = this._shotletPath();
         if (!caller || !ours || caller !== fileId(ours))
-            throw new CaptureError('AccessDenied', 'only Shotlet may ask for a capture');
+            throw new CallError('AccessDenied', 'only Shotlet may ask for a capture');
     }
 
     _shotletPath() {
@@ -398,9 +363,9 @@ export default class ShotletExtension extends Extension {
     // start shotlet on it, after `delay` seconds.
     async _capture(t0, fromBus, mode = 'area', delay = 0, extra = []) {
         if (this._busy)
-            throw new CaptureError('Busy', 'a capture is under way');
+            throw new CallError('Busy', 'a capture is under way');
         if (Main.sessionMode.isLocked)
-            throw new CaptureError('Locked', 'the screen is locked');
+            throw new CallError('Locked', 'the screen is locked');
         const exe = this._shotletPath();
         if (!exe)
             throw new Error('shotlet not found');
@@ -504,9 +469,5 @@ export default class ShotletExtension extends Extension {
             if (step() === GLib.SOURCE_CONTINUE)
                 GLib.timeout_add(GLib.PRIORITY_DEFAULT, 20, step);
         });
-    }
-
-    Place(title, x, y) {
-        return this._windows.place(title, x, y);
     }
 }

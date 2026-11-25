@@ -16,11 +16,22 @@ export function normalizeAccel(accel) {
     return [...mods.sort(), key].join('+');
 }
 
-// errors Capture() answers with: dev.shotlet.Shell1.Error.<name>
-export class CaptureError extends Error {
+// an error a D-Bus call answers with: dev.shotlet.Shell1.Error.<name>
+export class CallError extends Error {
     constructor(name, message) {
         super(message);
         this.dbusName = `dev.shotlet.Shell1.Error.${name}`;
+    }
+}
+
+// answer a call with the values `fn` gives, of these D-Bus types ('ss';
+// null: no values), or with the error it throws
+export async function reply(invocation, types, fn) {
+    try {
+        const values = await fn();
+        invocation.return_value(types ? new GLib.Variant(`(${types})`, values) : null);
+    } catch (e) {
+        invocation.return_dbus_error(e.dbusName ?? 'dev.shotlet.Shell1.Error.Failed', e.message);
     }
 }
 

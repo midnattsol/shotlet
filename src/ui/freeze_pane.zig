@@ -5,6 +5,7 @@
 //! panes are filled at once, a thread each (`fillAll`).
 
 const std = @import("std");
+const parallel = @import("../parallel.zig");
 const geom = @import("../geom.zig");
 const resample = @import("../gfx/resample.zig");
 const view_mod = @import("view.zig");
@@ -108,14 +109,13 @@ pub fn fillAll(gpa: std.mem.Allocator, f: Frozen, panes: []Pane, keep: u32) !voi
         }
     };
     var jobs: [16]Job = undefined;
-    var threads: [16]?std.Thread = @splat(null);
+    var g: parallel.Group(jobs.len) = .{};
     const n = @min(panes.len, jobs.len);
-    for (panes[0..n], 0..) |*p, i| {
-        jobs[i] = .{ .pane = p };
-        if (i + 1 < n) threads[i] = std.Thread.spawn(.{}, Job.run, .{ &jobs[i], gpa, f, keep }) catch null;
-        if (threads[i] == null) jobs[i].run(gpa, f, keep);
+    for (panes[0..n], jobs[0..n]) |*p, *j| {
+        j.* = .{ .pane = p };
+        g.go(Job.run, .{ j, gpa, f, keep });
     }
-    for (threads[0..n]) |t| if (t) |th| th.join();
+    g.wait();
     for (jobs[0..n]) |j| if (j.err) |e| return e;
 }
 

@@ -236,9 +236,7 @@ pub const Font = struct {
     pub fn ascentPx(self: *const Font, size_px: f64) f64 {
         return self.ascent * (size_px / self.units_per_em);
     }
-    pub fn descentPx(self: *const Font, size_px: f64) f64 {
-        return -self.descent * (size_px / self.units_per_em);
-    }
+
     pub fn lineHeightPx(self: *const Font, size_px: f64) f64 {
         return (self.ascent - self.descent) * (size_px / self.units_per_em);
     }
