@@ -199,7 +199,18 @@ const Driver = struct {
         return .{ .pixels = f.pixels, .width = f.width, .height = f.height, .alloc = std.heap.page_allocator };
     }
 
+    /// A frame of `mon`. The screencast gives none now and then (a screen
+    /// where nothing moves): asked again, or a check that something is not
+    /// there would pass on no frame at all.
     fn grabNode(self: *Driver, mon: *const Monitor) !kit.pw.Frame {
+        for (0..8) |_| return self.grabOnce(mon) catch |err| switch (err) {
+            error.NoFrame => continue,
+            else => return err,
+        };
+        return error.NoFrame;
+    }
+
+    fn grabOnce(self: *Driver, mon: *const Monitor) !kit.pw.Frame {
         var sock_path: [512]u8 = undefined;
         const p = try std.fmt.bufPrint(&sock_path, "{s}/pipewire-0", .{self.runtime});
         const fd = try sys.socketUnixStream();
@@ -208,7 +219,7 @@ const Driver = struct {
             return err;
         };
         var frame: [1]kit.pw.Frame = undefined;
-        try kit.pw.grabFrames(fd, &.{mon.node}, &frame, 5000);
+        try kit.pw.grabFrames(fd, &.{mon.node}, &frame, 800);
         return frame[0];
     }
 
