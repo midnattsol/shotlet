@@ -457,9 +457,9 @@ connection goes away, after 30 s without a step or after 5 minutes.
 `CaptureWindows(id)` gives the shotlet started on capture `id` (same
 caller check) where the windows were in that frame: their frames only
 (no titles, no contents), once, and only within a minute; it is what the
-editor's click-a-window uses. It came with the extension's version 4:
-after updating Shotlet, `shotlet gnome-integration install` and logging
-out and back in load it (until then the click is simply not offered).
+editor's click-a-window uses. After
+updating Shotlet, `shotlet gnome-integration install` and logging out and
+back in load a newer extension (until then what it adds is not offered).
 
 When the extension is missing, older, or cannot capture, Shotlet uses the
 screen-sharing portal as before. `shotlet gnome-integration status` and
@@ -755,8 +755,8 @@ tools`). CI (`.github/workflows/ci.yml`) runs the formatting check, the
 guards, `zig build test` and the builds on every pull request.
 
 The version comes from git (`tools/version.zig`): a build past the last
-tag calls itself the next patch's prerelease (`0.1.7-dev.12+abc1234`).
-A release is a tag: pushing `v0.1.7` builds it with `-Dversion=v0.1.7`,
+tag calls itself the next patch's prerelease (`0.1.1-dev.12+abc1234`).
+A release is a tag: pushing `v0.1.0` builds it with `-Dversion=v0.1.0`,
 which may not be older than `build.zig.zon`'s version; raise that one
 only to plan a minor or major release.
 

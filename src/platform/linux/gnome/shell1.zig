@@ -1,7 +1,6 @@
 //! dev.shotlet.Shell1, the bus interface of the Shotlet GNOME Shell
 //! extension (gnome-extension/: extension.js, modes.js, scroll.js,
-//! recorder.js, windows.js): its names, its Version and what each
-//! version can do, and Shotlet's side of every call.
+//! recorder.js, windows.js): its names, and Shotlet's side of every call.
 
 const std = @import("std");
 const dbus = @import("../dbus.zig");
@@ -13,39 +12,6 @@ const region = @import("../../../record/region.zig");
 pub const bus_name = "dev.shotlet.Shell1";
 pub const path = "/dev/shotlet/Shell1";
 pub const iface = "dev.shotlet.Shell1";
-
-/// What a version of the extension can do. Capture() and Place() are
-/// in every version.
-pub const Feature = enum {
-    /// captures it reports on (Shortcuts, BlockedShortcuts)
-    capture_info,
-    /// RecordSelect, StartRecording
-    recording,
-};
-
-/// The lowest Version with each Feature.
-const min_version = std.EnumArray(Feature, u32).init(.{
-    .capture_info = 2,
-    .recording = 3,
-});
-
-/// The extension's Version property; null when it is not running (or
-/// does not say).
-pub fn version(bus: *dbus.Connection) ?u32 {
-    if (!(bus.nameHasOwner(bus_name) catch false)) return null;
-    var prop = bus.getProperty(bus_name, path, iface, "Version", 2000) catch return null;
-    defer prop.deinit(bus.alloc);
-    return switch (prop.value) {
-        .u32_ => |v| v,
-        else => null,
-    };
-}
-
-/// The running extension is new enough for `f`.
-pub fn supports(bus: *dbus.Connection, f: Feature) bool {
-    const v = version(bus) orelse return false;
-    return v >= min_version.get(f);
-}
 
 /// Call `member`: the reply, or the error reply as its CallError (Busy
 /// for Busy and Locked, UnknownMethod from an older extension). A call
@@ -115,7 +81,7 @@ pub fn capture(bus: *dbus.Connection) CaptureRequest {
 pub const Handoff = @import("../../api/shell.zig").Handoff;
 
 /// Ask the extension to capture in this mode (after its countdown).
-/// An area capture with no delay uses Capture(), which every version has.
+/// An area capture with no delay uses Capture().
 pub fn captureMode(bus: *dbus.Connection, req: mode.Request) Handoff {
     if (req.mode == .area and req.delay_s == 0) return switch (capture(bus)) {
         .started => .started,
@@ -148,8 +114,8 @@ pub fn captureWindows(bus: *dbus.Connection, id: []const u8, out: []i32) []const
 
 /// Unfreeze(id): Shotlet shows capture `id` (or never will): the
 /// extension's frozen frame of it goes, and the reply says what the
-/// pointer and keyboard did meanwhile (Version 5; null from an older
-/// extension, or when it does not answer soon).
+/// pointer and keyboard did meanwhile (null from an older extension, or
+/// when it does not answer soon).
 pub fn unfreeze(bus: *dbus.Connection, id: []const u8) ?FrozenInput {
     var m = dbus.Marshal.init(bus.alloc);
     defer m.deinit();
@@ -226,7 +192,7 @@ pub const Scroll = struct {
         var self: Scroll = .{ .gpa = gpa, .bus = bus, .rect = rect };
         var r = reply.reader();
         self.id_len = (try readStringInto(&r, &self.id_buf)).len;
-        // (none before Version 6)
+        // (none from an older extension)
         self.pieces_len = if (readStringInto(&r, &self.pieces_buf)) |p| p.len else |err| switch (err) {
             error.ShortRead => 0,
             else => return err,
@@ -320,11 +286,6 @@ pub fn isStopRequest(msg: *const dbus.Message) bool {
 test "only the calls that check the caller tell of a refusal" {
     try std.testing.expect(checksCaller("Capture") and checksCaller("ScrollBegin") and checksCaller("StartRecording"));
     try std.testing.expect(!checksCaller("ScrollStep") and !checksCaller("ScrollEnd") and !checksCaller("Place"));
-}
-
-test "the version table" {
-    try std.testing.expectEqual(@as(u32, 2), min_version.get(.capture_info));
-    try std.testing.expectEqual(@as(u32, 3), min_version.get(.recording));
 }
 
 test "CaptureWindows' ai keeps whole rectangles" {

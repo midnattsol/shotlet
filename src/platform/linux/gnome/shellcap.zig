@@ -286,8 +286,8 @@ fn loadWithin(gpa: std.mem.Allocator, runtime_dir: []const u8, args: Args, wait:
 }
 
 /// A frame of a scrolling capture: capture `id` of `rect` (logical), in
-/// `pieces` (the layout ScrollBegin gave; "" from an extension older than
-/// Version 6, whose frames are one PNG).
+/// `pieces` (the layout ScrollBegin gave; "" from an older extension,
+/// whose frames are one PNG).
 pub fn loadRegion(gpa: std.mem.Allocator, runtime_dir: []const u8, id: []const u8, rect: geom.Rect, pieces: []const u8) !png.Image {
     if (pieces.len == 0) {
         var pbuf: [1200]u8 = undefined;

@@ -190,7 +190,7 @@ export default class ShotletExtension extends Extension {
     }
 
     get Version() {
-        return 6;
+        return 1;
     }
 
     // Unfreeze(id): the Shotlet started on capture `id` shows it now (or

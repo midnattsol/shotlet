@@ -36,7 +36,7 @@ pub const open = source.open;
 /// The shell shows its own stop button for recordings (GNOME's top bar),
 /// so no floating control is needed in the picture.
 pub fn shellHasControls(_: std.mem.Allocator, bus: *dbus.Connection) bool {
-    return gnome.isGnome() and shell1.supports(bus, .recording);
+    return gnome.isGnome() and gnome.extensionActive(bus);
 }
 
 /// Put the area picker up in the shell (it captures and starts `shotlet

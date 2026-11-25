@@ -4,6 +4,7 @@
 const std = @import("std");
 const dbus = @import("../dbus.zig");
 const shell1 = @import("shell1.zig");
+const extension = @import("extension.zig");
 const gtk_accel = @import("gtk_accel.zig");
 const out = @import("../../../cli/out.zig").say;
 
@@ -12,7 +13,7 @@ pub const CaptureInfo = @import("../../api/shell.zig").CaptureInfo;
 
 pub fn captureInfo(_: std.mem.Allocator, bus: *dbus.Connection) CaptureInfo {
     var info: CaptureInfo = .{};
-    if (!shell1.supports(bus, .capture_info)) return info;
+    if (!extension.extensionActive(bus)) return info;
     info.capture = true;
     for ([_][]const u8{ "Shortcuts", "BlockedShortcuts" }) |prop| {
         if (readShortcut(bus, prop, &info)) {

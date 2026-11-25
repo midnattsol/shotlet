@@ -47,7 +47,7 @@ pub const Source = struct {
 pub const Opened = union(enum) { ok: Source, cancelled, failed: anyerror };
 
 pub fn open(gpa: std.mem.Allocator, bus: *dbus.Connection, home: []const u8, cfg: *config.Config, want: Want) Opened {
-    if (!switches.get().no_shell_record and gnome.isGnome() and shell1.supports(bus, .recording)) {
+    if (!switches.get().no_shell_record and gnome.isGnome() and gnome.extensionActive(bus)) {
         if (openShell(gpa, bus, want)) |s| return .{ .ok = s } else |err| log.info("GNOME integration: {t}; the portal", .{err});
     }
     return openPortal(gpa, bus, home, cfg, want) catch |err| .{ .failed = err };
