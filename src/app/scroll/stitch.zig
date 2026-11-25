@@ -236,6 +236,11 @@ pub const Stitcher = struct {
         return .{ .pixels = self.prev, .width = self.width, .height = self.height };
     }
 
+    /// `f` is, pixel for pixel, the last frame stitched.
+    pub fn isLast(self: *const Stitcher, f: Frame) bool {
+        return f.width == self.width and f.height == self.height and std.mem.eql(u32, self.prev, f.pixels[0..self.prev.len]);
+    }
+
     pub fn push(self: *Stitcher, f: Frame) !Push {
         if (f.width != self.width or f.height != self.height) return error.FrameSizeChanged;
         if (self.totalHeight() >= self.max_height) return .full;

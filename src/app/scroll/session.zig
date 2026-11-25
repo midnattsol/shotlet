@@ -168,7 +168,13 @@ pub const Session = struct {
     /// a repaint under load), at most about two seconds on. A blinking
     /// cursor or a spinner does not count as moving (stitch.still).
     fn settled(self: *Session) !png.Image {
-        var a = try self.grab(0);
+        return self.settledFrom(try self.grab(0));
+    }
+
+    /// settled, from a frame already taken (now its own to free).
+    fn settledFrom(self: *Session, first: png.Image) !png.Image {
+        var a = first;
+        errdefer a.deinit(self.c.gpa);
         for (0..12) |_| {
             try self.wait(60);
             const b = try self.grab(0);
@@ -302,9 +308,7 @@ pub const Session = struct {
             log.warn("{t}", .{err});
             return .lost;
         };
-        // the app may not have painted the scroll yet, or a frame caught
-        // it mid-repaint: look again before counting it
-        if (clicks > 0 and (r == .unchanged or r == .no_overlap)) r = self.recheck(r) catch return .lost;
+        if (self.watch.lookAgain(r, clicks)) r = self.recheck(r) catch return .lost;
         switch (self.watch.feed(r, clicks)) {
             .go => {},
             .slower => {
@@ -328,7 +332,12 @@ pub const Session = struct {
     /// it still has not moved).
     fn recheck(self: *Session, was: stitch.Push) !stitch.Push {
         try self.wait(150);
-        var f = try self.settled();
+        var f = try self.grab(0);
+        if (was == .unchanged and self.st.?.isLast(frameOf(f))) {
+            f.deinit(self.c.gpa);
+            return was;
+        }
+        f = try self.settledFrom(f);
         defer f.deinit(self.c.gpa);
         const r = try self.push(f);
         return if (r == .unchanged) was else r;

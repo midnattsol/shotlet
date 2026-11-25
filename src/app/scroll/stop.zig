@@ -8,10 +8,12 @@
 //!   Note                   those words, kept for the editor to show
 //!   Watch.feed(push, clicks)  fold one frame in: go on, scroll slower,
 //!                          warn (and go on), or stop for a reason
+//!   Watch.lookAgain(push, clicks)  a frame to look at again before feed
 //!   Watch.restart()        after Continue: count afresh
 //!
 //! When Shotlet turns the wheel (auto): two frames in a row that the
-//! wheel did not move end it; at the end of the page when the wheel had
+//! wheel did not move end it, the first still frame looked at again (the
+//! app may paint late; the second turn is then one more chance to move); at the end of the page when the wheel had
 //! moved the content, else the page never moved. Content that moves by
 //! itself (a terminal's output arriving at the bottom, a few lines at a
 //! time) is stitched, but it is not the wheel's doing: a step that moved
@@ -110,11 +112,25 @@ pub const Watch = struct {
     moved: bool = false,
     /// frames in a row that did not move
     still: u32 = 0,
+    /// a still frame was looked at again, and nothing moved since
+    confirmed: bool = false,
     /// frames in a row that lined up nowhere
     misses: u32 = 0,
     /// rows a step must move to be the wheel's doing (auto): an eighth
     /// of the region, set from the first frame
     min_move: u32 = 0,
+
+    /// Whether the frame after a step of `clicks` notches is to be looked
+    /// at again before it is fed in: the app may not have painted the
+    /// scroll yet, or a frame caught it mid-repaint.
+    pub fn lookAgain(self: *const Watch, r: stitch.Push, clicks: i32) bool {
+        if (clicks <= 0) return false;
+        return switch (r) {
+            .unchanged => !self.confirmed,
+            .no_overlap => true,
+            .appended, .full => false,
+        };
+    }
 
     /// One frame's outcome (after the session looked again at a frame
     /// that seemed not to move or not to line up). `clicks`: the notches
@@ -123,6 +139,7 @@ pub const Watch = struct {
         switch (r) {
             .appended => |d| {
                 self.misses = 0;
+                self.confirmed = false;
                 if (self.auto and clicks > 0 and !self.byWheel(d, clicks)) return self.stood();
                 self.moved = true;
                 self.still = 0;
@@ -132,6 +149,7 @@ pub const Watch = struct {
             .unchanged => {
                 self.misses = 0;
                 if (!self.auto) return .go;
+                self.confirmed = clicks > 0;
                 return self.stood();
             },
             .no_overlap => {
@@ -159,6 +177,7 @@ pub const Watch = struct {
     pub fn restart(self: *Watch) void {
         self.still = 0;
         self.misses = 0;
+        self.confirmed = false;
     }
 };
 
@@ -267,6 +286,28 @@ test "only natural stops finish; the messages say why" {
     try testing.expectEqualStrings("Reached the end of the page", Reason.end_of_page.message(&buf, 0));
     try testing.expectEqualStrings("1\u{2009}234\u{2009}567", grouped(&buf, 1_234_567));
     try testing.expectEqualStrings("999", grouped(&buf, 999));
+}
+
+test "it never ends on a still frame that was not looked at again" {
+    var w: Watch = .{ .auto = true, .min_move = 40 };
+    try testing.expectEqual(Verdict.go, w.feed(.{ .appended = 100 }, 3));
+    // the first still frame: looked at again; the second turn's is not
+    try testing.expect(w.lookAgain(.unchanged, 3));
+    try testing.expectEqual(Verdict.go, w.feed(.unchanged, 3));
+    try testing.expect(!w.lookAgain(.unchanged, 3));
+    try testing.expectEqual(Verdict{ .stop = .end_of_page }, w.feed(.unchanged, 3));
+    // a move between them, also one too small to be the wheel's: anew
+    w = .{ .auto = true, .min_move = 40 };
+    _ = w.feed(.{ .appended = 100 }, 3);
+    _ = w.feed(.unchanged, 3);
+    _ = w.feed(.{ .appended = 100 }, 3);
+    try testing.expect(w.lookAgain(.unchanged, 3));
+    _ = w.feed(.{ .appended = 8 }, 3);
+    try testing.expect(w.lookAgain(.unchanged, 3));
+    // lining up nowhere is always looked at again; a frame without the
+    // wheel, and one that moved, never
+    try testing.expect(w.lookAgain(.no_overlap, 3));
+    try testing.expect(!w.lookAgain(.unchanged, 0) and !w.lookAgain(.{ .appended = 9 }, 3));
 }
 
 test "Continue counts afresh" {
