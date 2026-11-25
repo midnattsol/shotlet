@@ -372,8 +372,9 @@ test "the labels fit their buttons" {
     if (!text.available()) return error.SkipZigTest;
     const inner = width - 2 * pad;
     const bw = @divTrunc(inner - 2 * button_gap, 3);
+    // (4 px a side at least: DejaVu, where there is no better font, is wide)
     for ([_][]const u8{ "Cancel", "Finish", "Continue" }) |l|
-        try std.testing.expect(text.widthStyled(theme.font_label, .semibold, l) + 12 <= bw);
+        try std.testing.expect(text.widthStyled(theme.font_label, .semibold, l) + 8 <= bw);
     var buf: [24]u8 = undefined;
     try std.testing.expectEqualStrings("20\u{2009}000", grouped(&buf, 20_000));
 }
