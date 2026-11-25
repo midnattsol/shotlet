@@ -22,12 +22,14 @@
 // this extension; the open needs it.)
 //
 // Tagged windows are left out of Alt+Tab (both switchers build their lists
-// from Meta.Display.get_tab_list, filtered here): a Wayland client cannot
-// set skip-taskbar itself. No polling: everything hangs off window
+// from Meta.Display.get_tab_list, filtered here), and they and the editor
+// out of the dash and docks (Shell.AppSystem.get_running): a Wayland client
+// cannot set skip-taskbar itself. No polling: everything hangs off window
 // signals, and destroy() undoes it.
 
 import GLib from 'gi://GLib';
 import Meta from 'gi://Meta';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {InjectionManager} from 'resource:///org/gnome/shell/extensions/extension.js';
 import {APP_ID, roleOf} from './util.js';
@@ -40,6 +42,12 @@ const EDGE = 8;
 const FOCUS_ON_MAP_MS = 1000;
 // the editor's and the recording picker's title
 const FULLSCREEN_TITLE = 'Shotlet';
+
+// A window of Shotlet's that nobody goes back to: a tagged one, the editor
+// or a picker.
+function passing(win) {
+    return win.get_wm_class() === APP_ID && (roleOf(win) || win.get_title() === FULLSCREEN_TITLE);
+}
 
 export class ShotletWindows {
     constructor() {
@@ -62,6 +70,15 @@ export class ShotletWindows {
         this._injections.overrideMethod(Meta.Display.prototype, 'get_tab_list',
             original => function (...args) {
                 return original.call(this, ...args).filter(w => !roleOf(w));
+            });
+        // Shotlet counts as running while it has a window of its own to go
+        // back to (Settings, Recent captures)
+        this._injections.overrideMethod(Shell.AppSystem.prototype, 'get_running',
+            original => function () {
+                return original.call(this).filter(app => {
+                    const wins = app.get_id() === `${APP_ID}.desktop` ? app.get_windows() : [];
+                    return wins.length === 0 || !wins.every(passing);
+                });
             });
     }
 
@@ -167,7 +184,9 @@ export class ShotletWindows {
         this._place(win);
     }
 
-    // No map or destroy effect for a fullscreen editor or picker.
+    // No map, minimize or destroy effect for a fullscreen editor or picker
+    // (it closes clear and minimized: mutter backs it with black, which the
+    // minimize effect would fade over the desktop).
     _quiet(win, st) {
         const actor = win.get_compositor_private();
         if (st.quiet || !actor)
@@ -175,6 +194,7 @@ export class ShotletWindows {
         st.quiet = true;
         this._quietActors.add(actor);
         Main.wm.skipNextEffect(actor);
+        st.ids.push(win.connect('notify::minimized', () => Main.wm.skipNextEffect(actor)));
         st.ids.push(win.connect('unmanaging', () => Main.wm.skipNextEffect(actor)));
         st.ids.push(win.connect('unmanaged', () => this._quietActors.delete(actor)));
     }
