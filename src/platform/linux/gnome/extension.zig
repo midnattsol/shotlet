@@ -170,7 +170,9 @@ fn onDisk(gpa: std.mem.Allocator, home: []const u8) OnDisk {
     var p: [1200]u8 = undefined;
     for (bundled_files, 0..) |f, i| {
         const path = std.fmt.bufPrint(&p, "{s}/{s}", .{ dir, f[0] }) catch return .other;
-        const got = sys.readFileAlloc(gpa, path, f[1].len + 1) catch return if (i == 0) .absent else .other;
+        // (a longer file is another version, not a missing one)
+        const got = sys.readFileAlloc(gpa, path, f[1].len + 1) catch |err|
+            return if (i == 0 and err != error.FileTooBig) .absent else .other;
         defer gpa.free(got);
         if (!std.mem.eql(u8, got, f[1])) return .other;
     }
@@ -269,4 +271,22 @@ test "GNOME is told from XDG_CURRENT_DESKTOP" {
     try std.testing.expect(isGnome());
     env_mod.xdg = .{};
     try std.testing.expect(!isGnome());
+}
+
+test "an installed extension longer than the bundled one is another version" {
+    const gpa = std.testing.allocator;
+    var tmp = try testutil.TmpDir.home();
+    defer tmp.deinit();
+    try std.testing.expectEqual(OnDisk.absent, onDisk(gpa, tmp.path));
+    _ = try writeBundled(tmp.path);
+    try std.testing.expectEqual(OnDisk.same, onDisk(gpa, tmp.path));
+    var dbuf: [1024]u8 = undefined;
+    var p: [1200]u8 = undefined;
+    const main_js = try std.fmt.bufPrint(&p, "{s}/extension.js", .{try extensionDir(&dbuf, tmp.path)});
+    for ([_][]const u8{ ext_js ++ "// longer, as the one installed was\n", ext_js[0 .. ext_js.len - 40] }) |other| {
+        try sys.writeFile(main_js, other);
+        try std.testing.expectEqual(OnDisk.other, onDisk(gpa, tmp.path));
+        try std.testing.expectEqual(InstallResult.installed_relogin, refreshBundled(gpa, tmp.path));
+        try std.testing.expectEqual(OnDisk.same, onDisk(gpa, tmp.path));
+    }
 }
