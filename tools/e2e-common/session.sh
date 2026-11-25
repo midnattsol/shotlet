@@ -25,8 +25,24 @@ wait_socket() { SOCKET=; wait_until "$2" _socket_at "$1"; }
 _socket_at() { local f; for f in $1; do [ -S "$f" ] && { SOCKET=$f; return 0; }; done; return 1; }
 
 # start_pipewire LOGDIR: PipeWire and WirePlumber, their pids added to the
-# caller's `pids`
+# caller's `pids`. WirePlumber watches no device of the machine: no
+# camera (V4L2, libcamera), sound card (ALSA) or Bluetooth is opened, so
+# a test never turns the camera's light on or touches a microphone.
 start_pipewire() {
+    local conf=$XDG_CONFIG_HOME/wireplumber/wireplumber.conf.d
+    mkdir -p "$conf"
+    cat >"$conf/90-shotlet-e2e-no-devices.conf" <<'EOF'
+wireplumber.profiles = {
+  main = {
+    monitor.v4l2 = disabled
+    monitor.libcamera = disabled
+    monitor.alsa = disabled
+    monitor.alsa-midi = disabled
+    monitor.bluez = disabled
+    monitor.bluez-midi = disabled
+  }
+}
+EOF
     pipewire >"$1/pipewire.log" 2>&1 &
     pids+=($!)
     wait_socket "$XDG_RUNTIME_DIR/pipewire-0" 5
