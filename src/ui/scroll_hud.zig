@@ -80,13 +80,16 @@ pub const Preview = struct {
         const shown: u32 = std.math.clamp(@as(u32, @intFromFloat(@as(f64, @floatFromInt(pv.h)) / ratio)), 1, s.height);
         const first = s.height - shown;
         const p = resample.fit(s.width, shown, @intCast(pv.w), @intCast(pv.h), .contain);
-        const rows = gpa.alloc(u32, @as(usize, s.width) * shown) catch return null;
+        // two rows of the image for each of the preview's are enough
+        const step = @max(1, shown / (2 * p.h));
+        const n = shown / step;
+        const rows = gpa.alloc(u32, @as(usize, s.width) * n) catch return null;
         defer gpa.free(rows);
-        for (0..shown) |y| for (rows[y * s.width ..][0..s.width], s.row(s.ctx, first + @as(u32, @intCast(y)))[0..s.width]) |*d, q| {
+        for (0..n) |y| for (rows[y * s.width ..][0..s.width], s.row(s.ctx, first + @as(u32, @intCast(y)) * step)[0..s.width]) |*d, q| {
             d.* = q | 0xFF000000;
         };
         const out = gpa.alloc(u32, @as(usize, p.w) * p.h) catch return null;
-        resample.region(gpa, rows, s.width, shown, p.src, out, p.w, p.h) catch {
+        resample.scale(gpa, rows, s.width, n, out, p.w, p.h) catch {
             gpa.free(out);
             return null;
         };
