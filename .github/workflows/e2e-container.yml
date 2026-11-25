@@ -4,8 +4,8 @@ name: E2E (containers)
 # in a throwaway Debian container (tools/container/run.sh). Slow and
 # dependent on Debian's packages, so it never gates pull requests: it runs
 # nightly and on demand. Runners have no GPU, so KWin and the wlroots
-# portal skip there; direct capture on sway and labwc still runs (see the
-# docs/CONTRIBUTING.md, "Tests").
+# portal skip there; direct capture on sway and labwc still runs (see
+# docs/CONTRIBUTING.md, "End-to-end tests").
 on:
   workflow_dispatch:
     inputs:

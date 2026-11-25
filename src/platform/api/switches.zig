@@ -1,8 +1,7 @@
 //! Development and test switches: every SHOTLET_* variable the program
 //! reads, in one table (name, what it does, who reads it). main reads
 //! them once at startup (`init`); everyone else asks `get()`, core and
-//! backend alike, so no module reads the environment on its own. The
-//! docs/CONTRIBUTING.md's "Debugging and test switches" section lists the same table.
+//! backend alike, so no module reads the environment on its own.
 //!
 //! The locale categories ride along (`locale()`): they are not switches,
 //! but the code that needs them (OCR languages, the compose table) has
@@ -41,10 +40,10 @@ pub const Entry = struct {
     consumer: []const u8,
 };
 
-/// Every switch. Adding one: a field above, a row here, a line in the
-/// docs/CONTRIBUTING.md; the test below keeps the first two in step.
+/// Every switch. Adding one: a field above and a row here; the test below
+/// keeps them in step.
 pub const table = [_]Entry{
-    .{ .name = "SHOTLET_NO_DIRECT", .field = "no_direct", .doc = "never capture straight from the compositor (ext-image-copy / wlr-screencopy): portal or GNOME integration only", .consumer = "platform/linux/capture.zig, capture/perms/now.zig, capture/scroll_support.zig" },
+    .{ .name = "SHOTLET_NO_DIRECT", .field = "no_direct", .doc = "never capture straight from the compositor (ext-image-copy / wlr-screencopy / KWin): portal or GNOME integration only", .consumer = "platform/linux/capture.zig, capture/perms/now.zig, capture/scroll_support.zig" },
     .{ .name = "SHOTLET_NO_LAYER_SHELL", .field = "no_layer_shell", .doc = "ignore wlr-layer-shell: floating windows become plain toplevels", .consumer = "platform/linux/window/registry.zig" },
     .{ .name = "SHOTLET_NO_FRACTIONAL", .field = "no_fractional", .doc = "ignore wp-fractional-scale: integer buffer scales only", .consumer = "platform/linux/window/registry.zig" },
     .{ .name = "SHOTLET_NO_CURSOR_SHAPE", .field = "no_cursor_shape", .doc = "ignore cursor-shape-v1: Shotlet draws its own cursors", .consumer = "platform/linux/window/registry.zig" },
@@ -58,7 +57,7 @@ pub const table = [_]Entry{
     .{ .name = "SHOTLET_EDITOR_DUMP", .field = "editor_dump", .doc = "/path/prefix: the editor writes every pane's last frame and the export at exit", .consumer = "ui/editor/session.zig" },
     .{ .name = "SHOTLET_EDITOR_SCRIPT", .field = "editor_script", .doc = "scripted editor input, `;`-separated (ui/script_input.zig); turns animations off", .consumer = "ui/editor/session.zig" },
     .{ .name = "SHOTLET_SETTINGS_FOCUS", .field = "settings_focus", .doc = "n: Settings starts with its n-th control focused", .consumer = "ui/settings/app.zig" },
-    .{ .name = "SHOTLET_LOOP_STATS", .field = "loop_stats", .doc = "log, as each window closes, its frame times and the longest time the event loop stayed away from the compositor", .consumer = "platform/linux/window/loopstats.zig" },
+    .{ .name = "SHOTLET_LOOP_STATS", .field = "loop_stats", .doc = "log, as each window closes, its frame times (p50, p95, max) and the longest time the event loop stayed away from the compositor", .consumer = "platform/linux/window/loopstats.zig" },
     .{ .name = "SHOTLET_SETTINGS_VIEW", .field = "settings_view", .doc = "general|editor|shortcuts|recording: the view Settings starts on", .consumer = "ui/settings/app.zig" },
 };
 

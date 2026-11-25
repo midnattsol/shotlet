@@ -2,7 +2,7 @@
 # Container e2e suite: Shotlet on wlroots (sway, labwc) and KDE (KWin),
 # each scenario in a throwaway container (--rm, no network, no host
 # display, bus or PipeWire mounted). See tools/container/inner.sh for what
-# runs inside, table.sh for the scenarios, and docs/CONTRIBUTING.md's "Tests".
+# runs inside, table.sh for the scenarios.
 #
 # usage: tools/container/run.sh [--list] [--bins SHOTLET WLDRIVE DROPTARGET] [--] [TARGET...]
 #        zig build e2e-container [-- TARGET...]
